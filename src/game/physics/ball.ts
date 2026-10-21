@@ -19,10 +19,16 @@ export const GRAVITY = 9.81;
 export interface SurfaceProperties {
   /** Vertical coefficient of restitution on impact. */
   readonly restitution: number;
-  /** Fraction of horizontal speed lost per bounce (higher = slower surface). */
-  readonly bounceFriction: number;
-  /** Deceleration while rolling, m/s². */
+  /**
+   * Coulomb friction coefficient at a bounce. Horizontal speed lost is
+   * μ·(1+e)·(vertical impact speed): a steeply pitching delivery loses more
+   * pace than a ball skimming across the outfield. Higher = slower surface.
+   */
+  readonly friction: number;
+  /** Constant part of rolling deceleration, m/s². */
   readonly rollingResistance: number;
+  /** Speed-proportional part of rolling deceleration, 1/s (grass resists a fast ball more). */
+  readonly rollingDrag: number;
   /** Multiplier on spin turn (dry, dusty pitches grip more). */
   readonly grip: number;
   /** Multiplier on seam movement (green pitches seam more). */
@@ -36,16 +42,18 @@ export interface GroundModel {
 
 export const DEFAULT_PITCH: SurfaceProperties = {
   restitution: 0.55,
-  bounceFriction: 0.12,
-  rollingResistance: 1.6,
+  friction: 0.4,
+  rollingResistance: 0.6,
+  rollingDrag: 0.3,
   grip: 1,
   seam: 1,
 };
 
 export const DEFAULT_OUTFIELD: SurfaceProperties = {
   restitution: 0.35,
-  bounceFriction: 0.12,
-  rollingResistance: 2.6,
+  friction: 0.35,
+  rollingResistance: 0.6,
+  rollingDrag: 0.3,
   grip: 0,
   seam: 0,
 };
@@ -157,7 +165,7 @@ export function stepBall(
   if (onGround) {
     const surface = isOnPitch(p) ? ground.pitch : ground.outfield;
     const speed = Math.hypot(v.x, v.z);
-    const drop = surface.rollingResistance * dt;
+    const drop = (surface.rollingResistance + surface.rollingDrag * speed) * dt;
     if (speed <= drop || speed < REST_SPEED) {
       v.x = 0;
       v.z = 0;
@@ -223,10 +231,11 @@ function resolveBounce(ball: BallState, surface: SurfaceProperties, events: Ball
   const firstBounce = ball.bounces === 0;
 
   let restitution = surface.restitution;
-  let keep = 1 - surface.bounceFriction;
+  let friction = surface.friction;
   if (firstBounce) {
     restitution *= m.bounceFactor * (1 + SPIN.bouncePerRps * m.spinTop);
-    keep = Math.min(0.98, keep + SPIN.pacePerRps * m.spinTop);
+    // Topspin skids on through the surface; backspin grips and slows.
+    friction *= Math.max(0.3, 1 - SPIN.pacePerRps * 5 * m.spinTop);
   }
 
   if (impactSpeed < MIN_BOUNCE_SPEED) {
@@ -236,8 +245,13 @@ function resolveBounce(ball: BallState, surface: SurfaceProperties, events: Ball
     ball.bounces += 1;
     events.bounced = true;
   }
-  v.x *= keep;
-  v.z *= keep;
+  const h = Math.hypot(v.x, v.z);
+  if (h > 0) {
+    const loss = Math.min(h * 0.6, friction * (1 + restitution) * impactSpeed);
+    const keep = (h - loss) / h;
+    v.x *= keep;
+    v.z *= keep;
+  }
 
   if (firstBounce) {
     v.x += m.seamDeltaV * surface.seam + SPIN.turnPerRps * m.spinSide * surface.grip;

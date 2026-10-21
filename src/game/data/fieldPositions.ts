@@ -26,6 +26,9 @@ export const STANDARD_FIELD: readonly FieldPosition[] = [
   { id: 'fineleg', name: 'Fine leg', angleDeg: -160, distance: 52 },
 ];
 
+/** Where the bowler ends up after the follow-through: fields the ball back down the pitch. */
+export const BOWLER_FOLLOW_THROUGH: FieldPosition = { id: 'bowler', name: 'Bowler', angleDeg: 4, distance: 15.5 };
+
 /** World x/z for a field position, mirrored for a left-handed striker. */
 export function fieldPositionXZ(pos: FieldPosition, leftHanded = false): { x: number; z: number } {
   const a = (pos.angleDeg * Math.PI) / 180;

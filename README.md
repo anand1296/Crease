@@ -45,8 +45,6 @@ The game is a fully static site (no backend, no API keys).
 1. **checks** — install, type check, lint, unit tests, production build
 2. **e2e** — Playwright (Chromium with software WebGL) loads the built game, waits for the first rendered frame, confirms the canvas is visible, that the simulation is advancing, and that the console is error-free
 
-`.github/workflows/lockfile.yml` regenerates `package-lock.json` when `package.json` changes on `main`. It exists only because the sandbox where much of this code is written cannot reach the npm registry; delete it once lockfile changes are committed directly.
-
 ## Roadmap
 
 Built in phases; each phase ships a verified vertical slice.
