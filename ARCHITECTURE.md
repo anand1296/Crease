@@ -59,6 +59,7 @@ Simulation (core, physics,        deterministic TypeScript — no React or three
 | `game/scenes/camera/director.ts` | The broadcast director: which shot is on air and its framing, as a pure function of the ball's state (unit-tested) |
 | `game/scenes/Effects.tsx` | High-quality post-processing chain |
 | `scripts/avatars/` | Offline conversion of Rocketbox FBX avatars and clips to the runtime assets in `public/players/` |
+| `game/scenes/replay.ts` | Action replays: records each rendered frame of a ball (ball, poses, bats, stumps) and plays a window of it back for wickets and boundaries |
 | `game/scenes/MatchView.tsx` | Per-frame driver, players posed from the simulation, bat, ball, markers, camera rig; orbiting menu camera when no match is on |
 | `game/scenes/Ground.tsx`, `Stadium.tsx`, `Stumps.tsx` | Field and pitch textures, stands, instanced crowd, instanced sponsor boards, floodlights, live scoreboard |
 | `game/quality.ts` | Graphics quality: detection (software renderer → Low) and persistence |

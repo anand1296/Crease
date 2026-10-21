@@ -1442,3 +1442,42 @@ kbd.k.on {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+/* --- Replay ---------------------------------------------------------------------------- */
+
+.replay-tag {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 12px;
+  border-radius: 2px;
+  background: #b3261e;
+  color: #fff;
+  font: 800 22px var(--display);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.replay-tag .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  animation: replay-blink 1s steps(2, start) infinite;
+}
+
+@keyframes replay-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .replay-tag .dot {
+    animation: none;
+  }
+}

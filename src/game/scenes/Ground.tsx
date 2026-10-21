@@ -1,5 +1,5 @@
-import { useEffect, useMemo } from 'react';
-import { CanvasTexture, RepeatWrapping, SRGBColorSpace } from 'three';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { CanvasTexture, type InstancedMesh, Matrix4, RepeatWrapping, SRGBColorSpace } from 'three';
 import { Rng } from '../core/rng.ts';
 import { FIELD, STRIKER_STUMPS_Z } from '../data/field.ts';
 
@@ -228,16 +228,15 @@ export function Ground() {
       <Creases dir={1} />
       <Creases dir={-1} />
 
-      {/* 30-yard circle */}
-      <mesh position={[0, LINE_Y, 0]} rotation-x={-Math.PI / 2}>
-        <ringGeometry args={[27.43 - 0.06, 27.43 + 0.06, 128]} />
-        <meshBasicMaterial color={CREASE_COLOR} transparent opacity={0.5} />
-      </mesh>
+      <Square />
+
+      {/* The fielding circle, marked with white discs as on real grounds */}
+      <CircleDiscs />
 
       {/* Boundary rope */}
-      <mesh position={[0, 0.07, 0]} rotation-x={Math.PI / 2}>
-        <torusGeometry args={[FIELD.boundaryRadius, 0.07, 8, 160]} />
-        <meshStandardMaterial color="#e8e3d6" />
+      <mesh position={[0, 0.11, 0]} rotation-x={Math.PI / 2} castShadow>
+        <torusGeometry args={[FIELD.boundaryRadius, 0.11, 10, 220]} />
+        <meshStandardMaterial color="#f1ede2" roughness={0.6} />
       </mesh>
 
       {/* Sight screens */}
@@ -249,5 +248,79 @@ export function Ground() {
       ))}
 
     </group>
+  );
+}
+
+/** White plastic discs around the 30-yard (27.43 m) circle, two metres apart along the arc. */
+function CircleDiscs() {
+  const ref = useRef<InstancedMesh>(null);
+  const r = 27.43;
+  const count = Math.round((2 * Math.PI * r) / 2.2);
+  useLayoutEffect(() => {
+    const mesh = ref.current;
+    if (!mesh) return;
+    const m = new Matrix4();
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2;
+      m.makeRotationX(-Math.PI / 2);
+      m.setPosition(Math.sin(a) * r, 0.012, Math.cos(a) * r);
+      mesh.setMatrixAt(i, m);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  }, [count]);
+  return (
+    <instancedMesh ref={ref} args={[undefined, undefined, count]} receiveShadow>
+      <circleGeometry args={[0.16, 16]} />
+      <meshStandardMaterial color="#f4f1e8" roughness={0.5} />
+    </instancedMesh>
+  );
+}
+
+/**
+ * The square: the block of prepared strips around the match pitch — slightly
+ * paler, shorter grass with the faint scars of old pitches either side.
+ */
+function Square() {
+  const texture = useMemo(() => {
+    const w = 256;
+    const h = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    const rng = new Rng('square');
+    if (ctx) {
+      ctx.fillStyle = 'rgba(150, 170, 90, 0.22)';
+      ctx.fillRect(0, 0, w, h);
+      // Old strips either side of the match pitch.
+      const strip = w / 9;
+      for (let i = 0; i < 9; i++) {
+        if (i === 4) continue;
+        const worn = rng.range(0.05, 0.22);
+        ctx.fillStyle = `rgba(175, 160, 105, ${worn})`;
+        ctx.fillRect(i * strip + 2, h * 0.12, strip - 4, h * 0.76);
+        // Scuffed ends of an old pitch.
+        ctx.fillStyle = `rgba(150, 125, 80, ${worn * 0.8})`;
+        ctx.fillRect(i * strip + 4, h * 0.14, strip - 8, h * 0.06);
+        ctx.fillRect(i * strip + 4, h * 0.8, strip - 8, h * 0.06);
+      }
+      // Soft edges.
+      const g = ctx.createRadialGradient(w / 2, h / 2, w * 0.3, w / 2, h / 2, w * 0.72);
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(1, 'rgba(0,0,0,1)');
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+    }
+    const tex = new CanvasTexture(canvas);
+    tex.colorSpace = SRGBColorSpace;
+    return tex;
+  }, []);
+  useEffect(() => () => texture.dispose(), [texture]);
+  return (
+    <mesh position={[0, 0.002, 0]} rotation-x={-Math.PI / 2} receiveShadow>
+      <planeGeometry args={[FIELD.pitchWidth * 9, FIELD.pitchLength + 10]} />
+      <meshStandardMaterial map={texture} transparent depthWrite={false} roughness={0.95} />
+    </mesh>
   );
 }

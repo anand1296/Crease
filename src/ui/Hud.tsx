@@ -32,6 +32,7 @@ export function Hud() {
       <ControlsPanel />
       <NextPrompt />
       <ReviewCard />
+      <ReplayBadge />
       <InningsBreak />
       <Result />
       <HelpOverlay />
@@ -325,6 +326,8 @@ function PauseOverlay() {
   const toggleMute = useGame((s) => s.toggleMute);
   const commentaryOn = useGame((s) => s.commentaryOn);
   const toggleCommentary = useGame((s) => s.toggleCommentary);
+  const replaysOn = useGame((s) => s.replaysOn);
+  const toggleReplays = useGame((s) => s.toggleReplays);
   if (!paused) return null;
   return (
     <div className="overlay" role="dialog" aria-label="Paused" data-testid="pause">
@@ -339,6 +342,9 @@ function PauseOverlay() {
           </button>
           <button type="button" className="secondary" onClick={toggleCommentary}>
             Commentary: {commentaryOn ? 'on' : 'off'} (V)
+          </button>
+          <button type="button" className="secondary" onClick={toggleReplays}>
+            Replays: {replaysOn ? 'on' : 'off'}
           </button>
           <button type="button" className="secondary" onClick={rematch}>
             Restart match
@@ -529,7 +535,8 @@ function ControlsPanel() {
 function NextPrompt() {
   const snap = useGame((s) => s.snap);
   const match = useGame((s) => s.match);
-  if (!snap || !match) return null;
+  const replaying = useGame((s) => s.replaying);
+  if (!snap || !match || replaying) return null;
   const waiting = snap.phase === 'review' && snap.review?.kind === 'ball';
   const dead = snap.phase === 'delivery' && snap.ballPhase === 'dead';
   if (!waiting && !dead) return null;
@@ -552,8 +559,9 @@ function NextPrompt() {
 function ReviewCard() {
   const snap = useGame((s) => s.snap);
   const match = useGame((s) => s.match);
+  const replaying = useGame((s) => s.replaying);
   const review = snap?.review;
-  if (!snap || !match || !review || review.kind === 'ball') return null;
+  if (!snap || !match || !review || review.kind === 'ball' || replaying) return null;
   const inn = match.current;
   const batting = match.side(inn.batting).team;
   const bowling = match.side(inn.bowling).team;
@@ -642,5 +650,23 @@ function ReviewCard() {
         </button>
       </div>
     </div>
+  );
+}
+
+/** While an action replay plays: a broadcast-style tag and how to skip it. */
+function ReplayBadge() {
+  const replaying = useGame((s) => s.replaying);
+  const skip = useGame((s) => s.skipReplay);
+  if (!replaying) return null;
+  return (
+    <>
+      <div className="replay-tag" data-testid="replay">
+        <span className="dot" aria-hidden="true" />
+        Replay
+      </div>
+      <button type="button" className="next-prompt" onClick={skip}>
+        <kbd>Enter</kbd> <span className="dim">skip replay</span>
+      </button>
+    </>
   );
 }

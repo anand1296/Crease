@@ -4,11 +4,11 @@
 
 | | |
 | --- | --- |
-| Version | 0.6.0 (October 2026) |
+| Version | 0.7.0 (October 2026) |
 | Repository | https://github.com/anand1296/Crease |
 | Hosting | Vercel (static site, Git-integrated: every push to `main` deploys; pull requests get previews) |
 | Stack | TypeScript (strict) · React 19 · Three.js r180 via React Three Fiber 9 · Vite 7 · Zustand 5 · Vitest 3 · Playwright |
-| Size | ≈10,700 lines of application TypeScript, ≈1,450 lines of unit and simulation tests (112 tests), 3 browser tests |
+| Size | ≈11,700 lines of application TypeScript, ≈1,500 lines of unit and simulation tests (114 tests), 3 browser tests |
 | Backend | None. Everything — physics, AI, commentary, audio — runs in the player's browser |
 
 Companion documents: [README](../README.md) (running and playing), [GAME_DESIGN](../GAME_DESIGN.md) (rules and the simulation's numbers), [ARCHITECTURE](../ARCHITECTURE.md) (module summary), [CHANGELOG](../CHANGELOG.md), [batting report](batting-report.md).
@@ -58,7 +58,7 @@ Crease was built in vertical slices, each of which was playable, tested, documen
 | P1a–c | 21 Oct 2026 | Delivery engine (12 types, swing/seam/spin, pitch presets, launch solver); batting contact model (16 strokes, timing, edges); fielding plan (interception, catches, run decisions) |
 | P1 (0.2.0) | 21 Oct 2026 | Playable practice innings: bat or bowl, HUD, perception-limited AI opposition |
 | 0.3.0 | 21 Oct 2026 | Full matches (toss, two innings, targets, results, scorecards), LBW, wides, called running and run-outs, bowler quotas; squads and XI selection; menus; articulated players; stadium; synthesised sound |
-| 0.4.0 | 22 Oct 2026 | Realism pass: skinned, motion-captured player models; broadcast camera director; physical sky, image-based lighting, post-processing; umpires; breakable stumps; physically modelled bat-on-ball sound |
+| 0.4.0 | 22 Oct 2026 | Realism pass: skinned, motion-captured player models; classic and broadcast camera directors; physical sky, image-based lighting, post-processing; umpires; breakable stumps; physically modelled bat-on-ball sound |
 | 0.5.0 | 22 Oct 2026 | Real squads (India, Pakistan, Australia, England), national kits with clash rule, T20 batting AI |
 | 0.6.0 | 22 Oct 2026 | Game AI: learning bowling attack, AI captain with fielding restrictions, field-aware T20 batting, spoken commentary, coach |
 
@@ -186,11 +186,15 @@ stateDiagram-v2
   between --> delivery: computer bowling
   chooseBowler --> aiming
   aiming --> delivery: Space
-  delivery --> between: ball dead
+  delivery --> review: ball dead (human playing)
+  delivery --> between: ball dead (computer v computer)
+  review --> between: Enter / Space
   delivery --> inningsBreak: innings over
-  inningsBreak --> between: continue
+  inningsBreak --> review: continue (start card)
   delivery --> complete: match over
 ```
+
+**Review and pacing.** When a human is involved, every dead ball goes to `review` rather than straight to the next ball. The review says what to show: a *ball* prompt (Next ball), an *over* summary (bowler's figures, the over's balls and runs), a *wicket* card (the batting card, fall of wicket, partnership, next batter, plus the over summary if the wicket ended it) or the *start* card. The match only leaves `review` on `next()`, which the Enter/Space handler calls. The match also holds a `speed` factor: `advance(dt)` feeds `dt × speed` to the fixed-step clock, so slowing the game changes nothing but the wall-clock rate — the same seed gives the same match at every speed (a unit test checks it). The captain's field is cached per over, striker and bowler so fielders don't shuffle every ball.
 
 Inside `delivery`, the `DeliveryCycle` runs `runUp → inFlight → struck → dead`, raising events (`bounce`, `contact`, `pad`, `stumps`, `boundary`, …) that the renderer and audio consume. Every recorded ball also goes into a **ball log** (for the coach), the **learning attack's** reward update, and the **commentator**.
 
@@ -330,7 +334,9 @@ Every player has a hidden **control rig** (`Humanoid.tsx`, sized to the avatar's
 | Ball beyond 12 m | **Cut** to a high camera on the far side of the boundary, square to the ball's path, framing ball and chasing fielder (field of view computed to fit both and the ball's height) |
 | Stumps broken | **Cut** to a low stump camera |
 
-<kbd>C</kbd> switches to a view from behind the striker or a high wide view.
+The director has two styles. **Classic** (the default since 0.7.0) is Cricket 07's framing: the camera sits about 5 m up and 27 m behind the bowler's stumps with a 30° lens, and pushes in to 3.9 m up, 17 m back with a 19° lens — high enough that the line to the striker clears the umpire's hat. **TV** is the long-lens broadcast framing (46 m back, 15° → 9.5°). <kbd>C</kbd> cycles classic → broadcast → batter's view → high wide view.
+
+**Action replays** (`scenes/replay.ts`). While a ball is live, every view writes what it drew into a per-frame record: the ball's position and visibility, every player's and umpire's pose (position, facing, limb angles, IK targets, the motion-capture clip and its time), both bats and the state of both sets of stumps. After a wicket or a boundary, the same views read frames back instead of the live match, at 0.45×, while the HUD shows a REPLAY badge. The window depends on the dismissal (from just before release to just after the stumps break for bowled and LBW; from before contact to after the catch, run-out or boundary otherwise), and so does the camera: square-on at the striker's stumps for bowled and LBW; behind the striker for the rest, rising with a lofted ball but aiming below it so the frame keeps the ground. Because it is a recording rather than a re-simulation, a replay always shows exactly what happened and costs only a few hundred numbers per frame. Enter skips; the setting is persisted.
 
 ## 11. Audio and voice
 
@@ -342,9 +348,10 @@ All synthesised in the browser (`audio/sound.ts`), through a gentle limiter and 
 
 ## 12. UI, state and input
 
+- **Match HUD**: a scoreboard bar along the bottom (score, overs, batters, bowler and this over's balls, run rate, the chase, powerplay); a **controls panel** that shows the batting or bowling keys at all times, lights the keys held or just pressed (polled each animation frame from the keyboard state) and names the stroke the current direction + key will play (the same `shotFromInput` the match uses); the *Next ball* prompt and the over and wicket cards; the REPLAY badge.
 - **Screens**: main menu (over the live stadium, orbiting camera) → match setup (teams, overs 2/5/10/20/50, difficulty, pitch, toss/bat/bowl) → squad board (tick 11 of the squad, reorder, validation: exactly 11, warnings for no keeper, fewer than five bowlers, no spinner) → match (HUD) → innings break (scorecard, coach) → result (summary, top performers, both scorecards, coach, rematch).
 - **Store**: `state/game.ts` (Zustand) holds the screen, setup, settings (sound, graphics, commentary — persisted in `localStorage`) and a **snapshot** of the match rebuilt on match events, so the HUD re-renders on events, not frames.
-- **Input**: bindings are data (`input/keyboard.ts`); the handler reads the current match from the store. Batting: arrows for direction + D (ground), A (lofted), S (defend/push), W (sweep), X (leave), Shift (back foot), Space/R (run). Bowling: 1–9/Enter (choose bowler), Q/E (delivery), arrows (target), Space (run in, release on the meter). General: P/Esc, C, M, V, H.
+- **Input**: bindings are data (`input/keyboard.ts`); the handler reads the current match from the store. Batting: arrows for direction + D (ground), A (lofted), S (defend/push), W (sweep), X (leave), Shift (back foot), Space/R (run). Bowling: 1–9/Enter (choose bowler), Q/E (delivery), arrows (target), Space (run in, release on the meter). General: Enter/Space (next ball, continue, skip replay), P/Esc, C, M, V, H.
 - **Accessibility basics**: DOM UI with roles and labels, visible focus, `prefers-reduced-motion` respected, captions for every spoken line (the ticker).
 
 ## 13. Data: teams and squads
@@ -427,6 +434,8 @@ docs/             This document, batting report
 
 **AI**: perception-limited batting with situational and T20 intent and field reading; learning bowling attack; AI captain; commentary; coach.
 
+**Match flow**: a wait for the player after every ball; over-summary and wicket cards with the scorecard; game speed (0.65× / 0.8× / 1×); action replays of wickets and boundaries; an always-visible controls panel.
+
 **Presentation**: skinned, motion-captured players with kits and equipment; umpires with signals; breakable stumps; broadcast camera director; physical sky, image-based lighting, soft shadows, ambient occlusion, bloom, filmic tone mapping; procedural ground and stadium; sprite crowd that reacts; synthesised, physically modelled sound; spoken commentary; quality tiers.
 
 ## 18. Known limitations
@@ -434,6 +443,7 @@ docs/             This document, batting report
 - Controls follow Cricket 07's scheme in spirit, not key for key. Keyboard only — no gamepad or touch yet, so phones can't play.
 - Strokes, the bowling action and fielding are procedural motions retargeted onto the models, not motion-captured cricket; four body models are shared across all players; faces are generic.
 - No byes, leg byes or overthrows; no DRS; no free hit after a no-ball; a called run can't be sent back.
+- Ball physics was not changed in 0.7.0; the ball is drawn 1.35× life size for visibility.
 - Real-GPU frame rate hasn't been profiled; on software renderers even Low graphics is slow.
 - One-day scoring (≈4.3 an over) is below modern ODI rates (≈5.8); the one-day batting curve needs more tuning.
 - Squads reflect each board's latest announcement as of October 2026 and will date; ratings are approximations.

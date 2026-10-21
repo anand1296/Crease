@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { CanvasTexture, type Group, type Mesh, PerspectiveCamera, Quaternion, SRGBColorSpace, Vector3 } from 'three';
+import { type Camera, CanvasTexture, type Group, type Mesh, PerspectiveCamera, Quaternion, SRGBColorSpace, Vector3 } from 'three';
 import { Rng } from '../core/rng.ts';
 import { useGame } from '../../state/game.ts';
 import { sound } from '../audio/sound.ts';
@@ -17,6 +17,7 @@ import { predictArrival } from '../simulation/ballInPlay.ts';
 import { type ClipName, type HumanoidHandle, type Kit, type Pose, neutralPose } from './rig/Humanoid.tsx';
 import { Cricketer } from './rig/Cricketer.tsx';
 import { Stumps, type WicketHandle } from './Stumps.tsx';
+import { type ReplayKind, ReplayRecorder, replayVectors, restorePose } from './replay.ts';
 import { AVATARS, type AvatarId } from './rig/avatarAssets.ts';
 import { type Shot, WIDE, direct } from './camera/director.ts';
 import { battingStance, bowlingAction, gait, gather, keeperStance, readyStance, resetPose, throwing } from './rig/motion.ts';
@@ -79,28 +80,51 @@ export function MatchView() {
 
 function MatchScene({ match }: { match: Match }) {
   const inningsIndex = useGame((s) => s.snap?.inningsIndex ?? 0);
+  const recorder = useMemo(() => new ReplayRecorder(), []);
+  useEffect(() => {
+    const g = useGame.getState();
+    const skip = () => {
+      recorder.stop();
+      useGame.getState().setReplay(false, []);
+    };
+    g.setReplay(false, [], skip);
+    return () => {
+      recorder.stop();
+      useGame.getState().setReplay(false, []);
+    };
+  }, [recorder]);
   return (
     <group>
-      <Driver match={match} />
+      <Driver match={match} recorder={recorder} />
       {/* Re-mount the players when the sides swap at the innings break. */}
       <Suspense fallback={null}>
-        <Players key={inningsIndex} match={match} />
+        <Players key={inningsIndex} match={match} recorder={recorder} />
       </Suspense>
-      <BallView match={match} />
-      <Wickets match={match} />
+      <BallView match={match} recorder={recorder} />
+      <Wickets match={match} recorder={recorder} />
       <Suspense fallback={null}>
-        <Umpires match={match} />
+        <Umpires match={match} recorder={recorder} />
       </Suspense>
       <Markers match={match} />
-      <CameraRig match={match} />
+      <CameraRig match={match} recorder={recorder} />
     </group>
   );
 }
 
+/** Replay length in recorded seconds around the moment, by what happened. */
+function replayWindow(kind: ReplayKind, release: number, contact: number | undefined, event: number | undefined): [number, number] {
+  const e = event ?? release + 1;
+  if (kind === 'bowled' || kind === 'lbw') return [release - 0.35, e + 1.3];
+  const from = (contact ?? release) - (kind === 'runOut' ? 0.4 : 0.9);
+  return [Math.max(release - 0.35, from), e + (kind === 'boundary' ? 0.6 : 1.0)];
+}
+
 // --- Driver ---------------------------------------------------------------------------
 
-function Driver({ match }: { match: Match }) {
+function Driver({ match, recorder }: { match: Match; recorder: ReplayRecorder }) {
   const steps = useRef(0);
+  const meta = useRef<{ release: number; contact: number | undefined; event: number | undefined; off: 1 | -1 }>({ release: 0, contact: undefined, event: undefined, off: 1 });
+  const replayedFor = useRef<unknown>(undefined);
   const heard = useRef<{ cycle: unknown; n: number; outcome: unknown }>({ cycle: undefined, n: 0, outcome: undefined });
   useEffect(
     () =>
@@ -133,6 +157,36 @@ function Driver({ match }: { match: Match }) {
     }
     steps.current += match.advance(delta);
     const c = match.cycle;
+    // Record this frame for a possible replay, and note the moments that matter.
+    recorder.beginFrame(c, c?.time);
+    if (c) {
+      const ev = c.events.find((e) => e.type === 'stumps' || e.type === 'boundary' || e.type === 'pad' || e.type === 'body');
+      meta.current = {
+        release: c.releaseTime,
+        contact: c.contact,
+        event: c.outcome?.wicket?.kind === 'runOut' ? c.returnAt : c.outcome?.wicket?.kind === 'caught' ? c.collectedAt : ev ? c.releaseTime + ev.t : c.collectedAt,
+        off: offSideSign(c.opts.striker.battingHand),
+      };
+    }
+    // A wicket or a boundary: show the action replay before the card.
+    const g = useGame.getState();
+    if (match.phase === 'review' && !recorder.playing && match.lastOutcome && replayedFor.current !== match.lastOutcome) {
+      replayedFor.current = match.lastOutcome;
+      const o = match.lastOutcome;
+      const kind: ReplayKind | undefined = o.wicket ? o.wicket.kind : o.boundary ? 'boundary' : undefined;
+      if (kind && g.replaysOn && !g.paused) {
+        const m = meta.current;
+        const [from, to] = replayWindow(kind, m.release, m.contact, m.event);
+        if (recorder.start(kind, from, to, m.off, m.contact)) g.setReplay(true, [...recorder.ids]);
+      }
+    }
+    if (recorder.playing && !g.paused) {
+      recorder.playT += delta * 0.45;
+      if (recorder.playT >= recorder.endT) {
+        recorder.stop();
+        g.setReplay(false, []);
+      }
+    }
     if (c?.phase === 'runUp' && match.humanBowling) useGame.getState().setMeter(match.meter);
     // Sound for whatever happened this frame.
     const h = heard.current;
@@ -234,7 +288,7 @@ const SWEET_SPOT = 0.7;
 const RUN_LANE = 1.25;
 const END_Z = STRIKER_POPPING_Z + 0.35;
 
-function Players({ match }: { match: Match }) {
+function Players({ match, recorder }: { match: Match; recorder: ReplayRecorder }) {
   const fielding = match.bowlingSide;
   const batting = match.battingSide;
   const handles = useRef(new Map<string, HumanoidHandle | null>());
@@ -244,8 +298,30 @@ function Players({ match }: { match: Match }) {
   const batState = useMemo(() => ({ body: new Vector3(), hands: new Vector3(), dir: new Vector3(0, -1, 0) }), []);
   const look = useMemo(() => new Vector3(), []);
   const lastCycle = useRef<unknown>(null);
+  const scratch = useMemo(() => ({ pose: neutralPose(), vectors: replayVectors() }), []);
 
   useFrame((_, dtRaw) => {
+    // Action replay: draw the recorded frame instead of the live match.
+    if (recorder.playing) {
+      const fr = recorder.frameAt(recorder.playT);
+      if (!fr) return;
+      for (const [id, h] of handles.current) {
+        const snap = fr.poses.get(id);
+        if (h && snap) h.apply(restorePose(snap, scratch.pose, scratch.vectors));
+      }
+      [strikerBat.current, runnerBat.current].forEach((bat, i) => {
+        const b = fr.bats[i];
+        if (!bat) return;
+        bat.visible = b !== undefined;
+        if (b) {
+          bat.position.set(b[0] ?? 0, b[1] ?? 0, b[2] ?? 0);
+          bat.quaternion.set(b[3] ?? 0, b[4] ?? 0, b[5] ?? 0, b[6] ?? 1);
+        }
+      });
+      return;
+    }
+    if (strikerBat.current) strikerBat.current.visible = true;
+    if (runnerBat.current) runnerBat.current.visible = true;
     const dt = Math.min(0.05, dtRaw);
     const c = match.cycle;
     const t = match.time;
@@ -330,6 +406,7 @@ function Players({ match }: { match: Match }) {
       p.z = m.pos.z;
       p.facing = m.facing;
       h.apply(p);
+      recorder.pose(f.player.id, p);
     });
 
     // ---- Batters ----
@@ -389,6 +466,7 @@ function Players({ match }: { match: Match }) {
       p.z = m.pos.z;
       p.facing = m.facing;
       h.apply(p);
+      recorder.pose(id, p);
     }
 
     // Striker's bat: in the stroke it is posed by poseStriker; while running, carried.
@@ -406,6 +484,8 @@ function Players({ match }: { match: Match }) {
     const rb = runnerBat.current;
     const nh = handles.current.get(nonStrikerId);
     if (rb && nh) carryBat(rb, nh, m0(motions.get(nonStrikerId)));
+    const fr = recorder.current;
+    if (fr) fr.bats = [sb, rb].map((b) => (b ? [...b.position.toArray(), ...b.quaternion.toArray()] : undefined));
   });
 
   const keeperId = match.keeperOf(match.current.bowling).id;
@@ -454,7 +534,10 @@ const easeRun = (u: number) => u * u * (3 - 2 * u) * 0.35 + u * 0.65;
 
 /** Only the two batters at the crease are drawn. */
 function BatterSlot({ match, player, team, handles }: { match: Match; player: Player; team: Team; handles: React.RefObject<Map<string, HumanoidHandle | null>> }) {
-  const atCrease = useGame((s) => (s.snap ? s.snap.striker.id === player.id || s.snap.nonStriker.id === player.id : false));
+  // At the crease — or, while a replay plays, whoever was in it (a dismissed batter included).
+  const atCrease = useGame((s) =>
+    s.replaying ? s.replayIds.includes(player.id) : s.snap ? s.snap.striker.id === player.id || s.snap.nonStriker.id === player.id : false,
+  );
   const kit = useMemo(() => kitFor(match, team, player, 'batter'), [match, team, player]);
   if (!atCrease) return null;
   return (
@@ -652,11 +735,32 @@ function slerpDir(out: Vector3, from: Vector3, to: Vector3, t: number): void {
 // --- Wickets -------------------------------------------------------------------------------
 
 /** Both sets of stumps; broken (stumps back, bails flying) when the ball or a throw hits them. */
-function Wickets({ match }: { match: Match }) {
+function Wickets({ match, recorder }: { match: Match; recorder: ReplayRecorder }) {
   const strikerEnd = useRef<WicketHandle>(null);
   const bowlerEnd = useRef<WicketHandle>(null);
   const seen = useRef<unknown>(undefined);
+  const live = useRef<(number[] | undefined)[]>([undefined, undefined]);
+  const wasPlaying = useRef(false);
   useFrame((_, dtRaw) => {
+    const ends = [strikerEnd.current, bowlerEnd.current];
+    if (recorder.playing) {
+      if (!wasPlaying.current) live.current = ends.map((w) => w?.capture());
+      wasPlaying.current = true;
+      const fr = recorder.frameAt(recorder.playT);
+      ends.forEach((w, i) => {
+        const st = fr?.wickets[i];
+        if (w && st) w.restore(st);
+      });
+      return;
+    }
+    if (wasPlaying.current) {
+      // Back from a replay: as they were.
+      wasPlaying.current = false;
+      ends.forEach((w, i) => {
+        const st = live.current[i];
+        if (w && st) w.restore(st);
+      });
+    }
     const dt = Math.min(0.05, dtRaw);
     const c = match.cycle;
     if (c !== seen.current) {
@@ -674,6 +778,8 @@ function Wickets({ match }: { match: Match }) {
     }
     strikerEnd.current?.step(dt);
     bowlerEnd.current?.step(dt);
+    const fr = recorder.current;
+    if (fr) fr.wickets = ends.map((w) => w?.capture());
   });
   return (
     <>
@@ -723,11 +829,20 @@ function signal(p: Pose, s: Signal, t: number): void {
 }
 
 /** One umpire behind the bowler's stumps, one at square leg. */
-function Umpires({ match }: { match: Match }) {
+function Umpires({ match, recorder }: { match: Match; recorder: ReplayRecorder }) {
   const ends = useRef<(HumanoidHandle | null)[]>([null, null]);
   const motions = useMemo(() => [newMotion(-0.3, BOWLER_STUMPS_Z - 2.1), newMotion(-21, STRIKER_POPPING_Z)], []);
   const lastCycle = useRef<unknown>(null);
+  const scratch = useMemo(() => ({ pose: neutralPose(), vectors: replayVectors() }), []);
   useFrame((_, dtRaw) => {
+    if (recorder.playing) {
+      const fr = recorder.frameAt(recorder.playT);
+      ends.current.forEach((h, i) => {
+        const snap = fr?.poses.get(`umpire-${i}`);
+        if (h && snap) h.apply(restorePose(snap, scratch.pose, scratch.vectors));
+      });
+      return;
+    }
     const dt = Math.min(0.05, dtRaw);
     const c = match.cycle;
     const reset = c !== lastCycle.current;
@@ -771,6 +886,7 @@ function Umpires({ match }: { match: Match }) {
       m.pose.z = m.pos.z;
       m.pose.facing = m.facing;
       h.apply(m.pose);
+      recorder.pose(`umpire-${i}`, m.pose);
     });
   });
   return (
@@ -834,7 +950,7 @@ function ballTexture(): CanvasTexture {
   return tex;
 }
 
-function BallView({ match }: { match: Match }) {
+function BallView({ match, recorder }: { match: Match; recorder: ReplayRecorder }) {
   const ref = useRef<Mesh>(null);
   const out = useMemo(() => ({ x: 0, y: 0, z: 0 }), []);
   const texture = useMemo(ballTexture, []);
@@ -843,6 +959,25 @@ function BallView({ match }: { match: Match }) {
   useFrame((_, dt) => {
     const mesh = ref.current;
     if (!mesh) return;
+    if (recorder.playing) {
+      const fr = recorder.frameAt(recorder.playT);
+      if (fr) {
+        mesh.position.set(fr.ball[0] ?? 0, fr.ball[1] ?? 0, fr.ball[2] ?? 0);
+        mesh.visible = fr.ballVisible;
+        spin.current += dt * 8;
+        mesh.rotation.set(spin.current, 0, Math.PI / 2);
+      }
+      return;
+    }
+    // Recorded at the end of this frame's update.
+    const rec = () => {
+      const fr = recorder.current;
+      if (fr) {
+        fr.ball = mesh.position.toArray();
+        fr.ballVisible = mesh.visible;
+      }
+    };
+    queueMicrotask(rec);
     // Seam upright, backspin while it travels.
     const v = match.cycle?.play?.ball.velocity;
     if (v) spin.current += Math.min(0.1, dt) * Math.hypot(v.x, v.y, v.z) * 3;
@@ -878,7 +1013,7 @@ function BallView({ match }: { match: Match }) {
   return (
     <mesh ref={ref} castShadow>
       {/* Drawn larger than life (as most cricket games do) so it can be followed from the broadcast camera. */}
-      <sphereGeometry args={[FIELD.ballRadius * 1.6, 32, 20]} />
+      <sphereGeometry args={[FIELD.ballRadius * 1.35, 32, 20]} />
       <meshPhysicalMaterial map={texture} roughness={0.42} clearcoat={0.7} clearcoatRoughness={0.25} />
     </mesh>
   );
@@ -929,7 +1064,7 @@ function Markers({ match }: { match: Match }) {
 const BATTER_END = { pos: new Vector3(0, 2.1, STRIKER_STUMPS_Z + 7), target: new Vector3(0, 1.0, BOWLER_STUMPS_Z), fov: 40 };
 const HIGH = { pos: new Vector3(0, 48, BOWLER_STUMPS_Z - 40), target: new Vector3(0, 0, 8), fov: 45 };
 
-function CameraRig({ match }: { match: Match }) {
+function CameraRig({ match, recorder }: { match: Match; recorder: ReplayRecorder }) {
   const camera = useThree((s) => s.camera);
   const mode = useGame((s) => s.camera);
   const look = useMemo(() => new Vector3(WIDE.look.x, WIDE.look.y, WIDE.look.z), []);
@@ -937,14 +1072,22 @@ function CameraRig({ match }: { match: Match }) {
   const last = useRef<Shot['name'] | undefined>(undefined);
   const shake = useRef(0);
   const lastMode = useRef(mode);
+  const replayWas = useRef(false);
   useFrame((state, dt) => {
+    if (recorder.playing) {
+      replayCamera(recorder, camera, pos, look, !replayWas.current, dt);
+      replayWas.current = true;
+      last.current = 'hold';
+      return;
+    }
+    replayWas.current = false;
     const c = match.cycle;
     const wantPos = tmpA;
     const wantLook = tmpB;
     let fov: number;
     let ease: number;
     let cut = false;
-    if (mode === 'broadcast') {
+    if (mode === 'broadcast' || mode === 'classic') {
       const live = c && match.phase === 'delivery' ? c : undefined;
       const ball = live?.play?.ball.position;
       const stumps = live?.events.find((e) => e.type === 'stumps');
@@ -954,6 +1097,7 @@ function CameraRig({ match }: { match: Match }) {
         chaser = idx === undefined ? undefined : live.fielderPos[idx];
       }
       const shot = direct({
+        style: mode === 'classic' ? 'classic' : 'tv',
         phase: live?.phase,
         time: live?.time ?? 0,
         releaseTime: live?.releaseTime ?? 1.7,
@@ -996,6 +1140,48 @@ function CameraRig({ match }: { match: Match }) {
   });
   return null;
 }
+
+/**
+ * The replay camera. Bowled and LBW: low and square to the striker's crease,
+ * so you see the ball beat the bat and hit the stumps or pad. Everything
+ * else: from behind the striker, then following the ball.
+ */
+function replayCamera(rec: ReplayRecorder, camera: PerspectiveCamera | Camera, pos: Vector3, look: Vector3, cut: boolean, dt: number): void {
+  const fr = rec.frameAt(rec.playT);
+  if (!fr) return;
+  const ball = tmpA.set(fr.ball[0] ?? 0, fr.ball[1] ?? 0, fr.ball[2] ?? 0);
+  let fov = 32;
+  if (rec.kind === 'bowled' || rec.kind === 'lbw') {
+    tmpB.set(rec.off * 7.5, 1.1, STRIKER_STUMPS_Z - 2.2);
+    pos.lerp(tmpB, cut ? 1 : 1 - Math.exp(-dt * 6));
+    look.lerp(tmpQLook.set(ball.x * 0.4, 0.55, Math.max(STRIKER_STUMPS_Z - 3, Math.min(STRIKER_STUMPS_Z, ball.z))), cut ? 1 : 1 - Math.exp(-dt * 8));
+    fov = 30;
+  } else {
+    const struck = rec.contactT !== undefined && fr.t >= rec.contactT;
+    if (!struck) {
+      tmpB.set(0, 2.3, STRIKER_STUMPS_Z + 8);
+      tmpQLook.set(0, 1.0, BOWLER_STUMPS_Z);
+      fov = 34;
+    } else {
+      const d = Math.hypot(ball.x, ball.z - STRIKER_STUMPS_Z);
+      // Rise with a lofted ball but aim below it, so the frame keeps the ground
+      // (and the fielders under it) rather than a patch of sky.
+      tmpB.set(ball.x * 0.35, 4 + Math.min(16, d * 0.25) + Math.min(10, ball.y * 0.5), STRIKER_STUMPS_Z + 9 + Math.min(10, d * 0.1));
+      tmpQLook.set(ball.x, Math.min(ball.y * 0.5, 6), ball.z);
+      fov = Math.min(60, 30 + d * 0.35 + Math.max(0, ball.y - 6) * 0.6);
+    }
+    pos.lerp(tmpB, cut ? 1 : 1 - Math.exp(-dt * 3));
+    look.lerp(tmpQLook, cut ? 1 : 1 - Math.exp(-dt * 6));
+  }
+  camera.position.copy(pos);
+  camera.lookAt(look);
+  if (camera instanceof PerspectiveCamera && Math.abs(camera.fov - fov) > 0.01) {
+    camera.fov += (fov - camera.fov) * (cut ? 1 : 1 - Math.exp(-dt * 4));
+    camera.updateProjectionMatrix();
+  }
+}
+
+const tmpQLook = new Vector3();
 
 function nearest(points: readonly { x: number; z: number }[], x: number, z: number): number | undefined {
   let best: number | undefined;

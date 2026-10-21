@@ -40,6 +40,11 @@ export function useGameControls(): void {
           break;
       }
       if (g.paused) return;
+      // A replay is playing: Enter or Space skips it.
+      if (g.replaying) {
+        if (action === 'confirm' || action === 'bowl' || action === 'run') g.skipReplay();
+        return;
+      }
       // Between balls the game waits for the player: Enter or Space moves on.
       if (m.phase === 'review') {
         if (action === 'confirm' || action === 'bowl' || action === 'run') m.next();

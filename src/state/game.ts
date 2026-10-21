@@ -23,7 +23,7 @@ import type { BallOutcome } from '../game/session/deliveryCycle.ts';
  * components read the Match directly every frame.
  */
 export type Screen = 'menu' | 'setup' | 'squad' | 'match';
-export type CameraMode = 'broadcast' | 'batter' | 'high';
+export type CameraMode = 'classic' | 'broadcast' | 'batter' | 'high';
 export type BatFirst = 'toss' | 'user' | 'opponent';
 
 export interface MatchSetup {
@@ -93,6 +93,15 @@ export interface GameState {
   readonly muted: boolean;
   readonly quality: Quality;
   readonly commentaryOn: boolean;
+  /** Action replays after wickets and boundaries (setting), and whether one is playing. */
+  readonly replaysOn: boolean;
+  readonly replaying: boolean;
+  /** Who appears in the replay (so dismissed batters are drawn while it plays). */
+  readonly replayIds: readonly string[];
+  /** Skips a playing replay (set by the scene that owns the recorder). */
+  skipReplay: () => void;
+  setReplay: (playing: boolean, ids?: readonly string[], skip?: () => void) => void;
+  toggleReplays: () => void;
   goTo: (screen: Screen) => void;
   updateSetup: (patch: Partial<MatchSetup>) => void;
   startMatch: () => void;
@@ -235,6 +244,23 @@ function createMatch(setup: MatchSetup, seed: string): { match: Match; toss: str
   return { match, toss };
 }
 
+function readFlag(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : v === '1';
+  } catch {
+    return fallback;
+  }
+}
+
+function saveFlag(key: string, on: boolean): void {
+  try {
+    localStorage.setItem(key, on ? '1' : '0');
+  } catch {
+    // Not persisted.
+  }
+}
+
 export const useGame = create<GameState>()((set, get) => {
   const attach = (match: Match, toss: string) => {
     unsubscribe?.();
@@ -250,11 +276,21 @@ export const useGame = create<GameState>()((set, get) => {
     snap: undefined,
     paused: false,
     showHelp: false,
-    camera: 'broadcast',
+    camera: 'classic',
     meter: 0.5,
     muted: sound.muted,
     quality: detectQuality(),
     commentaryOn: readCommentaryEnabled(),
+    replaysOn: readFlag('crease.replays', true),
+    replaying: false,
+    replayIds: [],
+    skipReplay: () => undefined,
+    setReplay: (replaying, ids = [], skip) => set({ replaying, replayIds: ids, ...(skip ? { skipReplay: skip } : {}) }),
+    toggleReplays: () => {
+      const replaysOn = !get().replaysOn;
+      saveFlag('crease.replays', replaysOn);
+      set({ replaysOn });
+    },
     goTo: (screen) => {
       sound.unlock();
       keyboard.enabled = screen === 'match';
@@ -285,7 +321,7 @@ export const useGame = create<GameState>()((set, get) => {
       unsubscribe = undefined;
       keyboard.enabled = false;
       hush();
-      set({ screen: 'menu', match: undefined, snap: undefined, paused: false });
+      set({ screen: 'menu', match: undefined, snap: undefined, paused: false, replaying: false, replayIds: [] });
     },
     setPaused: (paused) => {
       get().match?.setPaused(paused);
@@ -294,9 +330,9 @@ export const useGame = create<GameState>()((set, get) => {
     },
     toggleHelp: () => set({ showHelp: !get().showHelp }),
     cycleCamera: () => {
-      const order: CameraMode[] = ['broadcast', 'batter', 'high'];
+      const order: CameraMode[] = ['classic', 'broadcast', 'batter', 'high'];
       const i = order.indexOf(get().camera);
-      set({ camera: order[(i + 1) % order.length] ?? 'broadcast' });
+      set({ camera: order[(i + 1) % order.length] ?? 'classic' });
     },
     setMeter: (meter) => {
       if (Math.abs(meter - get().meter) > 0.004) set({ meter });

@@ -8,6 +8,7 @@ import {
   type InstancedMesh,
   Matrix4,
   MeshLambertMaterial,
+  RepeatWrapping,
   SRGBColorSpace,
   Vector2,
 } from 'three';
@@ -54,19 +55,64 @@ function tierProfile(r0: number, y0: number, rows: number): Vector2[] {
   return pts;
 }
 
+/**
+ * Rows of plastic seats for a tier's lathe (u runs round the ground, v up the
+ * profile): coloured seat rows on concrete steps, with aisles every so often.
+ */
+function seatTexture(color: string, rows: number): CanvasTexture {
+  const w = 512;
+  const h = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.fillStyle = '#8a8f96';
+    ctx.fillRect(0, 0, w, h);
+    // The profile has the wall at the bottom of v and two points per row; rows occupy most of v.
+    const rowH = (h * 0.86) / (rows + 1);
+    for (let r = 0; r <= rows; r++) {
+      const y = h * 0.1 + r * rowH;
+      ctx.fillStyle = '#6e737a';
+      ctx.fillRect(0, y + rowH * 0.62, w, rowH * 0.38);
+      for (let x = 0; x < w; x += 16) {
+        if (x % 128 < 16) continue; // aisle
+        ctx.fillStyle = color;
+        ctx.fillRect(x + 2, y + rowH * 0.12, 12, rowH * 0.5);
+        ctx.fillStyle = 'rgba(0,0,0,0.25)';
+        ctx.fillRect(x + 2, y + rowH * 0.5, 12, rowH * 0.12);
+      }
+    }
+  }
+  const tex = new CanvasTexture(canvas);
+  tex.colorSpace = SRGBColorSpace;
+  tex.wrapS = RepeatWrapping;
+  tex.repeat.set(24, 1);
+  tex.anisotropy = 8;
+  return tex;
+}
+
 function Stands() {
   const lower = useMemo(() => tierProfile(STAND_R, 1.6, LOWER_ROWS), []);
   const upper = useMemo(() => tierProfile(UPPER_R, UPPER_Y, UPPER_ROWS), []);
   const roofY = UPPER_Y + UPPER_ROWS * ROW_RISE + 6;
+  const seats = useMemo(() => ({ lower: seatTexture('#1f5f9e', LOWER_ROWS), upper: seatTexture('#9e2a2b', UPPER_ROWS) }), []);
+  useEffect(
+    () => () => {
+      seats.lower.dispose();
+      seats.upper.dispose();
+    },
+    [seats],
+  );
   return (
     <group>
       <mesh>
         <latheGeometry args={[lower, 96]} />
-        <meshStandardMaterial color="#7d848f" roughness={0.95} side={DoubleSide} />
+        <meshStandardMaterial map={seats.lower} roughness={0.85} side={DoubleSide} />
       </mesh>
       <mesh>
         <latheGeometry args={[upper, 96]} />
-        <meshStandardMaterial color="#6c727c" roughness={0.95} side={DoubleSide} />
+        <meshStandardMaterial map={seats.upper} roughness={0.85} side={DoubleSide} />
       </mesh>
       {/* Fascia between the tiers */}
       <mesh position={[0, UPPER_Y - 1.5, 0]}>

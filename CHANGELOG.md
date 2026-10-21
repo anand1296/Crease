@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0 — Match flow, replays and the classic camera (2026-10-22)
+
+- **A paced match**: after every ball the game waits for you — *Next ball* (Enter or Space). Every over ends with an over summary and the scorecard; every wicket with a dismissal card (how out, fall of wicket, partnership, who's in next) and the scorecard. The match opens with a how-to-play card.
+- **Controls on screen**: a live controls panel shows the batting (or bowling) keys all the time, lights up the keys you hold or press, and names the stroke your current direction + key combination will play.
+- **Game speed**: Relaxed (0.65×), Normal (0.8×, the new default) or Real time, chosen in match setup. Slowing the game doesn't change what happens — the same seed gives the same match.
+- **Calm, purposeful fielding**: only the fielders who should move do — the chaser, one fielder backing up, the keeper and bowler going to the stumps for the return. Fields are set per over and batter instead of every ball, and players are placed at their positions on the camera cut between balls rather than walking across the ground.
+- **Action replays** of wickets and boundaries, slowed down with their own cameras (square-on for bowled and LBW, behind the striker following the ball for the rest). Enter skips; switch them off in the menus.
+- **Classic camera** (new default): lower and closer behind the bowler's arm, after Cricket 07; C still cycles to the long-lens broadcast camera, the batter's view and the high view.
+- **Ground and stadium**: worn strips on the square around the pitch, inner-circle markers, a thicker rope, seat rows in the stands (blue lower tier, red upper); a larger, easier-to-follow ball.
+- A new scoreboard bar along the bottom of the screen.
+
 ## 0.6.0 — Game AI (2026-10-22)
 
 - **Learning attack**: against a human batter the computer's bowlers learn, ball by ball, which plans work (Thompson sampling over delivery plans, phase-aware priors, pooled across the line-up).

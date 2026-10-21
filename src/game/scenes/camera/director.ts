@@ -34,6 +34,8 @@ export interface Shot {
 }
 
 export interface DirectorInput {
+  /** 'tv': long lens from far behind the bowler; 'classic': lower and closer, as in Cricket 07. */
+  readonly style?: 'tv' | 'classic';
   /** Cycle phase, or undefined between balls. */
   readonly phase: 'runUp' | 'inFlight' | 'struck' | 'dead' | undefined;
   /** Cycle time (s since the start of the run-up), release time, contact time. */
@@ -68,14 +70,30 @@ export const TIGHT: Readonly<{ pos: Vec; look: Vec; fov: number }> = {
   fov: 9.5,
 };
 
+/** Classic (Cricket 07) framing: lower and closer behind the bowler's arm. */
+export const CLASSIC_WIDE: Readonly<{ pos: Vec; look: Vec; fov: number }> = {
+  pos: { x: -0.9, y: 5.2, z: BOWLER_STUMPS_Z - 27 },
+  look: { x: 0, y: 0.8, z: 2 },
+  fov: 30,
+};
+export const CLASSIC_TIGHT: Readonly<{ pos: Vec; look: Vec; fov: number }> = {
+  // High enough that the line to the striker clears the bowler's-end umpire's hat.
+  pos: { x: -0.6, y: 3.9, z: BOWLER_STUMPS_Z - 17 },
+  look: { x: 0, y: 1.0, z: STRIKER_STUMPS_Z - 1.2 },
+  fov: 19,
+};
+
 /** How long the stroke is shown from the bowler's end before the chase camera takes over. */
 export const STROKE_HOLD = 0.45;
 
 export function direct(input: DirectorInput): Shot {
   const { phase, time, releaseTime, ball } = input;
+  const classic = input.style === 'classic';
+  const WIDE_ = classic ? CLASSIC_WIDE : WIDE;
+  const TIGHT_ = classic ? CLASSIC_TIGHT : TIGHT;
 
   if (phase === undefined) {
-    return { name: 'wide', pos: { ...WIDE.pos }, look: { ...WIDE.look }, fov: WIDE.fov, cut: input.previous !== 'wide' && input.previous !== 'runUp' && input.previous !== undefined, ease: 1.5 };
+    return { name: 'wide', pos: { ...WIDE_.pos }, look: { ...WIDE_.look }, fov: WIDE_.fov, cut: input.previous !== 'wide' && input.previous !== 'runUp' && input.previous !== undefined, ease: 1.5 };
   }
 
   if (phase === 'runUp' || (phase === 'inFlight' && input.contactTime === undefined && input.stumpsTime === undefined)) {
@@ -83,9 +101,9 @@ export function direct(input: DirectorInput): Shot {
     const u = smooth(time / Math.max(0.1, releaseTime - 0.15));
     return {
       name: phase === 'runUp' ? 'runUp' : 'delivery',
-      pos: { x: lerp(WIDE.pos.x, TIGHT.pos.x, u), y: lerp(WIDE.pos.y, TIGHT.pos.y, u), z: lerp(WIDE.pos.z, TIGHT.pos.z, u) },
-      look: { x: lerp(WIDE.look.x, TIGHT.look.x, u), y: lerp(WIDE.look.y, TIGHT.look.y, u), z: lerp(WIDE.look.z, TIGHT.look.z, u) },
-      fov: lerp(WIDE.fov, TIGHT.fov, u),
+      pos: { x: lerp(WIDE_.pos.x, TIGHT_.pos.x, u), y: lerp(WIDE_.pos.y, TIGHT_.pos.y, u), z: lerp(WIDE_.pos.z, TIGHT_.pos.z, u) },
+      look: { x: lerp(WIDE_.look.x, TIGHT_.look.x, u), y: lerp(WIDE_.look.y, TIGHT_.look.y, u), z: lerp(WIDE_.look.z, TIGHT_.look.z, u) },
+      fov: lerp(WIDE_.fov, TIGHT_.fov, u),
       cut: false,
       // Follow the dolly closely: it is already smooth.
       ease: 12,
@@ -106,7 +124,7 @@ export function direct(input: DirectorInput): Shot {
 
   if (input.contactTime === undefined || !ball) {
     // Beaten, padded or left: stay tight on the batter and the keeper.
-    return { name: 'delivery', pos: { ...TIGHT.pos }, look: { ...TIGHT.look }, fov: TIGHT.fov, cut: false, ease: 3 };
+    return { name: 'delivery', pos: { ...TIGHT_.pos }, look: { ...TIGHT_.look }, fov: TIGHT_.fov, cut: false, ease: 3 };
   }
 
   const since = time - input.contactTime;
@@ -115,9 +133,9 @@ export function direct(input: DirectorInput): Shot {
     // The stroke, from the bowler's end: widen and pan with the ball.
     return {
       name: 'stroke',
-      pos: { x: ball.x * 0.15, y: 9 + Math.min(10, fromBat * 0.4), z: BOWLER_STUMPS_Z - 36 },
+      pos: { x: ball.x * 0.15, y: (classic ? 4 : 9) + Math.min(10, fromBat * 0.4), z: BOWLER_STUMPS_Z - (classic ? 20 : 36) },
       look: { x: ball.x * 0.8, y: Math.max(0.6, ball.y * 0.7), z: lerp(STRIKER_STUMPS_Z - 1.6, ball.z, 0.8) },
-      fov: Math.min(30, 10 + fromBat * 1.1),
+      fov: Math.min(classic ? 45 : 30, (classic ? 20 : 10) + fromBat * 1.1),
       cut: false,
       ease: 5,
     };

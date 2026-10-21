@@ -79,6 +79,11 @@ test.describe('gameplay', () => {
       await expect(page.getByTestId('banner')).toBeVisible();
       // After every ball the game waits for a key press (a wicket or over end shows a card).
       await expect.poll(() => page.evaluate(() => window.__crease?.phase?.()), { timeout: 90_000 }).toBe('review');
+      // A wicket or boundary may start an action replay first: Enter skips it.
+      if (await page.getByTestId('replay').isVisible()) {
+        await page.keyboard.press('Enter');
+        await expect(page.getByTestId('replay')).toBeHidden();
+      }
       const waitingFor = await page.evaluate(() => (document.querySelector('[data-testid="review"]') ? 'card' : 'next'));
       if (waitingFor === 'next') await expect(page.getByTestId('next-ball')).toBeVisible();
       await page.keyboard.press('Enter');

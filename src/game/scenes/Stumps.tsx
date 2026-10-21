@@ -15,6 +15,9 @@ export interface WicketHandle {
   reset(): void;
   /** Advances the flying bails and the falling stumps. */
   step(dt: number): void;
+  /** For replays: the stumps' and bails' state as numbers, and putting it back. */
+  capture(): number[];
+  restore(state: readonly number[]): void;
 }
 
 interface WicketState {
@@ -121,6 +124,21 @@ export const Stumps = forwardRef<WicketHandle, { z: number }>(function Stumps({ 
             }
           }
         }
+        apply();
+      },
+      capture() {
+        return [state.broken ? 1 : 0, ...state.lean, ...state.bails.flatMap((b) => [b.x, b.y, b.z, b.angle])];
+      },
+      restore(v) {
+        state.broken = v[0] === 1;
+        state.lean = [v[1] ?? 0, v[2] ?? 0, v[3] ?? 0];
+        state.bails.forEach((b, i) => {
+          const k = 4 + i * 4;
+          b.x = v[k] ?? b.x;
+          b.y = v[k + 1] ?? b.y;
+          b.z = v[k + 2] ?? b.z;
+          b.angle = v[k + 3] ?? b.angle;
+        });
         apply();
       },
     };

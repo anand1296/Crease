@@ -2,7 +2,7 @@
 
 A browser-based 3D cricket game, built with React, TypeScript and Three.js. Inspired by the depth and replayability of classic cricket games: batting that rewards timing and shot selection, bowling with real variation, and an opponent that plays the ball rather than the dice.
 
-> **Status: alpha (0.6.0).** Play a full limited-overs match against the computer: pick India, Pakistan, Australia or England with their current T20I squads, choose your playing XI and batting order, set the overs (2–50), difficulty and pitch, toss, bat and bowl both innings, and finish with a result and full scorecards. Real ball physics, sixteen strokes, twelve delivery types, LBW, wides, run-outs and bowler quotas; motion-captured, skinned player models in team kits; umpires who signal; a broadcast-style camera; post-processed graphics; and synthesised sound, including a physically modelled bat-on-ball crack. Game AI throughout: a bowling attack that learns your weaknesses, an AI captain that sets fields to where you score (within powerplay restrictions), T20-minded computer batters that read the field, spoken ball-by-ball commentary, and a coach that reviews your innings. See [Roadmap](#roadmap).
+> **Status: alpha (0.7.0).** Play a full limited-overs match against the computer: pick India, Pakistan, Australia or England with their current T20I squads, choose your playing XI and batting order, set the overs (2–50), difficulty and pitch, toss, bat and bowl both innings, and finish with a result and full scorecards. The game waits for you between balls, sums up every over and wicket with the scorecard, replays wickets and boundaries, and runs at a speed you choose. Real ball physics, sixteen strokes, twelve delivery types, LBW, wides, run-outs and bowler quotas; motion-captured, skinned player models in team kits; umpires who signal; a broadcast-style camera; post-processed graphics; and synthesised sound, including a physically modelled bat-on-ball crack. Game AI throughout: a bowling attack that learns your weaknesses, an AI captain that sets fields to where you score (within powerplay restrictions), T20-minded computer batters that read the field, spoken ball-by-ball commentary, and a coach that reviews your innings. See [Roadmap](#roadmap).
 
 ## Running locally
 
@@ -31,6 +31,8 @@ Browser tests: to test a deployed build use `E2E_BASE_URL=https://… npm run te
 
 **Main menu → Play a match.** Choose your team and the opposition (India, Pakistan, Australia, England — each board's most recently announced men's T20I squad, 15–16 players), the number of overs, difficulty, pitch and who bats first (or toss for it). **Choose playing XI** opens the squad board: tick eleven players, reorder the batting order with ↑/↓, and the board warns you if the side has no keeper, fewer than five bowlers or no spinner. Then **Start match**.
 
+**Pace of play**: after each ball the game waits for <kbd>Enter</kbd> / <kbd>Space</kbd> (*Next ball*). At the end of every over you get an over summary with the scorecard, and after every wicket a dismissal card (how out, fall of wicket, partnership, next batter) with the scorecard. Wickets and boundaries are replayed in slow motion first (<kbd>Enter</kbd> skips; *Replays* can be switched off in the menus). **Game speed** in match setup: Relaxed, Normal (default, 0.8×) or Real time. The controls panel on the left of the screen shows the keys at all times, lights them as you press them, and names the stroke you are about to play.
+
 Each bowler may bowl at most a fifth of the overs (rounded up) and never two overs in a row. Out of overs, all out, or the target reached ends an innings; the result screen shows the margin, top performers and both scorecards. <kbd>H</kbd> shows the controls in the game.
 
 ### Batting
@@ -58,11 +60,11 @@ Hold an arrow for direction, then press a stroke key **as the ball arrives**. Th
 
 ### General
 
-<kbd>P</kbd> / <kbd>Esc</kbd> pause (resume, sound, commentary, restart, quit to menu) · <kbd>Enter</kbd> continue after the innings break · <kbd>C</kbd> camera · <kbd>M</kbd> sound on/off · <kbd>V</kbd> commentary on/off · <kbd>H</kbd> help. The game pauses itself when the window loses focus.
+<kbd>P</kbd> / <kbd>Esc</kbd> pause (resume, sound, commentary, restart, quit to menu) · <kbd>Enter</kbd> / <kbd>Space</kbd> next ball, continue past a card, skip a replay · <kbd>C</kbd> camera · <kbd>M</kbd> sound on/off · <kbd>V</kbd> commentary on/off · <kbd>H</kbd> help. The game pauses itself when the window loses focus.
 
 **Graphics** (main menu): *High* adds soft shadows, image-based lighting, the crowd, ambient occlusion, bloom, filmic tone mapping and up to 1.5× resolution; *Low* drops them for machines without a capable GPU. Low is chosen automatically when the browser reports a software renderer; your choice is remembered.
 
-**Camera**: the default broadcast camera sits wide behind the bowler between balls, pushes in slowly through the run-up, holds tight on the striker at release, then cuts to a high side-on camera that follows the ball and the chase (or to the stumps when they are hit). <kbd>C</kbd> switches to the view from behind the striker or a high wide view.
+**Camera**: the default *classic* camera sits low and close behind the bowler's arm, as in Cricket 07, and pushes in through the run-up until the striker fills the frame at release; after the stroke it cuts to a high side-on camera that follows the ball and the chase (or to the stumps when they are hit). <kbd>C</kbd> cycles to the long-lens *broadcast* camera, the view from behind the striker and a high wide view.
 
 ## The AI opposition
 
@@ -98,7 +100,9 @@ Built in phases; each phase ships a verified vertical slice.
 | P0 | Project boots, 3D ground renders, seeded RNG, fixed-step loop, ball physics core, CI + deploy | ✅ Done |
 | P1 | Delivery engine, batting input and contact model, fielding, scoring, playable practice innings (bat or bowl) | ✅ Done |
 | P2–P4 (0.3.0) | LBW, wides, called running and run-outs; match engine (toss, innings, targets, quotas, results, scorecards); four squads of sixteen and XI selection; menus; articulated players, stadium, crowd; audio; graphics quality | ✅ Done |
-| Next | Field settings and captaincy, stroke animation detail, replays, broadcast-style overlays, more teams and tournaments | — |
+| 0.4.0–0.6.0 | Motion-captured players, broadcast camera, post-processing, physically modelled bat sound; current T20I squads; game AI (learning attack, AI captain, field-aware batting, commentary, coach) | ✅ Done |
+| 0.7.0 | Paced match flow (next-ball prompt, over and wicket cards with scorecards), on-screen controls, game speed, calm fielding, action replays, classic camera | ✅ Done |
+| Next | Stroke animation detail, more teams and tournaments | — |
 | Later | Performance on low-end devices, touch/gamepad controls, production hardening | — |
 
 ## Documentation
@@ -113,9 +117,11 @@ Built in phases; each phase ships a verified vertical slice.
 
 - Controls follow the Cricket 07 scheme in spirit (direction + stroke-type keys, a timing-based release meter), not key for key.
 - Running, walking, idling and celebrating use motion capture; batting strokes, the bowling action, keeping, fielding and throwing are procedural and retargeted onto the models, so they are believable rather than broadcast-perfect. Four body models are shared across all players.
-- No byes, leg byes or overthrows; no DRS; the computer sets one standard field and does not change it.
+- No byes, leg byes or overthrows; no DRS.
+- Ball physics is unchanged in 0.7.0; the ball is drawn slightly larger than life so it can be followed.
 - Running is all-or-nothing per run: you cannot send the non-striker back once a run is called.
-- Audio is synthesised in the browser (bat, pads, stumps, bounce, catch, boundary, crowd reactions); there is no commentary and no continuous crowd bed.
+- Audio is synthesised in the browser; commentary uses the browser's own voice; there is no continuous crowd bed.
+- Keyboard only: no gamepad or touch controls yet.
 - On software-rendered browsers (no GPU) even Low graphics runs slowly. Frame rate on real GPUs has not been measured yet.
 
 ## Assets and licensing

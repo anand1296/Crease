@@ -19,6 +19,8 @@ export function MainMenu() {
   const toggleQuality = useGame((s) => s.toggleQuality);
   const commentaryOn = useGame((s) => s.commentaryOn);
   const toggleCommentary = useGame((s) => s.toggleCommentary);
+  const replaysOn = useGame((s) => s.replaysOn);
+  const toggleReplays = useGame((s) => s.toggleReplays);
   const [help, setHelp] = useState(false);
   return (
     <div className="menu-shell">
@@ -40,6 +42,9 @@ export function MainMenu() {
           </button>
           <button type="button" onClick={toggleCommentary}>
             Commentary: {commentaryOn ? 'on' : 'off'}
+          </button>
+          <button type="button" onClick={toggleReplays}>
+            Replays: {replaysOn ? 'on' : 'off'}
           </button>
         </nav>
       </div>
