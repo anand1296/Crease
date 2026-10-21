@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.0 — Matches, squads, players and sound (2026-10-21)
+
+- **Matches**: toss, two innings, targets and results ("won by N runs / N wickets (M balls left)" / tie), innings break and result screens with full scorecards (batting, extras, fall of wickets, bowling with maidens and economy) and top performers; rematch.
+- **Menus**: main menu over the live stadium; match setup (teams, overs 2–50, difficulty, pitch, toss / bat / bowl first); squad board to pick the XI and batting order with validation.
+- **Squads**: four fictional teams of sixteen with keepers, ratings, batting hands and bowling styles.
+- **Rules**: LBW (pitched outside leg, impact outside the line, projected path), wides, bowler quotas, no consecutive overs, keeper cannot bowl.
+- **Running**: the human batter calls each run (Space/R); run-outs. Leave moves to X.
+- **Bowling**: pick the bowler at the start of each over (number keys, Enter for the suggestion).
+- **Players**: articulated humanoids with IK hands on the bat, bowling action, batting strokes, keeper and fielder motion, throws and celebrations; team kits, helmets, pads, gloves.
+- **Stadium**: two-tier stands, instanced crowd that reacts, sponsor boards, floodlights, live scoreboard, pitch texture with footmarks, broadcast camera.
+- **Sound**: synthesised bat-on-ball (by timing and edge), pads, stumps, bounce, catch, boundary and crowd; M to mute.
+- **Graphics quality** setting (Low auto-selected on software renderers).
+- Removed the open-ended practice mode.
+
+
 ## 0.2.0 — P1: playable practice innings (2026-10-21)
 
 **Gameplay**

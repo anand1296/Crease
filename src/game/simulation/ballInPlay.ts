@@ -27,13 +27,19 @@ export type BallEvent =
   | { readonly type: 'bounce'; readonly t: number; readonly x: number; readonly z: number; readonly struck: boolean }
   | { readonly type: 'contact'; readonly t: number; readonly result: ContactResult; readonly position: Vec3 }
   | { readonly type: 'beaten'; readonly t: number; readonly result: ContactResult }
-  | { readonly type: 'pad' | 'body'; readonly t: number; readonly position: Vec3; readonly velocity: Vec3 }
+  | { readonly type: 'pad' | 'body'; readonly t: number; readonly position: Vec3; readonly velocity: Vec3; readonly lbw: LbwVerdict }
   | { readonly type: 'stumps'; readonly t: number; readonly afterContact: boolean }
   | { readonly type: 'passedBatter'; readonly t: number; readonly position: Vec3 }
   | { readonly type: 'boundary'; readonly t: number; readonly six: boolean; readonly position: Vec3 }
   | { readonly type: 'stopped'; readonly t: number; readonly position: Vec3 };
 
 export type BallPhase = 'delivery' | 'struck' | 'dead';
+
+/** The umpire's leg-before-wicket decision (Law 36, without umpire's-call margins). */
+export interface LbwVerdict {
+  readonly out: boolean;
+  readonly reason: 'out' | 'pitched outside leg' | 'impact outside line' | 'missing stumps' | 'going over';
+}
 
 export interface BallInPlayOptions {
   readonly delivery: ExecutedDelivery;
@@ -253,7 +259,8 @@ export class BallInPlay {
     // --- Pads and body ---
     const hit = this.hitBox(p0, p1);
     if (hit) {
-      raised.push({ type: hit.part, t: this.time, position: { ...p1 }, velocity: { ...b.velocity } });
+      const lbw = this.judgeLbw();
+      raised.push({ type: hit.part, t: this.time, position: { ...p1 }, velocity: { ...b.velocity }, lbw });
       this.deaden();
       return;
     }
@@ -284,6 +291,39 @@ export class BallInPlay {
       raised.push({ type: 'stopped', t: this.time, position: { ...p } });
       this.phase = 'dead';
     }
+  }
+
+  /**
+   * Law 36, simplified: not out if the ball pitched outside leg stump; not
+   * out if it struck the batter outside the line of the stumps (outside off
+   * only counts when no stroke was offered); otherwise out if, projected on
+   * from the impact, it would have hit the stumps.
+   */
+  private judgeLbw(): LbwVerdict {
+    const off = offSideSign(this.opts.striker.battingHand);
+    const half = STUMP_HALF_WIDTH;
+    const pitch = this.delivery.actual.pitch && this.bounceTime !== undefined ? this.events.find((e) => e.type === 'bounce') : undefined;
+    if (pitch && pitch.type === 'bounce' && pitch.x * off < -half) return { out: false, reason: 'pitched outside leg' };
+    const impactLine = this.ball.position.x * off;
+    const noStroke = !this.stroke || this.stroke.attempt.shot === 'leave';
+    if (impactLine < -half || (impactLine > half && !noStroke)) return { out: false, reason: 'impact outside line' };
+    // Project the ball on as if the batter were not there.
+    const ghost = cloneBall(this.ball);
+    const ev = newStepEvents();
+    let prev = { ...ghost.position };
+    for (let t = 0; t < 1.5; t += 1 / 240) {
+      stepBall(ghost, 1 / 240, this.opts.ground, ev);
+      if (prev.z < STRIKER_STUMPS_Z && ghost.position.z >= STRIKER_STUMPS_Z) {
+        const f = (STRIKER_STUMPS_Z - prev.z) / (ghost.position.z - prev.z);
+        const x = prev.x + (ghost.position.x - prev.x) * f;
+        const y = prev.y + (ghost.position.y - prev.y) * f;
+        if (y > STUMP_TOP) return { out: false, reason: 'going over' };
+        if (Math.abs(x) > half) return { out: false, reason: 'missing stumps' };
+        return { out: true, reason: 'out' };
+      }
+      prev = { ...ghost.position };
+    }
+    return { out: false, reason: 'missing stumps' };
   }
 
   private crossedStumps(p0: Readonly<Vec3>, p1: Readonly<Vec3>, raised: BallEvent[], afterContact: boolean): boolean {

@@ -5,11 +5,13 @@
 ```
 React UI (src/ui, src/app)        HUD, overlays, loading/error states — reads a store snapshot
    │
-State (src/state)                 zustand store: UI flags + snapshot of the session, refreshed on session events
+State (src/state)                 zustand store: screen, match setup, UI flags + snapshot of the match, refreshed on match events
    │
-Renderer (src/game/scenes)        react-three-fiber; reads the session every frame, never writes game state
+Renderer (src/game/scenes)        react-three-fiber; reads the match every frame, never writes game state
    │
-Session (src/game/session)        ball lifecycle and innings bookkeeping; owns the fixed-step clock
+Match (src/game/match)            toss, innings, bowler quotas, scorecards, results; owns the fixed-step clock
+   │
+Session (src/game/session)        one ball's lifecycle: run-up → release → flight → struck → runs → dead
    │
 Simulation (core, physics,        deterministic TypeScript — no React or three.js imports;
   bowling, batting, fielding,     unit-tested headless in Node
@@ -26,7 +28,7 @@ Simulation (core, physics,        deterministic TypeScript — no React or three
 | `game/core/fixedStep.ts` | Fixed-timestep accumulator with frame clamping and interpolation factor |
 | `game/core/vec3.ts` | Allocation-free vector helpers |
 | `game/physics/ball.ts` | Ball flight, drag, swing, spin, Coulomb bounce, seam/turn, rolling, rest |
-| `game/data/` | Ground dimensions, pitch presets, fielding positions, sample teams (fictional) |
+| `game/data/` | Ground dimensions, pitch presets, fielding positions, four fictional squads of sixteen |
 | `game/model/` | Player and difficulty types |
 | `game/bowling/deliveryTypes.ts` | The 12 delivery recipes |
 | `game/bowling/solver.ts` | Shooting-method launch solver; flight sampling |
@@ -39,19 +41,25 @@ Simulation (core, physics,        deterministic TypeScript — no React or three
 | `game/simulation/ballInPlay.ts` | One delivery from release to dead ball: stroke timing, the batter's perception, bat/pads/body/stumps/boundary |
 | `game/fielding/plan.ts` | Interception planning, catches, fumbles, boundaries, safe runs |
 | `game/ai/bowlingAi.ts`, `battingAi.ts` | Computer bowler and batter (perception-limited) |
-| `game/session/deliveryCycle.ts` | Run-up → release → flight → struck → dead, with fielder movement and outcome |
-| `game/session/practice.ts` | Innings bookkeeping: score, strike, overs, bowler changes, fatigue, figures |
-| `game/input/` | Keyboard (bindings as data), input → stroke mapping, wiring to the session |
-| `game/scenes/` | Ground, stumps, players, bat animation, ball, markers, camera rig |
-| `state/game.ts` | zustand store, session lifecycle (restart, switch role) |
-| `ui/Hud.tsx` | Scoreboard, delivery panel, outcome banner with timing feedback, bowling panel and meter, controls, help, pause |
+| `game/session/deliveryCycle.ts` | Run-up → release → flight → struck → dead, with fielder movement, called runs, run-outs, wides and the outcome |
+| `game/match/match.ts` | The match: toss, innings, strike, bowler eligibility and quotas, maidens, fall of wickets, scorecards, result, match-situation AI intent |
+| `game/match/squad.ts` | Default XI, keeper choice, XI validation (errors and warnings) |
+| `game/input/` | Keyboard (bindings as data, one shared instance), input → stroke mapping, wiring to the match |
+| `game/audio/sound.ts` | Web Audio synthesis: bat, pads, stumps, bounce, catch, boundary, crowd ambience; mute persisted |
+| `game/scenes/rig/` | Articulated humanoid (meshes + two-bone arm IK) and the procedural motion library (gait, stances, bowling action, throw, celebrate) |
+| `game/scenes/MatchView.tsx` | Per-frame driver, players posed from the simulation, bat, ball, markers, camera rig; orbiting menu camera when no match is on |
+| `game/scenes/Ground.tsx`, `Stadium.tsx`, `Stumps.tsx` | Field and pitch textures, stands, instanced crowd, instanced sponsor boards, floodlights, live scoreboard |
+| `game/quality.ts` | Graphics quality: detection (software renderer → Low) and persistence |
+| `state/game.ts` | zustand store: screens, match setup, match lifecycle (start, rematch, quit), pause, camera, sound, quality |
+| `ui/Menus.tsx` | Main menu, match setup, squad board, how to play |
+| `ui/Hud.tsx`, `ui/Scorecard.tsx` | Scoreboard strip, delivery panel, outcome banner, run prompt, bowler choice, bowling panel and meter, innings break, result, pause, help |
 | `game/debug.ts` | Read-only `window.__crease` handles for browser tests |
 
 ## Frame loop
 
 There is exactly one animation loop: react-three-fiber's. Each frame:
 
-1. `Driver` hands the frame delta to `PracticeSession.advance`. The session's `FixedStepClock` runs a whole number of 1/240 s steps, each stepping the current `DeliveryCycle` → `BallInPlay` → physics.
+1. `Driver` hands the frame delta to `Match.advance`. The session's `FixedStepClock` runs a whole number of 1/240 s steps, each stepping the current `DeliveryCycle` → `BallInPlay` → physics.
 2. The other views read the session in their own `useFrame` callbacks:
    - the bowler's run-up position;
    - the striker's body and bat, posed from the stroke's press/contact times so the sweet spot meets the ball at the simulated contact moment;
@@ -60,18 +68,18 @@ There is exactly one animation loop: react-three-fiber's. Each frame:
    - the camera.
 
    Meshes are positioned imperatively; nothing re-renders React per frame.
-3. The session notifies subscribers on events (phase changes, ball outcomes, setup changes). The store converts that into a snapshot for the HUD.
+3. The match notifies subscribers on events (phase changes, ball outcomes, innings changes). The store converts that into a snapshot for the HUD, and the driver turns the same events into sounds.
 
-Restart and role switch create a new session. The scene is keyed by the session, so every view resets with it, and the keyboard handler always reads the current session from the store.
+Starting, restarting or quitting a match replaces the `Match` in the store. The players are keyed by innings, so every view resets with it, and the keyboard handler always reads the current match from the store. The canvas stays mounted throughout: the stadium is the backdrop to the menus.
 
 ## Determinism
 
-- A session seed drives everything. Each ball gets its own forked RNG, and inside it the delivery, contact, fielding and AI decisions each get their own fork. Adding a draw in one system therefore does not perturb another.
-- Tests check identical results for identical seeds at every level: delivery, stroke, fielding plan and whole sessions.
+- A match seed drives everything. Each ball gets its own forked RNG, and inside it the delivery, contact, fielding and AI decisions each get their own fork. Adding a draw in one system therefore does not perturb another.
+- Tests check identical results for identical seeds at every level: delivery, stroke, fielding plan and whole matches.
 
 ## Testing
 
-- **Unit and simulation (Vitest)**: `src/**/*.test.ts`, colocated. Covers physics, deliveries, batting acceptance behaviours, fielding, AI v AI sessions (scoring rates, invariants, determinism), input mapping, and human input rules.
+- **Unit and simulation (Vitest)**: `src/**/*.test.ts`, colocated. Covers physics, deliveries, batting acceptance behaviours, fielding, AI v AI sessions (scoring rates, invariants, determinism), whole AI matches (scorecards add up, quotas, no consecutive overs, chases stop at the target), squads and XI validation, input mapping, and human input rules (bowler choice, called running).
 - **Browser (Playwright)**: `e2e/`, against the production build. Plays the game through the keyboard and observes state via `window.__crease`.
 - **CI**: GitHub Actions runs both on every push and pull request.
 

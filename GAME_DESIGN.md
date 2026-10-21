@@ -140,11 +140,11 @@ The [batting report](docs/batting-report.md) shows the resulting distributions. 
 4. **Catches**: the hold probability falls with difficulty: a dive, little time to settle, ball pace (keepers and slips are less troubled by pace), or reaching above 2.2 m. Better catchers hold more.
 5. **Ground stops**: a fumble lets the ball run on.
 6. **Boundary**: four if the ball reaches the rope and bounced first, six if it did not.
-7. **Runs** are completed only if the batters make their ground with 0.3 s to spare before the return throw arrives at the nearer stumps. Timings: call and start 0.35 s, first run 2.95 s, each further run 3.0 s, gather 0.55 s (+0.9 s after a dive), throw release 0.35 s, throw speed 20–32 m/s.
+7. **Runs**: the computer takes the runs that are safe (it completes a run only if the batters make their ground with 0.3 s to spare before the return throw arrives at the nearer stumps). A human batter calls each run with Space/R; the batters set off when called, and if the throw reaches the end they are running to before they do, that batter is run out. Timings: call and start 0.35 s, first run 2.95 s, each further run 3.0 s, gather 0.55 s (+0.9 s after a dive), throw release 0.35 s, throw speed 20–32 m/s.
 
 **The field** is a one-day field: keeper, slip, gully, a ring saving the single at 25–27 m, and fine leg back. Fielders stand where real fields put them, which leaves real gaps: a well-timed cover drive or pull can find the rope, while a mistimed one finds the fielder.
 
-## Computer opposition (P1 level)
+## Computer opposition
 
 **Bowling AI**: mostly stock balls in the off-stump corridor, mixed with the bowler's variations. Yorkers are aimed full and bouncers short. Higher difficulty means tighter lines and lengths and better execution.
 
@@ -157,23 +157,36 @@ The [batting report](docs/batting-report.md) shows the resulting distributions. 
 
 It then commits with a timing error drawn from its timing attribute, and its stroke goes through exactly the same contact physics as the human's.
 
+**Match situation**: in a match the batting AI's intent follows the state of the game: it attacks more as the required rate climbs or the overs run out, and defends more when wickets have fallen quickly or the tail is in. The computer captain bowls its best available bowler within the quota rules.
+
 **Difficulty**: Easy, Normal and Hard scale the AI's execution error (×1.6 / 1 / 0.65), perception error, tactical discipline and reaction delay.
 
 Computer v computer at Normal, measured over 400 balls on three seeds: 3.5–5.1 runs per over and a wicket every 30–56 balls, mostly caught, the rest bowled. That is one-day-international territory. Easy gives more wickets (about one per 20 balls) because the computer batter is worse too; Hard gives more runs (about 4.5 per over). The automated test enforces broad bounds: 2.5–11 runs per over and 12–150 balls per wicket.
 
-## Practice session (P1 game mode)
+## Matches
 
-`src/game/session/practice.ts`: an open-ended innings with either side human or computer.
+`src/game/match/match.ts` runs a limited-overs match between two sides, either of which may be human or computer.
 
-- **Strike** changes on odd runs and at the end of each over.
-- **Overs** are six legal balls; the bowler changes every over among the side's five best bowlers.
-- **Wickets** bring in the next batter. All out starts a new innings.
-- **No-balls** add one extra, do not count as a ball, and cannot produce a wicket.
+- **Setup**: overs (2, 5, 10, 20 or 50), difficulty, pitch (affects bounce, pace and turn), and who bats first, or a toss won by a seeded coin.
+- **Squads**: four fictional teams of sixteen. The playing XI must be eleven different players from the squad; the squad board warns, but allows, a side with no wicketkeeper, fewer than five bowling options or no spinner. The batting order is the XI's order.
+- **Bowler quotas**: at most `ceil(overs / 5)` overs each (one each in a 2–5 over game, four in 20, ten in 50), never two overs in a row, and never the keeper. A human bowling side picks the bowler at the start of each over.
+- **Overs** are six legal balls. Strike changes on odd runs and at the end of each over. A run-out removes whichever batter was running to the broken end.
+- **Extras**: a no-ball or a wide adds one run and is re-bowled. A wide is a ball passing more than 0.85 m outside off stump or 0.45 m outside leg (relative to the batter), or above head height (1.95 m), that the batter does not hit. No wicket of any kind falls off a no-ball (a simplification: under the Laws a run-out still stands).
+- **LBW** (Law 36, simplified): when the ball hits the pad or body first, it is not out if it pitched outside leg stump, or hit the batter outside the line of leg stump, or outside off stump while a stroke was offered. Otherwise the ball is projected on with the same physics as if the batter were not there: out if it would have hit the stumps, not out if it would have gone over or missed. The outcome banner gives the reason.
+- **End of innings**: overs used up, ten wickets down, or (second innings) the target passed. Results read "won by N runs", "won by N wickets (M balls left)", or a tie.
+- **Scorecards**: runs, balls, fours, sixes and strike rate for each batter with how out; extras; fall of wickets; overs, maidens, runs, wickets and economy for each bowler.
+
+## Presentation
+
+- **Players** are articulated humanoids (pelvis, torso, head, two-bone arms and legs) posed every frame from the simulation: the bowler's run-up, gather, delivery stride and follow-through; the batter's stance, backlift and stroke, with the hands solved onto the bat handle by inverse kinematics; the keeper's crouch and rise; fielders' ready position, running gait, gather and throw; and celebrations on a wicket. Kits use the team colours; batters wear helmets and pads, the keeper gloves and pads.
+- **Stadium**: two-tier stands, an instanced crowd that jumps on boundaries and wickets, fictional sponsor boards, floodlights and a live scoreboard.
+- **Camera**: a broadcast view from behind the bowler, which follows the struck ball; <kbd>C</kbd> cycles views.
+- **Sound** is synthesised with the Web Audio API: the bat (a sharper, louder crack for a well-timed hit, a dull click for an edge), pads, stumps, the bounce, catches, boundaries and the crowd's murmur and cheers.
+- **Graphics quality**: Low turns off shadows, the crowd and high-DPI rendering, and is chosen by default on software renderers.
 
 ## Not yet implemented
 
-- LBW (pad impacts are dot balls), wides, byes and leg byes.
-- Human-controlled running and run-outs.
-- Full matches: innings, targets, results, scorecards (P3).
-- Match-situation AI tactics and field changes (P3).
+- Byes, leg byes and overthrows; DRS.
+- Field changes and captaincy tactics beyond bowler selection.
+- Sending a batter back after a run is called.
 - Stroke spin imparted on the ball; inside edges onto the pad.

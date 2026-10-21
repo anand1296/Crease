@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react';
-import { BackSide, CanvasTexture, RepeatWrapping, SRGBColorSpace } from 'three';
+import { CanvasTexture, RepeatWrapping, SRGBColorSpace } from 'three';
+import { Rng } from '../core/rng.ts';
 import { FIELD, STRIKER_STUMPS_Z } from '../data/field.ts';
 
 const LINE_Y = 0.006;
@@ -26,6 +27,47 @@ function useOutfieldTexture(): CanvasTexture {
     tex.repeat.set(6, 6);
     tex.colorSpace = SRGBColorSpace;
     tex.anisotropy = 4;
+    return tex;
+  }, []);
+  useEffect(() => () => texture.dispose(), [texture]);
+  return texture;
+}
+
+/** Worn pitch: tan base, speckle, and scuffed ends where bowlers land and batters stand. */
+function usePitchTexture(): CanvasTexture {
+  const texture = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 1024;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      const g = ctx.createLinearGradient(0, 0, 128, 0);
+      g.addColorStop(0, '#b9a26c');
+      g.addColorStop(0.5, '#cdb784');
+      g.addColorStop(1, '#b9a26c');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, 128, 1024);
+      const rng = new Rng('pitch');
+      for (let i = 0; i < 9000; i++) {
+        const shade = rng.int(150, 205);
+        ctx.fillStyle = `rgba(${shade}, ${shade - 25}, ${shade - 70}, ${rng.range(0.1, 0.35)})`;
+        ctx.fillRect(rng.int(0, 127), rng.int(0, 1023), rng.int(1, 3), rng.int(1, 3));
+      }
+      // Footmarks and the batting areas at each end.
+      for (const end of [70, 954]) {
+        for (let i = 0; i < 260; i++) {
+          ctx.fillStyle = `rgba(110, 82, 45, ${rng.range(0.08, 0.25)})`;
+          const x = 64 + rng.boundedNormal(26);
+          const y = end + rng.boundedNormal(40);
+          ctx.beginPath();
+          ctx.ellipse(x, y, rng.range(1, 4), rng.range(2, 6), 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+    const tex = new CanvasTexture(canvas);
+    tex.colorSpace = SRGBColorSpace;
+    tex.anisotropy = 8;
     return tex;
   }, []);
   useEffect(() => () => texture.dispose(), [texture]);
@@ -59,7 +101,8 @@ function Creases({ dir }: { dir: 1 | -1 }) {
 
 export function Ground() {
   const outfield = useOutfieldTexture();
-  const stadiumRadius = FIELD.boundaryRadius + 18;
+  const pitch = usePitchTexture();
+  const stadiumRadius = FIELD.boundaryRadius + 16;
   return (
     <group>
       {/* Outfield */}
@@ -71,7 +114,7 @@ export function Ground() {
       {/* Pitch strip */}
       <mesh position={[0, 0.003, 0]} rotation-x={-Math.PI / 2} receiveShadow>
         <planeGeometry args={[FIELD.pitchWidth, FIELD.pitchLength + 4]} />
-        <meshStandardMaterial color="#c8b07a" roughness={0.95} />
+        <meshStandardMaterial map={pitch} roughness={0.95} />
       </mesh>
 
       <Creases dir={1} />
@@ -97,15 +140,6 @@ export function Ground() {
         </mesh>
       ))}
 
-      {/* Stands: an inward-facing tiered bowl */}
-      <mesh position={[0, 7, 0]}>
-        <cylinderGeometry args={[stadiumRadius + 14, stadiumRadius, 14, 96, 1, true]} />
-        <meshStandardMaterial color="#5d6470" roughness={0.9} side={BackSide} />
-      </mesh>
-      <mesh position={[0, 14.2, 0]} rotation-x={-Math.PI / 2}>
-        <ringGeometry args={[stadiumRadius + 13, stadiumRadius + 24, 96]} />
-        <meshStandardMaterial color="#3a3f48" roughness={0.9} />
-      </mesh>
     </group>
   );
 }

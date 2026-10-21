@@ -1,6 +1,7 @@
 import { lazy, type ReactNode, Suspense, useState } from 'react';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
 import { Hud } from '../ui/Hud.tsx';
+import { MainMenu, MatchSetup, SquadPicker } from '../ui/Menus.tsx';
 import { useGameControls } from '../game/input/useGameControls.ts';
 import { useGame } from '../state/game.ts';
 
@@ -32,11 +33,12 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
 export function App() {
   const [status, setStatus] = useState<Status>('loading');
   const [webgl] = useState(hasWebGL);
-  const restart = useGame((s) => s.restart);
+  const screen = useGame((s) => s.screen);
+  const quit = useGame((s) => s.quitToMenu);
   useGameControls();
 
   return (
-    <div className="app" data-testid="app" data-status={webgl ? status : 'unsupported'}>
+    <div className="app" data-testid="app" data-status={webgl ? status : 'unsupported'} data-screen={screen}>
       {webgl ? (
         <ErrorBoundary
           fallback={(error, reset) => (
@@ -45,32 +47,38 @@ export function App() {
               <button
                 type="button"
                 onClick={() => {
-                  restart();
+                  quit();
                   reset();
                 }}
               >
-                Restart
+                Back to the main menu
               </button>
             </Panel>
           )}
         >
+          {/* The stadium is always there: behind the menus as well as during play. */}
           <div className="stage" data-testid="game-canvas">
             <Suspense fallback={null}>
               <GameCanvas onReady={() => setStatus('ready')} />
             </Suspense>
           </div>
-          {status === 'ready' ? <Hud /> : null}
+          {status === 'ready' ? (
+            screen === 'menu' ? (
+              <MainMenu />
+            ) : screen === 'setup' ? (
+              <MatchSetup />
+            ) : screen === 'squad' ? (
+              <SquadPicker />
+            ) : (
+              <Hud />
+            )
+          ) : null}
         </ErrorBoundary>
       ) : (
         <Panel title="WebGL is not available">
           <p>Crease needs WebGL to draw the ground. Try a current version of Chrome, Edge, Firefox or Safari.</p>
         </Panel>
       )}
-
-      <header className="brand">
-        <span className="wordmark">CREASE</span>
-        <span className="build-tag">pre-alpha · P1</span>
-      </header>
 
       {webgl && status === 'loading' && (
         <div className="loading" aria-live="polite">
