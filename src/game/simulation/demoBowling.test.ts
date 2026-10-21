@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BOWLER_STUMPS_Z, FIELD, STRIKER_STUMPS_Z } from '../data/field.ts';
-import { DemoBowlingSim, launchVelocity } from './demoBowling.ts';
+import { launchVelocity } from '../bowling/solver.ts';
+import { DemoBowlingSim } from './demoBowling.ts';
 
 describe('launchVelocity', () => {
   it('produces the requested speed horizontally', () => {

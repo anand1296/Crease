@@ -35,8 +35,12 @@ export default defineConfig({
       name: 'desktop',
       use: {
         ...devices['Desktop Chrome'],
-        // Software WebGL so the 3D canvas renders on GPU-less CI runners.
-        launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] },
+        launchOptions: {
+          // Software WebGL so the 3D canvas renders on GPU-less CI runners.
+          args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+          // Optional: use an already-installed Chromium instead of Playwright's download.
+          ...(process.env.PW_CHROMIUM_PATH ? { executablePath: process.env.PW_CHROMIUM_PATH } : {}),
+        },
       },
     },
   ],

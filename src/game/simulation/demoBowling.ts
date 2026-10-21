@@ -2,7 +2,8 @@ import { FixedStepClock } from '../core/fixedStep.ts';
 import { Rng } from '../core/rng.ts';
 import { type Vec3, copyVec3, vec3 } from '../core/vec3.ts';
 import { BOWLER_STUMPS_Z, FIELD, STRIKER_STUMPS_Z } from '../data/field.ts';
-import { type BallState, type BallStepEvents, GRAVITY, createBall, stepBall } from '../physics/ball.ts';
+import { type BallState, type BallStepEvents, createBall, newStepEvents, stepBall } from '../physics/ball.ts';
+import { launchVelocity } from '../bowling/solver.ts';
 
 /**
  * P0 attract-mode simulation: an endless stream of seeded deliveries with no
@@ -22,16 +23,6 @@ const RELEASE_Z = BOWLER_STUMPS_Z + 0.6;
 const GAP_SECONDS = 1.2;
 const MAX_DELIVERY_SECONDS = 4;
 
-/** Initial velocity that pitches at `bounceZ` (ignoring drag) for a given speed. */
-export function launchVelocity(release: Readonly<Vec3>, target: Readonly<Vec3>, speed: number): Vec3 {
-  const dz = target.z - release.z;
-  const dx = target.x - release.x;
-  const horizontal = Math.hypot(dx, dz);
-  const t = horizontal / speed;
-  const vy = (target.y - release.y + 0.5 * GRAVITY * t * t) / t;
-  return vec3((dx / horizontal) * speed, vy, (dz / horizontal) * speed);
-}
-
 export class DemoBowlingSim {
   readonly clock = new FixedStepClock();
   readonly ball: BallState;
@@ -43,7 +34,7 @@ export class DemoBowlingSim {
   private elapsed = 0;
   private gap = 0;
   private count = 0;
-  private readonly events: BallStepEvents = { bounced: false, cameToRest: false };
+  private readonly events: BallStepEvents = newStepEvents();
 
   constructor(seed: string | number) {
     this.rng = new Rng(seed);
