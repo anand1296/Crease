@@ -19,9 +19,13 @@ export const FIELD = {
   boundaryRadius: 65,
   ballRadius: 0.036,
   ballMass: 0.16,
+  /** Bat blade width (Laws maximum 10.8 cm). */
+  batWidth: 0.108,
 } as const;
 
 /** z coordinate of the striker's stumps (the batting end). */
 export const STRIKER_STUMPS_Z = FIELD.pitchLength / 2;
 /** z coordinate of the bowler's-end stumps. */
 export const BOWLER_STUMPS_Z = -FIELD.pitchLength / 2;
+/** z coordinate of the striker's popping crease. */
+export const STRIKER_POPPING_Z = STRIKER_STUMPS_Z - FIELD.poppingCreaseOffset;

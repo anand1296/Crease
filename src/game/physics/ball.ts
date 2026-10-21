@@ -43,9 +43,9 @@ export const DEFAULT_PITCH: SurfaceProperties = {
 };
 
 export const DEFAULT_OUTFIELD: SurfaceProperties = {
-  restitution: 0.42,
-  bounceFriction: 0.22,
-  rollingResistance: 1.35,
+  restitution: 0.35,
+  bounceFriction: 0.12,
+  rollingResistance: 2.6,
   grip: 0,
   seam: 0,
 };

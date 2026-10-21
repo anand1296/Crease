@@ -16,7 +16,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "check": "npm run typecheck && npm run lint && npm test"
+    "check": "npm run typecheck && npm run lint && npm test",
+    "report:batting": "node scripts/batting-report.ts"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.0",

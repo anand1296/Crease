@@ -160,14 +160,17 @@ export function executeDelivery(plan: DeliveryPlan, ctx: ExecutionContext): Exec
     const pitchZ = STRIKER_STUMPS_Z - Math.max(0.2, length + lengthErr);
     const expectedTurn = SPIN.turnPerRps * intendedMove.spinSide * ctx.pitch.surface.grip;
     let pitchX = lineX - expectedTurn * ((STRIKER_STUMPS_Z - pitchZ) / speed);
-    for (let i = 0; i < 4; i++) {
+    // Moving the pitching spot sideways moves the finish further, because the
+    // angle from the release point carries on after the bounce: the ratio is
+    // (release→stumps) / (release→pitch), about 2 for a bouncer.
+    const gain = (STRIKER_STUMPS_Z - release.z) / Math.max(1, pitchZ - release.z);
+    for (let i = 0; i < 6; i++) {
       const v = solveLaunch(release, { x: pitchX, z: pitchZ }, speed, intendedMove, ground);
       const atStumps = sampleFlight(release, v, intendedMove, ground).atStumps;
       if (!atStumps) break;
       const miss = lineX - atStumps.x;
       if (Math.abs(miss) < 0.005) break;
-      // Moving the pitching spot moves the finish by roughly the same amount.
-      pitchX += miss;
+      pitchX += miss / gain;
     }
     velocity = solveLaunch(release, { x: pitchX + lineErr, z: pitchZ }, speed, intendedMove, ground);
   }
