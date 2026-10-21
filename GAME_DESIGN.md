@@ -89,7 +89,7 @@ Sixteen strokes, each a distinct set of physical intentions:
 - timing tolerance and swing time;
 - which way a late stroke turns the face.
 
-All of them go through the same contact physics. The defensive **push** is the block played with more bat and placed into a gap. Its tolerance is lower, so it carries more risk than a dead bat.
+All of them go through the same contact physics. The defensive **push** is the block played with more bat and placed into a gap. Its tolerance is lower, so it carries more risk than a dead bat. Defensive strokes are played late with soft hands: the bat is presented about 60% of the way through the stroke and waits for the ball (a fractionally late block is still a block, not a ball on the pad), and after the bounce they can adjust sooner (from 0.05 s) and more fully (up to 95%, scaled by the defence attribute) than attacking strokes.
 
 ### Footwork and the contact point
 
@@ -148,6 +148,12 @@ The [batting report](docs/batting-report.md) shows the resulting distributions. 
 
 **Bowling AI**: mostly stock balls in the off-stump corridor, mixed with the bowler's variations. Yorkers are aimed full and bouncers short. Higher difficulty means tighter lines and lengths and better execution.
 
+**Learning bowling AI (against a human batter)**: `src/game/ai/adaptiveBowling.ts`. Each bowler type has a set of plans (pace: good length at the stumps, the corridor, full outswingers, inswingers, back of a length, bouncer, yorker, wide yorker, slower ball full, slower bouncer; spin: stock ball at the stumps, turning away outside off, flight, flatter and quicker, the variation). Choosing a plan is a multi-armed bandit solved by Thompson sampling. Reward per ball = −(runs + extras) + 0.6 for a dot + 0.5 for beating the bat + 18 for a wicket, clamped to [−7, 18]. Each plan's mean reward has a Gaussian belief (per-ball σ 3.2) with a phase-dependent prior worth 4 balls (yorkers and slower balls best at the death, swing in the powerplay). The team-wide record for a plan counts at half weight towards each batter's belief. Sampling width is 1.6 − 0.9 × difficulty tactics, so Easy explores and Hard exploits.
+
+**AI captain**: `src/game/ai/captain.ts`. 18 candidate positions (slip, gully, the ring, short fine leg; third man, deep point, deep cover, long-off, long-on, deep midwicket, deep square, fine leg on the rope at 55–63 m). Each has a base value by bowler type (pace/spin) and phase; each of the batter's scoring shots adds value near its direction (boundaries to the deep, singles to the ring), recent shots more. The captain takes the best deep positions the restrictions allow (2 / 4 / 5), at least 30° apart, then fills the ring (20° apart). Powerplay = the first 30% of a T20's overs (20% of longer games), death = the last 20%.
+
+**Field-aware T20 batting**: the computer batter computes the widest gap between boundary fielders on each side, and between ring fielders, from the actual field, and aims lofted shots and pushes into them.
+
 **Batting AI**: no omniscience. It judges the ball only after 0.14 s of flight, with errors in line and length that grow with lower technique and higher difficulty perception error. It cannot see seam movement before the bounce, and a slower ball or wrong'un can fool it. It picks a stroke for what it *thinks* is coming:
 
 - drive the full ball;
@@ -157,7 +163,11 @@ The [batting report](docs/batting-report.md) shows the resulting distributions. 
 
 It then commits with a timing error drawn from its timing attribute, and its stroke goes through exactly the same contact physics as the human's.
 
-**Match situation**: in a match the batting AI's intent follows the state of the game: it attacks more as the required rate climbs or the overs run out, and defends more when wickets have fallen quickly or the tail is in. In games of 20 overs or fewer it plays T20 cricket: positive from the first ball, and above ordinary aggression it starts clearing the ring off good-length balls (lofted over midwicket from the stumps, over cover from outside off) and hooking. Computer v computer T20s with the real squads average about 170 in the first innings at 8–9 an over, with five or six wickets down; a test holds that to 130–230 and 7–11.5 an over. Fifty-over games keep the one-day calibration. The computer captain bowls its best available bowler within the quota rules.
+**Match situation**: in a match the batting AI's intent follows the state of the game: it attacks more as the required rate climbs or the overs run out, and defends more when wickets have fallen quickly or the tail is in. In games of 20 overs or fewer it plays T20 cricket: positive from the first ball, and above ordinary aggression it starts clearing the ring off good-length balls (lofted over midwicket from the stumps, over cover from outside off) and hooking. Computer v computer T20s with the real squads, against the AI captain's fields, average about 185 in the first innings at about 9.3 an over, with around five wickets down; a test holds that to 130–230 and 7–11.5 an over. Fifty-over games use a one-day curve (build, then accelerate) and come out at about 4.3 an over and a wicket every 31 balls — traditional rather than modern ODI scoring (≈5.8); a test holds them to 3.5–7 an over and 20–60 balls a wicket. The computer captain bowls its best available bowler within the quota rules.
+
+**Commentary** (`src/game/ai/commentary.ts`): a template grammar over the ball's facts — bowler and batter, delivery and pace, stroke and region (from the batter-relative exit angle and elevation), fielder, dismissal, the out batter's score, the bowler's haul, milestones, the over's runs, the chase equation, the bowlers' plan and field changes — with phrasing chosen by a seeded RNG and never repeated twice running. Spoken by the Web Speech API (`src/game/audio/voice.ts`).
+
+**Coach** (`src/game/ai/coach.ts`): rules over the match's ball log. Timing bias (mean timing error beyond ±18 ms), the most troublesome delivery ((4 × dismissals + plays-and-misses)/balls − runs per ball / 3 > 0.2) with control-specific advice, front-foot drives to short balls, leaving balls that hit the stumps, the most productive stroke; for bowling, best and most expensive delivery and wides.
 
 **Difficulty**: Easy, Normal and Hard scale the AI's execution error (×1.6 / 1 / 0.65), perception error, tactical discipline and reaction delay.
 

@@ -29,7 +29,7 @@ Different intentions on the same ball, perfectly timed.
 | Cover drive | 97% | 0% | 3% | 0% | 32.4 | 55.1° ± 1.2 | -4.3° | 97% | 0% | 1% | 0% | 0% |
 | Square cut | 52% | 2% | 36% | 12% | 24.1 | 91.9° ± 2.1 | -5.1° | 55% | 0% | 2% | 28% | 7% |
 | Lofted drive | 98% | 0% | 2% | 0% | 39.6 | -0.1° ± 1.2 | 32.7° | 1% | 98% | 98% | 0% | 0% |
-| Defensive block | 95% | 0% | 5% | 0% | 7.0 | 0.0° ± 2.5 | -26.1° | 0% | 0% | 1% | 0% | 0% |
+| Defensive block | 95% | 0% | 5% | 0% | 7.0 | -0.0° ± 2.4 | -26.1° | 0% | 0% | 1% | 0% | 0% |
 | Pull | 0% | 71% | 28% | 2% | 22.4 | -76.9° ± 6.4 | -10.2° | 14% | 0% | 3% | 4% | 1% |
 
 ## The right shot for the length
@@ -38,7 +38,7 @@ Each delivery played with a suitable and an unsuitable stroke, perfectly timed.
 
 | Scenario | Middled | Mistimed | Edge | Miss | Exit m/s | Direction (clean) | Elevation | 4 | 6 | Aerial chance | Bowled | Pad/body |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Good length — block | 76% | 0% | 24% | 1% | 8.9 | -0.4° ± 2.5 | -26.5° | 0% | 0% | 4% | 1% | 0% |
+| Good length — block | 90% | 0% | 11% | 0% | 7.5 | -0.2° ± 1.4 | -26.4° | 0% | 0% | 2% | 0% | 0% |
 | Good length — cover drive | 65% | 0% | 31% | 5% | 26.4 | 55.0° ± 1.4 | -4.9° | 63% | 0% | 3% | 5% | 3% |
 | Short & wide — square cut | 99% | 0% | 1% | 0% | 30.8 | 92.2° ± 1.2 | -2.6° | 99% | 0% | 0% | 1% | 0% |
 | Short & wide — cover drive | 54% | 10% | 31% | 7% | 24.2 | 54.7° ± 3.5 | 6.0° | 60% | 0% | 57% | 1% | 0% |

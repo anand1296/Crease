@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import { sound } from '../game/audio/sound.ts';
 import { type Quality, detectQuality, saveQuality } from '../game/quality.ts';
+import { hush, readCommentaryEnabled, saveCommentaryEnabled } from '../game/audio/voice.ts';
+import type { CommentaryLine } from '../game/ai/commentary.ts';
+import type { CoachNote } from '../game/ai/coach.ts';
+import { fieldingPhase } from '../game/ai/captain.ts';
 import { Rng } from '../game/core/rng.ts';
 import type { PitchId } from '../game/data/pitches.ts';
 import { TEAMS, type Team } from '../game/data/teams.ts';
@@ -56,6 +60,13 @@ export interface MatchSnapshot {
   readonly bowler: { readonly name: string; readonly style: string; readonly card: BowlingCard | undefined; readonly fatigue: number };
   readonly lastOutcome: BallOutcome | undefined;
   readonly ballCount: number;
+  /** Latest commentary line and how many there have been (to notice a new one). */
+  readonly commentary: CommentaryLine | undefined;
+  readonly commentaryCount: number;
+  /** Powerplay / middle / death, from the fielding restrictions. */
+  readonly fieldPhase: 'powerplay' | 'middle' | 'death';
+  /** The coach's notes for the human side (at the innings break and the result). */
+  readonly coach: { readonly batting: readonly CoachNote[]; readonly bowling: readonly CoachNote[] } | undefined;
   readonly recent: readonly string[];
   readonly setup: BowlingSetup;
   readonly deliveries: readonly DeliveryTypeId[];
@@ -78,6 +89,7 @@ export interface GameState {
   readonly meter: number;
   readonly muted: boolean;
   readonly quality: Quality;
+  readonly commentaryOn: boolean;
   goTo: (screen: Screen) => void;
   updateSetup: (patch: Partial<MatchSetup>) => void;
   startMatch: () => void;
@@ -89,6 +101,7 @@ export interface GameState {
   setMeter: (m: number) => void;
   toggleMute: () => void;
   toggleQuality: () => void;
+  toggleCommentary: () => void;
 }
 
 const STYLE_NAMES: Record<string, string> = {
@@ -146,6 +159,10 @@ function snapshot(m: Match, toss: string): MatchSnapshot {
     },
     lastOutcome: m.lastOutcome,
     ballCount: m.history.length,
+    commentary: m.commentary[m.commentary.length - 1],
+    commentaryCount: m.commentary.length,
+    fieldPhase: fieldingPhase(m.config.overs, inn.balls),
+    coach: m.phase === 'inningsBreak' || m.phase === 'complete' ? m.coachNotes() : undefined,
     recent: m.recent,
     setup: m.setup,
     deliveries: m.availableDeliveries,
@@ -231,6 +248,7 @@ export const useGame = create<GameState>()((set, get) => {
     meter: 0.5,
     muted: sound.muted,
     quality: detectQuality(),
+    commentaryOn: readCommentaryEnabled(),
     goTo: (screen) => {
       sound.unlock();
       keyboard.enabled = screen === 'match';
@@ -260,10 +278,12 @@ export const useGame = create<GameState>()((set, get) => {
       unsubscribe?.();
       unsubscribe = undefined;
       keyboard.enabled = false;
+      hush();
       set({ screen: 'menu', match: undefined, snap: undefined, paused: false });
     },
     setPaused: (paused) => {
       get().match?.setPaused(paused);
+      if (paused) hush();
       set({ paused });
     },
     toggleHelp: () => set({ showHelp: !get().showHelp }),
@@ -285,6 +305,12 @@ export const useGame = create<GameState>()((set, get) => {
       const quality: Quality = get().quality === 'high' ? 'low' : 'high';
       saveQuality(quality);
       set({ quality });
+    },
+    toggleCommentary: () => {
+      const commentaryOn = !get().commentaryOn;
+      saveCommentaryEnabled(commentaryOn);
+      if (!commentaryOn) hush();
+      set({ commentaryOn });
     },
   };
 });

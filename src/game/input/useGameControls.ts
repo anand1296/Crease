@@ -33,6 +33,9 @@ export function useGameControls(): void {
         case 'mute':
           g.toggleMute();
           return;
+        case 'commentary':
+          g.toggleCommentary();
+          return;
         default:
           break;
       }

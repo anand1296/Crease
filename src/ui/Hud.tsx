@@ -4,6 +4,9 @@ import type { BallOutcome } from '../game/session/deliveryCycle.ts';
 import type { InningsState } from '../game/match/match.ts';
 import { Scorecard } from './Scorecard.tsx';
 import { HowToPlay } from './Menus.tsx';
+import { useEffect, useRef, useState } from 'react';
+import type { CoachNote } from '../game/ai/coach.ts';
+import { speak } from '../game/audio/voice.ts';
 
 /**
  * In-match HUD. Kept to the screen edges so the batter, bowler and ball stay
@@ -19,6 +22,7 @@ export function Hud() {
       <RunPrompt />
       <BowlingPanel />
       <BowlerChoice />
+      <Commentary />
       <ControlsBar />
       <InningsBreak />
       <Result />
@@ -80,6 +84,7 @@ function ScoreStrip() {
       </div>
       <div className="role" data-testid="role">
         {snap.userBatting ? 'You are batting' : 'You are bowling'}
+        {snap.fieldPhase === 'powerplay' ? <span className="phase-tag" data-testid="powerplay">Powerplay</span> : null}
       </div>
     </section>
   );
@@ -264,6 +269,7 @@ function InningsBreak() {
           {chaser.name} need <strong>{first.runs + 1}</strong> to win from {snap.maxOvers} overs.
         </p>
         <Scorecard innings={first} batting={batting} bowling={bowling} />
+        <Coach notes={snap.coach} />
         <button type="button" onClick={() => match.continueAfterBreak()} autoFocus data-testid="continue">
           Start the chase (Enter)
         </button>
@@ -289,6 +295,7 @@ function Result() {
             Top score: {best.bat}. Best bowling: {best.bowl}.
           </p>
         ) : null}
+        <Coach notes={snap.coach} />
         <div className="cards">
           {match.innings.map((inn, i) => (
             <Scorecard key={i} innings={inn} batting={match.side(inn.batting).team} bowling={match.side(inn.bowling).team} />
@@ -330,6 +337,8 @@ function PauseOverlay() {
   const quit = useGame((s) => s.quitToMenu);
   const muted = useGame((s) => s.muted);
   const toggleMute = useGame((s) => s.toggleMute);
+  const commentaryOn = useGame((s) => s.commentaryOn);
+  const toggleCommentary = useGame((s) => s.toggleCommentary);
   if (!paused) return null;
   return (
     <div className="overlay" role="dialog" aria-label="Paused" data-testid="pause">
@@ -342,6 +351,9 @@ function PauseOverlay() {
           <button type="button" className="secondary" onClick={toggleMute}>
             Sound: {muted ? 'off' : 'on'} (M)
           </button>
+          <button type="button" className="secondary" onClick={toggleCommentary}>
+            Commentary: {commentaryOn ? 'on' : 'off'} (V)
+          </button>
           <button type="button" className="secondary" onClick={rematch}>
             Restart match
           </button>
@@ -351,5 +363,54 @@ function PauseOverlay() {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Ball-by-ball commentary: the latest line along the bottom of the screen,
+ * and spoken by the commentator's voice when commentary is on (and sound is
+ * not muted).
+ */
+function Commentary() {
+  const line = useGame((s) => s.snap?.commentary);
+  const count = useGame((s) => s.snap?.commentaryCount ?? 0);
+  const on = useGame((s) => s.commentaryOn);
+  const muted = useGame((s) => s.muted);
+  const heard = useRef(count);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    if (count === heard.current || !line) return;
+    heard.current = count;
+    setVisible(true);
+    if (on && !muted) speak(line);
+    const t = window.setTimeout(() => setVisible(false), 6500);
+    return () => window.clearTimeout(t);
+  }, [count, line, on, muted]);
+  if (!on || !line || !visible) return null;
+  return (
+    <div className={`commentary ${line.excitement === 2 ? 'big' : ''}`} role="log" aria-live="polite" data-testid="commentary">
+      <span className="mic" aria-hidden="true" />
+      {line.text}
+    </div>
+  );
+}
+
+/** The coach's notes for the human side. */
+function Coach({ notes }: { notes: { batting: readonly CoachNote[]; bowling: readonly CoachNote[] } | undefined }) {
+  if (!notes) return null;
+  const all = [...notes.batting.map((n) => ({ ...n, kind: 'Batting' })), ...notes.bowling.map((n) => ({ ...n, kind: 'Bowling' }))];
+  if (all.length === 0) return null;
+  return (
+    <section className="coach" aria-label="Coach's notes" data-testid="coach">
+      <h3>Coach&rsquo;s notes</h3>
+      <ul>
+        {all.map((n) => (
+          <li key={`${n.kind}-${n.title}`} className={n.tone}>
+            <strong>{n.title}</strong>
+            <span>{n.detail}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

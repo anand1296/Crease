@@ -2,7 +2,7 @@
 
 A browser-based 3D cricket game, built with React, TypeScript and Three.js. Inspired by the depth and replayability of classic cricket games: batting that rewards timing and shot selection, bowling with real variation, and an opponent that plays the ball rather than the dice.
 
-> **Status: alpha (0.5.0).** Play a full limited-overs match against the computer: pick India, Pakistan, Australia or England with their current T20I squads, choose your playing XI and batting order, set the overs (2–50), difficulty and pitch, toss, bat and bowl both innings, and finish with a result and full scorecards. Real ball physics, sixteen strokes, twelve delivery types, LBW, wides, run-outs and bowler quotas; motion-captured, skinned player models in team kits; umpires who signal; a broadcast-style camera; post-processed graphics; and synthesised sound, including a physically modelled bat-on-ball crack. See [Roadmap](#roadmap).
+> **Status: alpha (0.6.0).** Play a full limited-overs match against the computer: pick India, Pakistan, Australia or England with their current T20I squads, choose your playing XI and batting order, set the overs (2–50), difficulty and pitch, toss, bat and bowl both innings, and finish with a result and full scorecards. Real ball physics, sixteen strokes, twelve delivery types, LBW, wides, run-outs and bowler quotas; motion-captured, skinned player models in team kits; umpires who signal; a broadcast-style camera; post-processed graphics; and synthesised sound, including a physically modelled bat-on-ball crack. Game AI throughout: a bowling attack that learns your weaknesses, an AI captain that sets fields to where you score (within powerplay restrictions), T20-minded computer batters that read the field, spoken ball-by-ball commentary, and a coach that reviews your innings. See [Roadmap](#roadmap).
 
 ## Running locally
 
@@ -58,11 +58,21 @@ Hold an arrow for direction, then press a stroke key **as the ball arrives**. Th
 
 ### General
 
-<kbd>P</kbd> / <kbd>Esc</kbd> pause (resume, sound, restart, quit to menu) · <kbd>Enter</kbd> continue after the innings break · <kbd>C</kbd> camera · <kbd>M</kbd> sound on/off · <kbd>H</kbd> help. The game pauses itself when the window loses focus.
+<kbd>P</kbd> / <kbd>Esc</kbd> pause (resume, sound, commentary, restart, quit to menu) · <kbd>Enter</kbd> continue after the innings break · <kbd>C</kbd> camera · <kbd>M</kbd> sound on/off · <kbd>V</kbd> commentary on/off · <kbd>H</kbd> help. The game pauses itself when the window loses focus.
 
 **Graphics** (main menu): *High* adds soft shadows, image-based lighting, the crowd, ambient occlusion, bloom, filmic tone mapping and up to 1.5× resolution; *Low* drops them for machines without a capable GPU. Low is chosen automatically when the browser reports a software renderer; your choice is remembered.
 
 **Camera**: the default broadcast camera sits wide behind the bowler between balls, pushes in slowly through the run-up, holds tight on the striker at release, then cuts to a high side-on camera that follows the ball and the chase (or to the stumps when they are hit). <kbd>C</kbd> switches to the view from behind the striker or a high wide view.
+
+## The AI opposition
+
+- **It learns you.** When you bat, the computer's attack treats each delivery plan (yorker at the stumps, wide yorker, bouncer, slower ball, the corridor, the googly …) as an experiment and learns, ball by ball, which ones keep you quiet or get you out — and bowls more of them (Thompson sampling, pooled across your batting line-up). It starts from cricket sense (yorkers at the death, swing and slips with the new ball) and adapts within the match. Difficulty sets how ruthlessly it exploits what it has learned.
+- **AI captain.** Fields are set every ball for the bowler, the phase of the innings and the batter's scoring areas, within the fielding restrictions: two men outside the circle in the powerplay, four in the middle overs, five at the death. Score heavily through midwicket and a man goes back there.
+- **T20 batting.** In games of 20 overs or fewer the computer batters bat like a T20 side, and read the field — lofted shots go into the gaps between the boundary riders, pushes into the gaps in the ring.
+- **Commentary.** Ball-by-ball commentary written from what happened (the delivery and its pace, the stroke and where it went, the fielder, milestones, the chase, what the bowlers' plan was), shown on screen and spoken by the browser's built-in voice. <kbd>V</kbd> toggles it.
+- **Coach.** At the innings break and the end of the match the coach reviews your play: timing bias in milliseconds, the delivery that troubles you most and how to play it, shot selection, your best scoring stroke — and for your bowling, which balls worked and which were punished.
+
+See [docs/TECHNICAL_ARCHITECTURE.md](docs/TECHNICAL_ARCHITECTURE.md) for how all of this is built.
 
 ## Deployment
 
@@ -97,6 +107,7 @@ Built in phases; each phase ships a verified vertical slice.
 - [ARCHITECTURE.md](ARCHITECTURE.md): modules and how they fit together
 - [CHANGELOG.md](CHANGELOG.md): milestones
 - [docs/batting-report.md](docs/batting-report.md): batting outcome distributions
+- [docs/TECHNICAL_ARCHITECTURE.md](docs/TECHNICAL_ARCHITECTURE.md): the complete technical architecture — how the project was built, decisions, AI, testing, deployment and future scope
 
 ## Known limitations
 

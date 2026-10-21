@@ -36,3 +36,30 @@ describe('T20 (computer v computer, real squads)', () => {
     expect(rpo).toBeLessThan(11.5);
   }, 120_000);
 });
+
+describe('One-day (computer v computer, real squads)', () => {
+  it('scores at one-day rates: 3.5–7 an over, 20–60 balls a wicket', () => {
+    let runs = 0;
+    let balls = 0;
+    let wickets = 0;
+    for (const [a, b, seed] of [
+      [0, 1, 'x'],
+      [2, 3, 'y'],
+    ] as const) {
+      const m = new Match({ home: side(TEAMS[a]), away: side(TEAMS[b]), overs: 50, battingFirst: 'home', pitch: 'balanced', difficulty: 'normal', seed });
+      while (m.phase !== 'complete' && m.time < 200000) m.step(1 / 240);
+      expect(m.phase).toBe('complete');
+      for (const inn of m.innings) {
+        runs += inn.runs;
+        balls += inn.balls;
+        wickets += inn.wickets;
+      }
+    }
+    const rpo = (runs / balls) * 6;
+    const perWicket = balls / Math.max(1, wickets);
+    expect(rpo).toBeGreaterThan(3.5);
+    expect(rpo).toBeLessThan(7);
+    expect(perWicket).toBeGreaterThan(20);
+    expect(perWicket).toBeLessThan(60);
+  }, 120_000);
+});

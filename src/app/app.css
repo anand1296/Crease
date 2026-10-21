@@ -909,3 +909,112 @@ button.icon {
     display: none;
   }
 }
+
+/* --- Commentary ---------------------------------------------------------------------- */
+
+.commentary {
+  position: absolute;
+  bottom: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  max-width: min(760px, calc(100% - 32px));
+  padding: 9px 16px 10px;
+  border-left: 3px solid var(--brass);
+  border-radius: 2px;
+  background: var(--glass);
+  color: var(--chalk);
+  font-size: 15px;
+  line-height: 1.4;
+  pointer-events: none;
+  animation: commentary-in 220ms ease-out;
+}
+
+.commentary.big {
+  border-left-color: #e8794a;
+  font-weight: 600;
+}
+
+.commentary .mic {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e8794a;
+  transform: translateY(-1px);
+}
+
+@keyframes commentary-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .commentary {
+    animation: none;
+  }
+}
+
+.phase-tag {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: var(--brass);
+  color: var(--board-deep);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+/* --- Coach --------------------------------------------------------------------------- */
+
+.coach {
+  margin: 14px 0 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--board-line);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.18);
+  text-align: left;
+}
+
+.coach h3 {
+  margin: 0 0 8px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--brass);
+}
+
+.coach ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.coach li {
+  display: grid;
+  gap: 2px;
+  padding-left: 10px;
+  border-left: 3px solid #e8794a;
+}
+
+.coach li.strength {
+  border-left-color: #7fbf6a;
+}
+
+.coach li strong {
+  font-weight: 600;
+}
+
+.coach li span {
+  color: var(--chalk-dim);
+  font-size: 14px;
+  line-height: 1.45;
+}

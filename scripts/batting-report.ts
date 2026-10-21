@@ -6,7 +6,8 @@
  *   npm run report:batting
  */
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { TEAMS, findPlayer } from '../src/game/data/teams.ts';
+import { findPlayer } from '../src/game/data/teams.ts';
+import { SAMPLE_TEAMS as TEAMS } from '../src/game/data/sampleTeams.ts';
 import type { DeliveryPlan } from '../src/game/bowling/execute.ts';
 import { type StrokeSummary, mean, rate, simulateMany } from '../src/game/batting/harness.ts';
 import { type ShotAttempt, SHOTS, attempt } from '../src/game/batting/shots.ts';

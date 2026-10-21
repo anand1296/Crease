@@ -1,5 +1,7 @@
 # Architecture
 
+A summary. The full document — decisions, every subsystem, AI, testing, deployment and future scope — is [docs/TECHNICAL_ARCHITECTURE.md](docs/TECHNICAL_ARCHITECTURE.md).
+
 ## Layers
 
 ```
@@ -40,7 +42,11 @@ Simulation (core, physics,        deterministic TypeScript — no React or three
 | `game/batting/harness.ts` | Headless stroke simulation for tests and the report |
 | `game/simulation/ballInPlay.ts` | One delivery from release to dead ball: stroke timing, the batter's perception, bat/pads/body/stumps/boundary |
 | `game/fielding/plan.ts` | Interception planning, catches, fumbles, boundaries, safe runs |
-| `game/ai/bowlingAi.ts`, `battingAi.ts` | Computer bowler and batter (perception-limited) |
+| `game/ai/bowlingAi.ts`, `battingAi.ts` | Computer bowler (heuristic) and batter (perception-limited; T20 hitting; reads gaps in the field) |
+| `game/ai/adaptiveBowling.ts` | Learning attack: Thompson-sampling bandit over delivery plans against the human batter |
+| `game/ai/captain.ts` | AI captain: field placement by bowler, phase and the batter's wagon wheel, within fielding restrictions |
+| `game/ai/commentary.ts`, `game/audio/voice.ts` | Ball-by-ball commentary generator and its spoken voice (Web Speech API) |
+| `game/ai/coach.ts` | Post-innings analysis of the human's batting and bowling |
 | `game/session/deliveryCycle.ts` | Run-up → release → flight → struck → dead, with fielder movement, called runs, run-outs, wides and the outcome |
 | `game/match/match.ts` | The match: toss, innings, strike, bowler eligibility and quotas, maidens, fall of wickets, scorecards, result, match-situation AI intent |
 | `game/match/squad.ts` | Default XI, keeper choice, XI validation (errors and warnings) |

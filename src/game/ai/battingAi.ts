@@ -36,6 +36,37 @@ export interface BattingAiOptions {
   readonly intent: number;
   readonly rng: Rng;
   readonly ground: GroundModel;
+  /** Where the deep field has gaps, batter-relative degrees (see `deepGaps`). */
+  readonly gaps?: Gaps | undefined;
+}
+
+export interface Gaps {
+  readonly off: number;
+  readonly leg: number;
+  /** Gaps in the ring (for pushes and drives along the ground). */
+  readonly ringOff?: number;
+  readonly ringLeg?: number;
+}
+
+/**
+ * Reading the field: the middle of the widest gap between the boundary
+ * fielders on each side (batter-relative degrees, + off side), where a
+ * lofted shot is safest.
+ */
+export function deepGaps(deepAngles: readonly number[], ringAngles: readonly number[] = []): Gaps {
+  const best = (from: number, to: number, angles: readonly number[] = deepAngles) => {
+    let angle = (from + to) / 2;
+    let clearance = -1;
+    for (let a = from; a <= to; a += 2) {
+      const c = angles.reduce((m, d) => Math.min(m, Math.abs(d - a)), 90);
+      if (c > clearance) {
+        clearance = c;
+        angle = a;
+      }
+    }
+    return angle;
+  };
+  return { off: best(8, 110), leg: best(-110, -8), ...(ringAngles.length ? { ringOff: best(15, 110, ringAngles), ringLeg: best(-110, -15, ringAngles) } : {}) };
 }
 
 export function decideStroke(delivery: ExecutedDelivery, o: BattingAiOptions): BattingDecision | null {
@@ -64,7 +95,7 @@ export function decideStroke(delivery: ExecutedDelivery, o: BattingAiOptions): B
     rng.boundedNormal(0.06 * misread) +
     (disguise && !picked && delivery.type.id !== 'slower' ? -0.15 : 0);
 
-  const shot = chooseShot(line, length, atStumps.y, o.intent, rng);
+  const shot = chooseShot(line, length, atStumps.y, o.intent, rng, o.gaps);
 
   // --- Timing ---
   const planeZ = contactPlaneZ(shot, bat.footwork, actualPitch?.z);
@@ -77,7 +108,10 @@ export function decideStroke(delivery: ExecutedDelivery, o: BattingAiOptions): B
 }
 
 /** Shot selection from the perceived line (batter-relative), length and height at the stumps. */
-export function chooseShot(line: number, length: number, heightAtStumps: number, intent: number, rng: Rng): ShotAttempt {
+export function chooseShot(line: number, length: number, heightAtStumps: number, intent: number, rng: Rng, gaps?: Gaps): ShotAttempt {
+  // Lofted shots go where the boundary fielders are not.
+  const legGap = gaps?.leg ?? -40;
+  const offGap = gaps?.off ?? 35;
   const aggressive = rng.chance(0.35 + 0.35 * Math.min(1, intent));
   // Above 1: T20 hitting — clearing the ring off good-length balls too.
   const slog = Math.max(0, intent - 1);
@@ -97,6 +131,7 @@ export function chooseShot(line: number, length: number, heightAtStumps: number,
     if (wide) return aggressive ? attempt('coverDrive') : attempt('leave');
     if (legSide) return attempt(aggressive ? 'flick' : 'onDrive');
     if (aggressive && rng.chance(0.25 + 0.25 * Math.min(1, intent) + 0.5 * slog)) {
+      if (gaps) return attempt('loftedAttack', 'front', line < 0.05 ? legGap : offGap);
       return line < 0.05 && rng.chance(0.4) ? attempt('loftedAttack', 'front', -40) : attempt('loftedDrive');
     }
     return attempt(line > 0.15 ? 'coverDrive' : line > 0.03 ? 'offDrive' : 'straightDrive');
@@ -106,12 +141,12 @@ export function chooseShot(line: number, length: number, heightAtStumps: number,
     const fw = length > 6 ? 'back' : 'front';
     if (slog > 0 && rng.chance(slog * 1.1)) {
       // Into the arc: over midwicket off the stumps, over cover from outside off.
-      return line > 0.15 ? attempt('loftedAttack', 'front', 35) : attempt('loftedAttack', fw, -45);
+      return line > 0.15 ? attempt('loftedAttack', 'front', offGap) : attempt('loftedAttack', fw, gaps ? legGap : -45);
     }
     if (wide) return attempt('leave', 'front');
     if (legSide) return aggressive ? attempt('flick', fw) : push(-40, fw);
     if (aggressive && line > 0.2 && length < 5) return attempt('coverDrive');
-    if (rng.chance(0.55 + 0.3 * intent)) return push(line > 0.08 ? 35 : -38, fw);
+    if (rng.chance(0.55 + 0.3 * Math.min(1, intent))) return push(line > 0.08 ? (gaps?.ringOff ?? 35) : (gaps?.ringLeg ?? -38), fw);
     return attempt('block', fw);
   }
   // Short.

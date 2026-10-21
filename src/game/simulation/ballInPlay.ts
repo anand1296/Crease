@@ -217,8 +217,11 @@ export class BallInPlay {
         s.arrival = t0 + dt * ((s.planeZ - p0.z) / (p1.z - p0.z));
       }
       if (s.arrival !== undefined) {
-        const early = s.batTime <= s.arrival;
-        if (early || this.time >= s.batTime) {
+        // A defensive bat is presented early and waits for the ball: it is in place about 60% of the way
+        // through the stroke, so a slightly late block is still a block rather than the ball hitting the pad.
+        const readyTime = SHOTS[s.attempt.shot].kind === 'defence' ? s.pressTime + 0.6 * (s.batTime - s.pressTime) : s.batTime;
+        const early = readyTime <= s.arrival;
+        if (early || this.time >= readyTime) {
           // Early: contact as the ball reaches the plane. Late: wherever the ball is when the bat arrives.
           const f = early ? (s.planeZ - p0.z) / (p1.z - p0.z) : 1;
           const at = vec3(p0.x + (p1.x - p0.x) * f, p0.y + (p1.y - p0.y) * f, p0.z + (p1.z - p0.z) * f);
@@ -226,14 +229,21 @@ export class BallInPlay {
           // Once the ball pitches the batter can correct the bat — if there is time before it arrives.
           const technique = this.opts.striker.batting.technique / 100;
           const sinceBounce = s.sawBounce || this.bounceTime === undefined ? 1 : this.time - this.bounceTime;
-          const adjust = Math.min(0.9, Math.max(0, (sinceBounce - 0.1) / 0.25)) * (0.6 + 0.4 * technique);
+          // A defensive stroke is played late, under the eyes, with soft hands: it can adjust to
+          // movement off the pitch sooner and more completely, the more so with a good defence.
+          const defensive = SHOTS[s.attempt.shot].kind === 'defence';
+          const defence = this.opts.striker.batting.defence / 100;
+          const adjust = defensive
+            ? Math.min(0.95, Math.max(0, (sinceBounce - 0.05) / 0.2)) * (0.6 + 0.4 * defence)
+            : Math.min(0.9, Math.max(0, (sinceBounce - 0.1) / 0.25)) * (0.6 + 0.4 * technique);
           const off = offSideSign(this.opts.striker.battingHand);
           const result = resolveContact({
             attempt: s.attempt,
             batter: this.opts.striker,
             ballPosition: at,
             ballVelocity: b.velocity,
-            timingError: s.batTime - s.arrival,
+            // Arriving while a defensive bat waits in place is perfectly timed.
+            timingError: !early ? readyTime - s.arrival : s.arrival > s.batTime ? s.batTime - s.arrival : readyTime === s.batTime ? s.batTime - s.arrival : 0,
             lineError: (at.x - s.expected.x) * off * (1 - adjust),
             heightError: (at.y - s.expected.y) * (1 - adjust),
             rng: this.opts.rng,

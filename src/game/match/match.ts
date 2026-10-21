@@ -1,10 +1,14 @@
 import { FixedStepClock } from '../core/fixedStep.ts';
 import { Rng } from '../core/rng.ts';
 import { BOWLER_FOLLOW_THROUGH, STANDARD_FIELD } from '../data/fieldPositions.ts';
+import { AdaptiveBowling, ballReward } from '../ai/adaptiveBowling.ts';
+import { fieldingPhase, setField, type WagonShot } from '../ai/captain.ts';
+import { type BallRecord, type CoachNote, battingNotes, bowlingNotes } from '../ai/coach.ts';
+import { Commentator, type CommentaryLine } from '../ai/commentary.ts';
+import { SHOTS, type ShotAttempt } from '../batting/shots.ts';
 import { PITCHES, type PitchId } from '../data/pitches.ts';
 import type { Team } from '../data/teams.ts';
 import { chooseDelivery } from '../ai/bowlingAi.ts';
-import type { ShotAttempt } from '../batting/shots.ts';
 import { DELIVERY_TYPES, type DeliveryTypeId, LENGTHS, deliveriesFor } from '../bowling/deliveryTypes.ts';
 import { fatigueAfterBall, fatigueAfterRest } from '../bowling/fatigue.ts';
 import { type Fielder, buildField } from '../fielding/plan.ts';
@@ -140,11 +144,24 @@ export class Match {
   private ballNumber = 0;
   private readonly rng: Rng;
   private readonly listeners = new Set<() => void>();
+  /** Ball-by-ball record for the coach. */
+  readonly log: BallRecord[] = [];
+  /** Commentary, newest last (the last 60 lines). */
+  readonly commentary: CommentaryLine[] = [];
+  private readonly commentator: Commentator;
+  /** The computer's attack, learning the human batters. */
+  private readonly brain = new AdaptiveBowling();
+  private pendingPlan: { batterId: string; planId: string; insight?: string | undefined } | undefined;
+  /** What the captain was protecting for each batter, to notice field changes. */
+  private readonly protecting = new Map<string, string>();
+  private fieldChange: string | undefined;
+  private announcedOver = -1;
 
   constructor(config: MatchConfig) {
     if (config.home.xi.length !== 11 || config.away.xi.length !== 11) throw new Error('Each side needs exactly 11 players');
     this.config = config;
     this.rng = new Rng(config.seed);
+    this.commentator = new Commentator(config.seed);
     this.startInnings(config.battingFirst);
     this.setup = defaultSetup(this.bowler);
   }
@@ -419,7 +436,17 @@ export class Match {
       this.emit();
       return;
     }
-    const d = chooseDelivery(this.bowler, DIFFICULTIES[this.config.difficulty], this.rng.fork(`bowl-ai-${this.ballNumber}`));
+    const rng = this.rng.fork(`bowl-ai-${this.ballNumber}`);
+    const difficulty = DIFFICULTIES[this.config.difficulty];
+    if (this.humanBatting) {
+      // Against the human: an attack that learns what works against each batter.
+      const phase = fieldingPhase(this.config.overs, this.current.balls);
+      const d = this.brain.choose(this.bowler, this.striker, phase === 'powerplay' ? 0 : phase === 'middle' ? 1 : 2, difficulty, rng);
+      this.pendingPlan = { batterId: this.striker.id, planId: d.planId, insight: d.insight };
+      this.startCycle(d.plan, d.releaseQuality);
+      return;
+    }
+    const d = chooseDelivery(this.bowler, difficulty, rng);
     this.startCycle(d.plan, d.releaseQuality);
   }
 
@@ -427,6 +454,12 @@ export class Match {
 
   private startCycle(plan: BowlingSetup, releaseQuality?: number): void {
     const bowler = this.bowler;
+    const overNumber = this.innings.length * 1000 + Math.floor(this.current.balls / 6);
+    if (this.ballsThisOver === 0 && this.announcedOver !== overNumber) {
+      this.announcedOver = overNumber;
+      const bowled = (this.card(bowler)?.balls ?? 0) > 0;
+      if (!bowled) this.say(this.commentator.newBowler(bowler.name, this.current.balls === 0));
+    }
     this.cycle = new DeliveryCycle({
       bowler,
       striker: this.striker,
@@ -456,11 +489,12 @@ export class Match {
     const required = inn.target === undefined ? 0 : ((inn.target - inn.runs) / ballsLeft) * 6;
     if (this.config.overs <= 20) {
       // T20 (or shorter): positive from the start, all-out attack at the death.
-      if (inn.target === undefined) return clamp(0.95 + 0.55 * progress - caution, -0.2, 1.6);
+      if (inn.target === undefined) return clamp(1.05 + 0.5 * progress - caution, -0.2, 1.6);
       return clamp(0.75 + (required - 7.5) / 4 - caution * 0.5, -0.3, 1.6);
     }
-    if (inn.target === undefined) return clamp(-0.05 + 0.85 * progress - caution, -0.5, 1);
-    return clamp((required - 5) / 5 - caution * 0.5, -0.5, 1);
+    // One-day: build, then accelerate.
+    if (inn.target === undefined) return clamp(0.75 + 0.65 * progress - caution, -0.3, 1.4);
+    return clamp(0.75 + (required - 5.8) / 3.5 - caution * 0.5, -0.3, 1.4);
   }
 
   private record(o: BallOutcome): void {
@@ -520,6 +554,7 @@ export class Match {
       fallOfWickets: outPlayer ? [...inn.fallOfWickets, { wicket: wickets, runs, balls, batter: outPlayer.name }] : inn.fallOfWickets,
     };
     this.history.push(o);
+    this.strikerAt.push(striker.id);
     this.lastOutcome = o;
     const def = this.cycle?.delivery?.type;
     if (def) this.fatigue.set(bowler.id, fatigueAfterBall(this.bowlerFatigue, bowler.bowling.stamina, def));
@@ -527,8 +562,110 @@ export class Match {
     this.runsThisOver += runsTotal;
     const mark = o.wicket ? 'W' : o.wide ? `${o.extras}wd` : o.noBall ? `${o.runs + o.extras}nb` : o.runs === 0 ? '•' : String(o.runs);
     this.recent = [...this.recent, mark].slice(-8);
+    this.learnAndDescribe(o, striker, bowler, updatedCard, legal);
     this.emit();
   }
+
+  /** Feeds the ball to the coach's log and the learning attack, and commentates it. */
+  private learnAndDescribe(o: BallOutcome, striker: Player, bowler: Player, bowlerCard: BowlingCard, legal: boolean): void {
+    const c = this.cycle;
+    const typeId = c?.delivery?.type.id ?? 'fast';
+    const events = c?.events ?? [];
+    const pad = events.find((e) => e.type === 'pad' || e.type === 'body');
+    const beaten = o.contact?.kind === 'miss' || events.some((e) => e.type === 'beaten');
+    this.log.push({
+      innings: this.innings.length - 1,
+      humanBatting: this.humanBatting,
+      humanBowling: this.humanBowling,
+      deliveryType: typeId,
+      deliveryName: o.delivery.name,
+      speedKph: o.delivery.speedKph,
+      length: o.delivery.length,
+      shot: o.shot?.shot,
+      shotName: o.shot ? SHOTS[o.shot.shot].name : undefined,
+      footwork: o.shot?.footwork,
+      contact: o.contact?.kind,
+      timingMs: o.timingMs,
+      runs: o.runs,
+      extras: o.extras,
+      wide: o.wide,
+      noBall: o.noBall,
+      wicket: o.wicket?.kind,
+      legal,
+    });
+    const plan = this.pendingPlan;
+    this.pendingPlan = undefined;
+    if (plan) this.brain.learn(plan.batterId, plan.planId, ballReward({ runs: o.runs, extras: o.extras, wicket: o.wicket !== undefined && o.wicket.kind !== 'runOut', beaten }));
+
+    const inn = this.current;
+    const card = (p: Player) => inn.battingCards.find((b) => b.player.id === p.id);
+    const outName = o.wicket ? (o.wicket.batter === 'nonStriker' ? this.nonStriker.name : striker.name) : undefined;
+    const outCard = o.wicket ? inn.battingCards.find((b) => b.player.name === outName) : undefined;
+    const overComplete = legal && this.ballsThisOver >= 6;
+    const chase = this.chase;
+    const fieldChange = this.fieldChange;
+    this.fieldChange = undefined;
+    this.say(
+      this.commentator.ball({
+        bowler: bowler.name,
+        batter: striker.name,
+        delivery: o.delivery,
+        pace: !isSpinner(bowler.bowlingStyle),
+        shot: o.shot ? SHOTS[o.shot.shot].name : undefined,
+        contact: o.contact?.kind,
+        directionDeg: o.contact && o.contact.kind !== 'miss' && o.contact.kind !== 'leave' ? o.contact.directionDeg : undefined,
+        elevationDeg: o.contact?.elevationDeg,
+        runs: o.runs,
+        extras: o.extras,
+        wide: o.wide,
+        noBall: o.noBall,
+        boundary: o.boundary,
+        wicket: o.wicket && outName ? { kind: o.wicket.kind, fielder: o.wicket.fielder, out: outName } : undefined,
+        notOutLbw: pad && pad.type !== 'pad' ? undefined : pad && !pad.lbw.out && !o.wicket && o.runs === 0 ? pad.lbw.reason : undefined,
+        padded: pad !== undefined,
+        batterRuns: card(striker)?.runs ?? 0,
+        batterBalls: card(striker)?.balls ?? 0,
+        outBatterRuns: outCard?.runs,
+        bowlerWickets: bowlerCard.wickets,
+        total: { runs: inn.runs, wickets: inn.wickets },
+        overComplete,
+        overRuns: this.runsThisOver,
+        chase: chase && overComplete ? { team: this.battingSide.team.name, needed: chase.needed, balls: chase.ballsLeft } : undefined,
+        insight: plan?.insight,
+        fieldChange,
+      }),
+    );
+  }
+
+  private say(line: CommentaryLine): void {
+    this.commentary.push(line);
+    if (this.commentary.length > 60) this.commentary.splice(0, this.commentary.length - 60);
+  }
+
+  /** The coach's notes for the human side, from this match so far. */
+  coachNotes(): { batting: CoachNote[]; bowling: CoachNote[] } {
+    return { batting: battingNotes(this.log), bowling: bowlingNotes(this.log) };
+  }
+
+  /** What the computer's attack has learned about a batter (best plans first). */
+  scoutingReport(batter: Player): { label: string; mean: number; n: number }[] {
+    const bowler = this.bowlingSide.xi.find((p) => !isSpinner(p.bowlingStyle) && p.bowlingStyle !== 'none') ?? this.bowler;
+    const phase = fieldingPhase(this.config.overs, this.current.balls);
+    return this.brain.report(batter, bowler, phase === 'powerplay' ? 0 : phase === 'middle' ? 1 : 2).map((r) => ({ label: r.plan.label, mean: r.mean, n: r.n }));
+  }
+
+  /** The striker's scoring shots this match, batter-relative (for the captain). */
+  private wagon(batter: Player): WagonShot[] {
+    const out: WagonShot[] = [];
+    this.history.forEach((o, i) => {
+      if (this.strikerAt[i] !== batter.id || o.runs === 0 || !o.contact || o.contact.kind === 'miss' || o.contact.kind === 'leave') return;
+      out.push({ directionDeg: o.contact.directionDeg, runs: o.runs });
+    });
+    return out;
+  }
+
+  /** Who was on strike for each ball in `history`. */
+  private readonly strikerAt: string[] = [];
 
   private afterBall(): void {
     const o = this.lastOutcome;
@@ -582,9 +719,12 @@ export class Match {
       this.phase = 'inningsBreak';
       this.phaseTimer = AUTO_BREAK;
       this.needsBowlerChoice = true;
+      const done = this.current;
+      this.say(this.commentator.inningsBreak(this.side(done.batting).team.name, done.runs, done.wickets, done.runs + 1, this.side(done.bowling).team.name));
     } else {
       this.result = this.decide();
       this.phase = 'complete';
+      this.say(this.commentator.result(this.result.summary));
     }
     this.emit();
     return true;
@@ -651,8 +791,19 @@ export class Match {
       .slice()
       .sort((a, b) => b.fielding.catching - a.fielding.catching);
     const hand = this.striker.battingHand;
+    // The AI captain sets the field for this batter, bowler and phase of the innings.
+    const decision = setField({
+      overs: this.config.overs,
+      ballsBowled: this.current.balls,
+      spinner: isSpinner(bowler.bowlingStyle),
+      wagon: this.wagon(this.striker),
+    });
+    if (decision.protecting && this.protecting.get(this.striker.id) !== decision.protecting) {
+      this.protecting.set(this.striker.id, decision.protecting);
+      this.fieldChange = decision.protecting;
+    }
     const [wk] = buildField([keeper], STANDARD_FIELD.filter((p) => p.id === 'wk'), hand);
-    const ring = buildField(others, STANDARD_FIELD.filter((p) => p.id !== 'wk'), hand);
+    const ring = buildField(others, decision.positions, hand);
     const [bowlerSpot] = buildField([bowler], [BOWLER_FOLLOW_THROUGH], hand);
     return [...(wk ? [wk] : []), ...ring, ...(bowlerSpot ? [bowlerSpot] : [])];
   }

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0 — Game AI (2026-10-22)
+
+- **Learning attack**: against a human batter the computer's bowlers learn, ball by ball, which plans work (Thompson sampling over delivery plans, phase-aware priors, pooled across the line-up).
+- **AI captain**: fields set per ball from the bowler, the phase and the batter's scoring areas; powerplay / middle / death fielding restrictions; powerplay shown on the scoreboard.
+- **Field-aware T20 batting**: the computer aims lofted shots and pushes into the gaps in the field. AI v AI T20s average ≈185 at ≈9.3 an over.
+- **Defensive batting fixed**: blocks are presented early and adjust to movement off the pitch better, so a fractionally late block is no longer an LBW. One-day games were scoring under 3 an over with a wicket every 19 balls; with a new one-day intent curve they now score ≈4.3 an over with a wicket every ≈31 balls, held by a new test.
+- **Commentary**: ball-by-ball, written from the facts of each ball, spoken by the browser's voice; toggle with V or in the menus.
+- **Coach**: notes on timing, troublesome deliveries, shot selection and bowling at the innings break and the result.
+- docs/TECHNICAL_ARCHITECTURE.md: the complete technical architecture document.
+
+
 ## 0.5.0 — Real T20 squads (2026-10-22)
 
 - **Teams**: India, Pakistan, Australia and England with each board's most recently announced men's T20I squad (India and Pakistan named 6 Oct 2026, England 13 Oct 2026, Australia's Bangladesh squad of June 2026); real batting hands and bowling styles, captains and keepers marked; ratings are the game's own approximations.

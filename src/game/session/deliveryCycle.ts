@@ -2,12 +2,12 @@ import type { Rng } from '../core/rng.ts';
 import type { Vec3 } from '../core/vec3.ts';
 import { BOWLER_STUMPS_Z, STRIKER_STUMPS_Z } from '../data/field.ts';
 import { type PitchPreset, groundFor } from '../data/pitches.ts';
-import { type BattingAiOptions, decideStroke } from '../ai/battingAi.ts';
+import { type BattingAiOptions, decideStroke, deepGaps } from '../ai/battingAi.ts';
 import type { ContactResult } from '../batting/contact.ts';
 import { SHOTS, type ShotAttempt } from '../batting/shots.ts';
 import { type DeliveryPlan, type ExecutedDelivery, executeDelivery } from '../bowling/execute.ts';
 import { type Fielder, type FieldingPlan, RUN, fielderReaction, fielderSpeed, planFielding } from '../fielding/plan.ts';
-import { type Player, isSpinner } from '../model/player.ts';
+import { type Player, isSpinner, offSideSign } from '../model/player.ts';
 import type { GroundModel } from '../physics/ball.ts';
 import { type BallEvent, BallInPlay } from '../simulation/ballInPlay.ts';
 
@@ -169,7 +169,12 @@ export class DeliveryCycle {
     this.play = new BallInPlay({ delivery, striker: o.striker, ground: this.ground, rng: this.rng.fork('contact') });
     this.phase = 'inFlight';
     if (o.battingAi) {
-      const decision = decideStroke(delivery, { ...o.battingAi, batter: o.striker, rng: this.rng.fork('batting-ai'), ground: this.ground });
+      // The batter reads the field: where are the gaps in the deep?
+      const off = offSideSign(o.striker.battingHand);
+      const fielders = o.field.map((f) => ({ d: Math.hypot(f.start.x, f.start.z - STRIKER_STUMPS_Z), a: (Math.atan2(f.start.x * off, STRIKER_STUMPS_Z - f.start.z) * 180) / Math.PI }));
+      const deep = fielders.filter((f) => f.d > 35).map((f) => f.a);
+      const ring = fielders.filter((f) => f.d > 14 && f.d <= 35).map((f) => f.a);
+      const decision = decideStroke(delivery, { ...o.battingAi, batter: o.striker, rng: this.rng.fork('batting-ai'), ground: this.ground, gaps: deepGaps(deep, ring) });
       if (decision) {
         this.aiShot = decision.attempt;
         this.aiCommitAt = this.releaseTime + decision.commitAt;

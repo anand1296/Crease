@@ -16,6 +16,8 @@ export function MainMenu() {
   const toggleMute = useGame((s) => s.toggleMute);
   const quality = useGame((s) => s.quality);
   const toggleQuality = useGame((s) => s.toggleQuality);
+  const commentaryOn = useGame((s) => s.commentaryOn);
+  const toggleCommentary = useGame((s) => s.toggleCommentary);
   const [help, setHelp] = useState(false);
   return (
     <div className="menu-shell">
@@ -34,6 +36,9 @@ export function MainMenu() {
           </button>
           <button type="button" onClick={toggleQuality}>
             Graphics: {quality === 'high' ? 'high' : 'low'}
+          </button>
+          <button type="button" onClick={toggleCommentary}>
+            Commentary: {commentaryOn ? 'on' : 'off'}
           </button>
         </nav>
       </div>
@@ -361,7 +366,7 @@ export function HowToPlay({ onClose }: { onClose: () => void }) {
           needle is in the gold gives an accurate release.
         </p>
         <p className="dim">
-          <kbd>P</kbd> pause · <kbd>C</kbd> camera · <kbd>M</kbd> sound · <kbd>H</kbd> help
+          <kbd>P</kbd> pause · <kbd>C</kbd> camera · <kbd>M</kbd> sound · <kbd>V</kbd> commentary · <kbd>H</kbd> help
         </p>
         <button type="button" onClick={onClose} autoFocus>
           Close
