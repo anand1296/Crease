@@ -46,7 +46,13 @@ Simulation (core, physics,        deterministic TypeScript — no React or three
 | `game/match/squad.ts` | Default XI, keeper choice, XI validation (errors and warnings) |
 | `game/input/` | Keyboard (bindings as data, one shared instance), input → stroke mapping, wiring to the match |
 | `game/audio/sound.ts` | Web Audio synthesis: bat, pads, stumps, bounce, catch, boundary, crowd ambience; mute persisted |
-| `game/scenes/rig/` | Articulated humanoid (meshes + two-bone arm IK) and the procedural motion library (gait, stances, bowling action, throw, celebrate) |
+| `game/scenes/rig/Humanoid.tsx`, `motion.ts` | Control skeleton (posed procedurally; two-bone arm IK; also drawable from primitives) and the procedural motion library |
+| `game/scenes/rig/Cricketer.tsx` | Skinned player model: loads the avatar, paints the kit through its mask (shader patch on `MeshStandardMaterial`), attaches helmet/cap/hat, pads and keeper's mitts to bones |
+| `game/scenes/rig/avatarRig.ts` | Drives the model's skeleton from a motion-capture clip or by retargeting the control skeleton (bind-pose corrections, spine distribution, head look-at, model-side arm IK, finger grip), cross-fading between sources |
+| `game/scenes/rig/avatarAssets.ts` | Asset URLs and the clip library loader |
+| `game/scenes/camera/director.ts` | The broadcast director: which shot is on air and its framing, as a pure function of the ball's state (unit-tested) |
+| `game/scenes/Effects.tsx` | High-quality post-processing chain |
+| `scripts/avatars/` | Offline conversion of Rocketbox FBX avatars and clips to the runtime assets in `public/players/` |
 | `game/scenes/MatchView.tsx` | Per-frame driver, players posed from the simulation, bat, ball, markers, camera rig; orbiting menu camera when no match is on |
 | `game/scenes/Ground.tsx`, `Stadium.tsx`, `Stumps.tsx` | Field and pitch textures, stands, instanced crowd, instanced sponsor boards, floodlights, live scoreboard |
 | `game/quality.ts` | Graphics quality: detection (software renderer → Low) and persistence |

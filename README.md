@@ -2,7 +2,7 @@
 
 A browser-based 3D cricket game, built with React, TypeScript and Three.js. Inspired by the depth and replayability of classic cricket games: batting that rewards timing and shot selection, bowling with real variation, and an opponent that plays the ball rather than the dice.
 
-> **Status: alpha (0.3.0).** Play a full limited-overs match against the computer: pick from four fictional teams of sixteen, choose your playing XI and batting order, set the overs (2–50), difficulty and pitch, toss, bat and bowl both innings, and finish with a result and full scorecards. Real ball physics, sixteen strokes, twelve delivery types, LBW, wides, run-outs, bowler quotas, articulated players in a floodlit stadium, and synthesised sound. See [Roadmap](#roadmap).
+> **Status: alpha (0.4.0).** Play a full limited-overs match against the computer: pick from four fictional teams of sixteen, choose your playing XI and batting order, set the overs (2–50), difficulty and pitch, toss, bat and bowl both innings, and finish with a result and full scorecards. Real ball physics, sixteen strokes, twelve delivery types, LBW, wides, run-outs and bowler quotas; motion-captured, skinned player models in team kits; umpires who signal; a broadcast-style camera; post-processed graphics; and synthesised sound, including a physically modelled bat-on-ball crack. See [Roadmap](#roadmap).
 
 ## Running locally
 
@@ -60,7 +60,9 @@ Hold an arrow for direction, then press a stroke key **as the ball arrives**. Th
 
 <kbd>P</kbd> / <kbd>Esc</kbd> pause (resume, sound, restart, quit to menu) · <kbd>Enter</kbd> continue after the innings break · <kbd>C</kbd> camera · <kbd>M</kbd> sound on/off · <kbd>H</kbd> help. The game pauses itself when the window loses focus.
 
-**Graphics** (main menu): *High* draws shadows, the crowd and high-DPI frames; *Low* drops them for machines without a capable GPU. Low is chosen automatically when the browser reports a software renderer; your choice is remembered.
+**Graphics** (main menu): *High* adds soft shadows, image-based lighting, the crowd, ambient occlusion, bloom, filmic tone mapping and up to 1.5× resolution; *Low* drops them for machines without a capable GPU. Low is chosen automatically when the browser reports a software renderer; your choice is remembered.
+
+**Camera**: the default broadcast camera sits wide behind the bowler between balls, pushes in slowly through the run-up, holds tight on the striker at release, then cuts to a high side-on camera that follows the ball and the chase (or to the stumps when they are hit). <kbd>C</kbd> switches to the view from behind the striker or a high wide view.
 
 ## Deployment
 
@@ -99,12 +101,14 @@ Built in phases; each phase ships a verified vertical slice.
 ## Known limitations
 
 - Controls follow the Cricket 07 scheme in spirit (direction + stroke-type keys, a timing-based release meter), not key for key.
-- Players are procedural, articulated figures with procedural motion, not motion-captured models; faces and kits are simple.
+- Running, walking, idling and celebrating use motion capture; batting strokes, the bowling action, keeping, fielding and throwing are procedural and retargeted onto the models, so they are believable rather than broadcast-perfect. Four body models are shared across all players.
 - No byes, leg byes or overthrows; no DRS; the computer sets one standard field and does not change it.
 - Running is all-or-nothing per run: you cannot send the non-striker back once a run is called.
-- Audio is synthesised in the browser (bat, pads, stumps, bounce, catch, boundary, crowd); there is no commentary.
-- On software-rendered browsers (no GPU) even Low graphics runs slowly.
+- Audio is synthesised in the browser (bat, pads, stumps, bounce, catch, boundary, crowd reactions); there is no commentary and no continuous crowd bed.
+- On software-rendered browsers (no GPU) even Low graphics runs slowly. Frame rate on real GPUs has not been measured yet.
 
 ## Assets and licensing
 
-All geometry, textures and sounds are generated procedurally in code. No third-party game assets, player likenesses or roster data are bundled; all teams, players and sponsors are fictional. The UI typeface is Barlow Condensed (SIL Open Font License 1.1), bundled via `@fontsource/barlow-condensed`.
+- **Players**: four Microsoft Rocketbox avatars (MIT licence, © 2020 Microsoft; [repository](https://github.com/microsoft/Microsoft-Rocketbox), notice in `public/players/LICENSE-Rocketbox.md`) with Rocketbox motion-capture clips (run, jog, walk, idle, cheer). They are converted offline by `scripts/avatars/` (FBX → glTF, 1024² textures, a baked kit mask so any team colours can be painted on, compact clip data) and the results are committed under `public/players/`.
+- Everything else — the ground, stadium, crowd, ball, equipment, textures and all sounds — is generated procedurally in code.
+- All teams, players and sponsors are fictional. The UI typeface is Barlow Condensed (SIL Open Font License 1.1), bundled via `@fontsource/barlow-condensed`.

@@ -1,7 +1,7 @@
 {
   "name": "crease",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Browser-based 3D cricket game — React, TypeScript, Three.js",
   "type": "module",
   "engines": {
@@ -23,6 +23,8 @@
     "@fontsource/barlow-condensed": "^5.3.0",
     "@react-three/drei": "^10.7.0",
     "@react-three/fiber": "^9.3.0",
+    "@react-three/postprocessing": "^3.1.3",
+    "postprocessing": "^6.39.5",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "three": "^0.180.0",

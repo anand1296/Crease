@@ -2,14 +2,13 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import {
   BackSide,
-  BufferAttribute,
   CanvasTexture,
-  Color,
   DoubleSide,
+  InstancedBufferAttribute,
   type InstancedMesh,
   Matrix4,
+  MeshLambertMaterial,
   SRGBColorSpace,
-  SphereGeometry,
   Vector2,
 } from 'three';
 import { useGame } from '../../state/game.ts';
@@ -34,37 +33,12 @@ const SCREEN_GAP = 0.2;
 export function Stadium({ crowd }: { crowd: boolean }) {
   return (
     <group>
-      <Sky />
       <Stands />
       {crowd ? <Crowd /> : null}
       <AdBoards />
       <Floodlights />
       <ScoreScreen />
     </group>
-  );
-}
-
-function Sky() {
-  const geometry = useMemo(() => {
-    const g = new SphereGeometry(420, 32, 16);
-    const pos = g.getAttribute('position');
-    const colors = new Float32Array(pos.count * 3);
-    const top = new Color('#3f78b8');
-    const horizon = new Color('#cfe2f0');
-    const c = new Color();
-    for (let i = 0; i < pos.count; i++) {
-      const y = pos.getY(i) / 420;
-      c.copy(horizon).lerp(top, Math.min(1, Math.max(0, y * 1.6)));
-      colors.set([c.r, c.g, c.b], i * 3);
-    }
-    g.setAttribute('color', new BufferAttribute(colors, 3));
-    return g;
-  }, []);
-  useEffect(() => () => geometry.dispose(), [geometry]);
-  return (
-    <mesh geometry={geometry}>
-      <meshBasicMaterial vertexColors side={BackSide} fog={false} depthWrite={false} />
-    </mesh>
   );
 }
 
@@ -113,76 +87,204 @@ function Stands() {
   );
 }
 
-const CROWD_COLORS = ['#f2f2f2', '#1f4e8c', '#8c1f2e', '#e2701d', '#5b2a86', '#f2c14e', '#2a2a2a', '#c94040', '#3b7a57', '#87a9d6', '#e8d9b5'];
+const SHIRTS = ['#f2f2f2', '#1f4e8c', '#8c1f2e', '#e2701d', '#5b2a86', '#f2c14e', '#2a2a2a', '#c94040', '#3b7a57', '#87a9d6', '#e8d9b5', '#1b2b4b', '#d64f8a', '#4aa3a2'];
+const SKINS = ['#f1c9a5', '#e3b48f', '#c58c64', '#a8714c', '#8d5a3b', '#6b4128', '#5a3622'];
+const HAIR = ['#1d1510', '#3b2618', '#6b4a2b', '#a77b4b', '#d8c08a', '#7a7a7a'];
+const CELLS_X = 8;
+const CELLS_Y = 4;
 
-/** One instanced mesh for every spectator; jumps up when something happens. */
+/**
+ * Spectator sprite sheet, drawn procedurally: 32 people (head, hair or cap,
+ * shoulders, shirt, some with arms raised or a flag), front-on and waist up.
+ */
+function crowdAtlas(): CanvasTexture {
+  const cw = 64;
+  const ch = 96;
+  const canvas = document.createElement('canvas');
+  canvas.width = cw * CELLS_X;
+  canvas.height = ch * CELLS_Y;
+  const ctx = canvas.getContext('2d');
+  const rng = new Rng('crowd-atlas');
+  const pick = <T,>(a: readonly T[]): T => a[rng.int(0, a.length - 1)] ?? (a[0] as T);
+  if (ctx) {
+    for (let cy = 0; cy < CELLS_Y; cy++) {
+      for (let cx = 0; cx < CELLS_X; cx++) {
+        const x0 = cx * cw;
+        const y0 = cy * ch;
+        const shirt = pick(SHIRTS);
+        const skin = pick(SKINS);
+        const armsUp = rng.chance(0.25);
+        // Arms (behind the body when raised).
+        ctx.fillStyle = skin;
+        if (armsUp) {
+          ctx.save();
+          ctx.translate(x0 + cw / 2, y0 + ch * 0.5);
+          for (const side of [-1, 1]) {
+            ctx.save();
+            ctx.rotate(side * 0.35);
+            ctx.fillStyle = shirt;
+            ctx.fillRect(side * 16 - 5, -46, 10, 30);
+            ctx.fillStyle = skin;
+            ctx.beginPath();
+            ctx.arc(side * 16, -50, 5.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          }
+          ctx.restore();
+          if (rng.chance(0.3)) {
+            ctx.fillStyle = pick(SHIRTS);
+            ctx.fillRect(x0 + 6, y0 + 4, cw - 12, 16);
+          }
+        }
+        // Torso with shoulders.
+        ctx.fillStyle = shirt;
+        ctx.beginPath();
+        ctx.moveTo(x0 + 10, y0 + ch);
+        ctx.lineTo(x0 + 12, y0 + ch * 0.5);
+        ctx.quadraticCurveTo(x0 + 14, y0 + ch * 0.42, x0 + 24, y0 + ch * 0.41);
+        ctx.lineTo(x0 + cw - 24, y0 + ch * 0.41);
+        ctx.quadraticCurveTo(x0 + cw - 14, y0 + ch * 0.42, x0 + cw - 12, y0 + ch * 0.5);
+        ctx.lineTo(x0 + cw - 10, y0 + ch);
+        ctx.closePath();
+        ctx.fill();
+        // Shading down the sides.
+        const g = ctx.createLinearGradient(x0 + 10, 0, x0 + cw - 10, 0);
+        g.addColorStop(0, 'rgba(0,0,0,0.25)');
+        g.addColorStop(0.5, 'rgba(0,0,0,0)');
+        g.addColorStop(1, 'rgba(0,0,0,0.25)');
+        ctx.fillStyle = g;
+        ctx.fillRect(x0 + 10, y0 + ch * 0.41, cw - 20, ch * 0.59);
+        // Neck and head.
+        ctx.fillStyle = skin;
+        ctx.fillRect(x0 + cw / 2 - 5, y0 + ch * 0.34, 10, 8);
+        ctx.beginPath();
+        ctx.ellipse(x0 + cw / 2, y0 + ch * 0.27, 10, 12.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Hair or a cap.
+        if (rng.chance(0.3)) {
+          ctx.fillStyle = pick(SHIRTS);
+          ctx.beginPath();
+          ctx.ellipse(x0 + cw / 2, y0 + ch * 0.2, 11, 7, 0, Math.PI, 0);
+          ctx.fill();
+          ctx.fillRect(x0 + cw / 2 - 11, y0 + ch * 0.2 - 1, 22, 3);
+        } else {
+          ctx.fillStyle = pick(HAIR);
+          ctx.beginPath();
+          ctx.ellipse(x0 + cw / 2, y0 + ch * 0.22, 10.5, 8, 0, Math.PI, 0);
+          ctx.fill();
+        }
+      }
+    }
+  }
+  const tex = new CanvasTexture(canvas);
+  tex.colorSpace = SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+/**
+ * Every spectator as one instanced, alpha-tested sprite (one draw call).
+ * Each picks a cell of the sprite sheet; when something happens they jump,
+ * animated on the GPU.
+ */
 function Crowd() {
   const ref = useRef<InstancedMesh>(null);
+  const atlas = useMemo(crowdAtlas, []);
+  useEffect(() => () => atlas.dispose(), [atlas]);
   const seats = useMemo(() => {
     const rng = new Rng('crowd');
-    const out: { x: number; y: number; z: number; a: number; c: string; phase: number }[] = [];
+    const out: { x: number; y: number; z: number; a: number; cell: number; phase: number; scale: number }[] = [];
     const tier = (r0: number, y0: number, rows: number, fill: number) => {
       for (let row = 0; row < rows; row++) {
         const r = r0 + row * ROW_DEPTH + ROW_DEPTH * 0.5;
         const y = y0 + row * ROW_RISE;
-        const count = Math.floor((Math.PI * 2 * r) / 0.75);
+        const count = Math.floor((Math.PI * 2 * r) / 0.62);
         for (let i = 0; i < count; i++) {
-          const a = (i / count) * Math.PI * 2;
+          const a = (i / count) * Math.PI * 2 + rng.range(-0.002, 0.002);
           // Leave the seats behind the sight screens empty.
           const fromLine = Math.min(Math.abs(Math.sin(a)), 1);
           if (Math.abs(Math.cos(a)) > 0.9 && fromLine < SCREEN_GAP) continue;
           if (!rng.chance(fill)) continue;
-          out.push({ x: Math.sin(a) * r, y, z: Math.cos(a) * r, a, c: CROWD_COLORS[rng.int(0, CROWD_COLORS.length - 1)] ?? '#fff', phase: rng.next() * 6.28 });
+          out.push({ x: Math.sin(a) * r, y, z: Math.cos(a) * r, a, cell: rng.int(0, CELLS_X * CELLS_Y - 1), phase: rng.next() * 6.28, scale: rng.range(0.9, 1.08) });
         }
       }
     };
-    tier(STAND_R, 1.6, LOWER_ROWS, 0.72);
-    tier(UPPER_R, UPPER_Y, UPPER_ROWS, 0.62);
+    tier(STAND_R, 1.6, LOWER_ROWS, 0.82);
+    tier(UPPER_R, UPPER_Y, UPPER_ROWS, 0.74);
     return out;
   }, []);
-  const matrix = useMemo(() => new Matrix4(), []);
-  const color = useMemo(() => new Color(), []);
+  const material = useMemo(() => {
+    const m = new MeshLambertMaterial({ map: atlas, alphaTest: 0.5, side: DoubleSide });
+    const uniforms = { uTime: { value: 0 }, uJump: { value: 0 } };
+    m.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, uniforms);
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+attribute float cell;
+attribute float phase;
+uniform float uTime;
+uniform float uJump;`,
+        )
+        .replace(
+          '#include <uv_vertex>',
+          `#include <uv_vertex>
+vMapUv = (vec2(mod(cell, ${CELLS_X}.0), floor(cell / ${CELLS_X}.0)) + vMapUv) / vec2(${CELLS_X}.0, ${CELLS_Y}.0);`,
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+transformed.y += max(0.0, sin(uTime * 9.0 + phase)) * 0.32 * uJump;`,
+        );
+    };
+    m.customProgramCacheKey = () => 'crease-crowd-v1';
+    return { m, uniforms };
+  }, [atlas]);
+  useEffect(() => () => material.m.dispose(), [material]);
   const excitement = useRef(0);
   const lastBall = useRef(0);
 
   useLayoutEffect(() => {
     const mesh = ref.current;
     if (!mesh) return;
+    const matrix = new Matrix4();
+    const scale = new Matrix4();
+    const cells = new Float32Array(seats.length);
+    const phases = new Float32Array(seats.length);
     seats.forEach((s, i) => {
-      matrix.makeRotationY(s.a);
-      matrix.setPosition(s.x, s.y + 0.32, s.z);
+      // Facing the middle of the ground.
+      matrix.makeRotationY(s.a + Math.PI);
+      scale.makeScale(s.scale, s.scale, s.scale);
+      matrix.multiply(scale);
+      matrix.setPosition(s.x, s.y + 0.55 * s.scale, s.z);
       mesh.setMatrixAt(i, matrix);
-      mesh.setColorAt(i, color.set(s.c));
+      // Sheet rows run top to bottom; texture v runs bottom to top.
+      const col = s.cell % CELLS_X;
+      const row = CELLS_Y - 1 - Math.floor(s.cell / CELLS_X);
+      cells[i] = row * CELLS_X + col;
+      phases[i] = s.phase;
     });
+    mesh.geometry.setAttribute('cell', new InstancedBufferAttribute(cells, 1));
+    mesh.geometry.setAttribute('phase', new InstancedBufferAttribute(phases, 1));
     mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  }, [seats, matrix, color]);
+  }, [seats]);
 
   useFrame((state, dt) => {
-    const mesh = ref.current;
-    if (!mesh) return;
     const snap = useGame.getState().snap;
     if (snap && snap.ballCount !== lastBall.current) {
       lastBall.current = snap.ballCount;
       const o = snap.lastOutcome;
-      if (o?.boundary || o?.wicket) excitement.current = 3;
+      if (o?.boundary || o?.wicket) excitement.current = 3.5;
     }
-    if (excitement.current <= 0) return;
     excitement.current = Math.max(0, excitement.current - dt);
-    const t = state.clock.elapsedTime;
-    const k = Math.min(1, excitement.current);
-    seats.forEach((s, i) => {
-      matrix.makeRotationY(s.a);
-      matrix.setPosition(s.x, s.y + 0.32 + Math.max(0, Math.sin(t * 9 + s.phase)) * 0.35 * k, s.z);
-      mesh.setMatrixAt(i, matrix);
-    });
-    mesh.instanceMatrix.needsUpdate = true;
+    material.uniforms.uTime.value = state.clock.elapsedTime;
+    material.uniforms.uJump.value = Math.min(1, excitement.current);
   });
 
   return (
-    <instancedMesh ref={ref} args={[undefined, undefined, seats.length]}>
-      <boxGeometry args={[0.42, 0.62, 0.3]} />
-      <meshStandardMaterial roughness={0.9} />
+    <instancedMesh ref={ref} args={[undefined, material.m, seats.length]} frustumCulled={false}>
+      <planeGeometry args={[0.6, 0.9]} />
     </instancedMesh>
   );
 }

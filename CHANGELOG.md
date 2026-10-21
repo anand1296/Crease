@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 — Realistic players, broadcast camera, graphics and sound (2026-10-22)
+
+- **Players**: skinned, motion-captured human models (Microsoft Rocketbox, MIT) replace the primitive figures; team kits painted through a baked kit mask; helmets, caps, sun hats, pads, keeper's mitts; varied skin tones; running, idling and celebrations from motion capture; strokes and bowling retargeted from the procedural rig with IK hands on the bat; heads follow the ball; fielders walk in.
+- **Umpires** at both ends with signals (out, four, six, wide, no-ball, run-out).
+- **Wickets** break — stumps knocked back, bails flying.
+- **Camera**: broadcast director — wide between balls, slow push-in through the run-up, tight at release, cut to a chase camera after the stroke, stump camera when bowled.
+- **Graphics**: physical sky, image-based lighting, late-afternoon sun with soft shadows; High adds ambient occlusion, bloom, filmic tone mapping and vignette; detailed outfield and pitch; stitched ball; sprite crowd.
+- **Sound**: no more background noise; physically modelled bat-on-ball sound (crack and woody ring when middled, dull hum off the toe, tick off the edge); stadium reverb; crowd reactions of voices and applause.
+- Tests for the bat-sound model and the camera director.
+
+
 ## 0.3.0 — Matches, squads, players and sound (2026-10-21)
 
 - **Matches**: toss, two innings, targets and results ("won by N runs / N wickets (M balls left)" / tie), innings break and result screens with full scorecards (batting, extras, fall of wickets, bowling with maidens and economy) and top performers; rematch.

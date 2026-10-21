@@ -18,14 +18,15 @@ async function ready(page: Page, errors: string[]): Promise<void> {
 }
 
 async function playStroke(page: Page, keys: { hold?: string; press: string }, lead: number): Promise<void> {
-  await expect.poll(() => page.evaluate(() => window.__crease?.ballPhase?.()), { timeout: 30_000 }).toBe('inFlight');
+  // Software rendering runs the game well below real time, so allow generous waits.
+  await expect.poll(() => page.evaluate(() => window.__crease?.ballPhase?.()), { timeout: 90_000 }).toBe('inFlight');
   await page.waitForFunction(
     (l) => {
       const eta = window.__crease?.eta?.();
       return eta === undefined || eta <= l;
     },
     lead,
-    { polling: 'raf', timeout: 15_000 },
+    { polling: 'raf', timeout: 45_000 },
   );
   if (keys.hold) await page.keyboard.down(keys.hold);
   await page.keyboard.press(keys.press);
@@ -33,7 +34,7 @@ async function playStroke(page: Page, keys: { hold?: string; press: string }, le
 }
 
 test.describe('gameplay', () => {
-  test.setTimeout(300_000);
+  test.setTimeout(600_000);
 
   test('set up a match, pick the XI, bat with several strokes, pause, quit', async ({ page }) => {
     const errors: string[] = [];
@@ -69,7 +70,7 @@ test.describe('gameplay', () => {
       // Call a run if the ball was hit; harmless otherwise.
       await page.waitForTimeout(250);
       await page.keyboard.press('Space');
-      await expect.poll(() => balls(page), { timeout: 30_000 }).toBe(i + 1);
+      await expect.poll(() => balls(page), { timeout: 90_000 }).toBe(i + 1);
       await expect(page.getByTestId('banner')).toBeVisible();
     }
     const score = await page.evaluate(() => window.__crease?.score?.());
@@ -109,7 +110,7 @@ test.describe('gameplay', () => {
     await expect.poll(() => page.evaluate(() => window.__crease?.ballPhase?.())).toBe('runUp');
     await page.waitForTimeout(400);
     await page.keyboard.press('Space');
-    await expect.poll(() => balls(page), { timeout: 30_000 }).toBe(1);
+    await expect.poll(() => balls(page), { timeout: 90_000 }).toBe(1);
     await expect(page.getByTestId('banner')).toBeVisible();
 
     expect(errors).toEqual([]);

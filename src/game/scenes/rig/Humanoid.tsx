@@ -50,7 +50,18 @@ export interface Pose {
   /** Optional world-space hand targets: the arm is aimed at them (e.g. holding a bat). */
   handL?: Vector3 | undefined;
   handR?: Vector3 | undefined;
+  /**
+   * Play a motion-captured clip instead of the procedural pose (skinned
+   * models only; the primitive rig ignores it). `time` in seconds.
+   */
+  clip?: { name: ClipName; time: number } | undefined;
+  /** World point the head turns towards. */
+  look?: Vector3 | undefined;
+  /** Curl of the fingers, 0 open … 1 gripping (bat, ball). */
+  grip?: number | undefined;
 }
+
+export type ClipName = 'sprint' | 'run' | 'jog' | 'walk' | 'idle' | 'breathe' | 'cheer' | 'cheer2' | 'clap' | 'crouch';
 
 const limb = (pitch = 0, roll = 0, bend = 0): LimbPose => ({ pitch, roll, bend });
 
@@ -68,15 +79,60 @@ export interface HumanoidHandle {
   handWorld(side: 'L' | 'R', out: Vector3): Vector3;
 }
 
-// Proportions (metres).
-const HIP_Y = 0.94;
-const THIGH = 0.45;
-const SHIN = 0.44;
-const TORSO = 0.52;
-const SHOULDER_X = 0.2;
-const UPPER_ARM = 0.3;
-const FOREARM = 0.27;
-const HIP_X = 0.1;
+/** The control rig's joints in the character's own space (root = origin, facing +z), after `apply`. */
+export interface RigFrames {
+  hipsY: number;
+  torso: Quaternion;
+  upperArmL: Quaternion;
+  upperArmR: Quaternion;
+  forearmL: Quaternion;
+  forearmR: Quaternion;
+  thighL: Quaternion;
+  thighR: Quaternion;
+  calfL: Quaternion;
+  calfR: Quaternion;
+  footL: Quaternion;
+  footR: Quaternion;
+  elbowL: Vector3;
+  elbowR: Vector3;
+  handL: Vector3;
+  handR: Vector3;
+}
+
+export const newRigFrames = (): RigFrames => ({
+  hipsY: HIP_Y,
+  torso: new Quaternion(),
+  upperArmL: new Quaternion(),
+  upperArmR: new Quaternion(),
+  forearmL: new Quaternion(),
+  forearmR: new Quaternion(),
+  thighL: new Quaternion(),
+  thighR: new Quaternion(),
+  calfL: new Quaternion(),
+  calfR: new Quaternion(),
+  footL: new Quaternion(),
+  footR: new Quaternion(),
+  elbowL: new Vector3(),
+  elbowR: new Vector3(),
+  handL: new Vector3(),
+  handR: new Vector3(),
+});
+
+export interface RigHandle extends HumanoidHandle {
+  /** Reads the rig's joint frames (call after `apply`). */
+  frames(out: RigFrames): RigFrames;
+}
+
+// Proportions (metres): those of the Rocketbox avatars this rig drives (a 1.80 m athlete).
+export const HIP_Y = 0.895;
+const THIGH = 0.399;
+const SHIN = 0.397;
+const TORSO = 0.606;
+const SHOULDER_X = 0.21;
+const UPPER_ARM = 0.286;
+const FOREARM = 0.271;
+const HIP_X = 0.088;
+const LEG_Y = 0;
 
 const DOWN = new Vector3(0, -1, 0);
 const tmpV = new Vector3();
@@ -145,7 +201,29 @@ function Limb({
   );
 }
 
-export const Humanoid = forwardRef<HumanoidHandle, { kit: Kit }>(function Humanoid({ kit }, ref) {
+const rootInv = new Quaternion();
+const tmpWQ = new Quaternion();
+const tmpWS = new Vector3();
+const tmpWP = new Vector3();
+const tmpRootM = new Matrix4();
+
+function frameOf(g: Group | null, outQ: Quaternion): void {
+  if (!g) return;
+  g.matrixWorld.decompose(tmpWP, tmpWQ, tmpWS);
+  outQ.copy(rootInv).multiply(tmpWQ);
+}
+
+function pointOf(g: Group | null, out: Vector3): void {
+  if (!g) return;
+  out.setFromMatrixPosition(g.matrixWorld).applyMatrix4(tmpRootM);
+}
+
+/**
+ * The articulated rig. Drawn from primitives when `hidden` is false; when
+ * hidden it is a pure control skeleton for a skinned model passed as
+ * `children` (which shares its root transform).
+ */
+export const Humanoid = forwardRef<RigHandle, { kit: Kit; hidden?: boolean; children?: React.ReactNode }>(function Humanoid({ kit, hidden = false, children }, ref) {
   const root = useRef<Group>(null);
   const hips = useRef<Group>(null);
   const torso = useRef<Group>(null);
@@ -162,7 +240,7 @@ export const Humanoid = forwardRef<HumanoidHandle, { kit: Kit }>(function Humano
   const footL = useRef<Group>(null);
   const footR = useRef<Group>(null);
 
-  const handle = useMemo<HumanoidHandle>(
+  const handle = useMemo<RigHandle>(
     () => ({
       get root() {
         return root.current;
@@ -178,9 +256,34 @@ export const Humanoid = forwardRef<HumanoidHandle, { kit: Kit }>(function Humano
         t.rotation.set(p.lean, p.twist, p.tilt, 'YXZ');
         setLeg(hipL.current, kneeL.current, footL.current, p.legL, 1);
         setLeg(hipR.current, kneeR.current, footR.current, p.legR, -1);
-        if (p.handL || p.handR) r.updateMatrixWorld(true);
+        if (p.handL || p.handR || hidden) r.updateMatrixWorld(true);
         setArm(shoulderL.current, elbowL.current, p.armL, 1, p.handL);
         setArm(shoulderR.current, elbowR.current, p.armR, -1, p.handR);
+        if (hidden) r.updateMatrixWorld(true);
+      },
+      frames(out) {
+        const r = root.current;
+        if (!r) return out;
+        r.matrixWorld.decompose(tmpWP, rootInv, tmpWS);
+        rootInv.invert();
+        tmpRootM.copy(r.matrixWorld).invert();
+        out.hipsY = hips.current?.position.y ?? HIP_Y;
+        frameOf(torso.current, out.torso);
+        frameOf(shoulderL.current, out.upperArmL);
+        frameOf(shoulderR.current, out.upperArmR);
+        frameOf(elbowL.current, out.forearmL);
+        frameOf(elbowR.current, out.forearmR);
+        frameOf(hipL.current, out.thighL);
+        frameOf(hipR.current, out.thighR);
+        frameOf(kneeL.current, out.calfL);
+        frameOf(kneeR.current, out.calfR);
+        frameOf(footL.current, out.footL);
+        frameOf(footR.current, out.footR);
+        pointOf(elbowL.current, out.elbowL);
+        pointOf(elbowR.current, out.elbowR);
+        pointOf(handL.current, out.handL);
+        pointOf(handR.current, out.handR);
+        return out;
       },
       handWorld(side, out) {
         const hand = side === 'L' ? handL.current : handR.current;
@@ -189,7 +292,7 @@ export const Humanoid = forwardRef<HumanoidHandle, { kit: Kit }>(function Humano
         return out.setFromMatrixPosition(hand.matrixWorld);
       },
     }),
-    [],
+    [hidden],
   );
   useImperativeHandle(ref, () => handle, [handle]);
 
@@ -198,7 +301,8 @@ export const Humanoid = forwardRef<HumanoidHandle, { kit: Kit }>(function Humano
 
   return (
     <group ref={root}>
-      <group ref={hips} position={[0, HIP_Y, 0]}>
+      {children}
+      <group ref={hips} position={[0, HIP_Y, 0]} visible={!hidden}>
         {/* Pelvis */}
         <mesh position={[0, 0.02, 0]}>
           <boxGeometry args={[0.32, 0.18, 0.2]} />
@@ -282,14 +386,14 @@ export const Humanoid = forwardRef<HumanoidHandle, { kit: Kit }>(function Humano
           </group>
         </group>
         {/* Legs */}
-        <group position={[HIP_X, -0.04, 0]}>
+        <group position={[HIP_X, LEG_Y, 0]}>
           <Limb
             upperLen={THIGH} lowerLen={SHIN} upperRadius={0.075} lowerRadius={0.058}
             upperColor={kit.trousers} lowerColor={kit.trousers} endColor="#1d1d1f" endSize={[0.1, 0.07, 0.26]}
             upperRef={hipL} lowerRef={kneeL} endRef={footL} pads={kit.pads}
           />
         </group>
-        <group position={[-HIP_X, -0.04, 0]}>
+        <group position={[-HIP_X, LEG_Y, 0]}>
           <Limb
             upperLen={THIGH} lowerLen={SHIN} upperRadius={0.075} lowerRadius={0.058}
             upperColor={kit.trousers} lowerColor={kit.trousers} endColor="#1d1d1f" endSize={[0.1, 0.07, 0.26]}

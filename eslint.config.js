@@ -17,4 +17,9 @@ export default tseslint.config(
       '@typescript-eslint/no-non-null-assertion': 'error',
     },
   },
+  {
+    // Offline asset scripts run in Node.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: { globals: { ...globals.node } },
+  },
 );

@@ -22,6 +22,9 @@ export function resetPose(p: Pose): void {
   setLimb(p.legR, 0, 0, 0);
   p.handL = undefined;
   p.handR = undefined;
+  p.clip = undefined;
+  p.look = undefined;
+  p.grip = undefined;
 }
 
 /**
@@ -77,6 +80,7 @@ export function celebrate(p: Pose, t: number): void {
 
 /** Hands together at chest height: taking a catch or gathering the ball. */
 export function gather(p: Pose): void {
+  p.clip = undefined;
   setLimb(p.armL, 1.2, -0.15, 0.9);
   setLimb(p.armR, 1.2, -0.15, 0.9);
   p.lean = Math.max(p.lean, 0.3);
@@ -84,6 +88,7 @@ export function gather(p: Pose): void {
 
 /** Throwing arm cocked (u 0→0.5) and released (0.5→1). */
 export function throwing(p: Pose, u: number, rightArmed: boolean): void {
+  p.clip = undefined;
   const arm = rightArmed ? p.armR : p.armL;
   const other = rightArmed ? p.armL : p.armR;
   const k = Math.min(1, Math.max(0, u));

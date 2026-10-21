@@ -7,60 +7,168 @@ const LINE_Y = 0.006;
 const LINE_W = 0.05;
 const CREASE_COLOR = '#f4f1e8';
 
-/** Mown-stripe outfield texture, generated procedurally (no external assets). */
-function useOutfieldTexture(): CanvasTexture {
-  const texture = useMemo(() => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 256;
-    const ctx = canvas.getContext('2d');
+/**
+ * Mown outfield, generated procedurally: alternating stripes with soft
+ * edges, blade-level grain and clover-dark patches. Returns colour and a
+ * matching normal map so the stripes catch the light like real cut grass.
+ */
+function useOutfieldTextures(): { map: CanvasTexture; normal: CanvasTexture } {
+  const textures = useMemo(() => {
+    const size = 1024;
+    const stripes = 8;
+    const rng = new Rng('outfield');
+    const color = document.createElement('canvas');
+    color.width = size;
+    color.height = size;
+    const height = new Float32Array(size * size);
+    const ctx = color.getContext('2d');
     if (ctx) {
-      const stripes = 8;
-      for (let i = 0; i < stripes; i++) {
-        ctx.fillStyle = i % 2 === 0 ? '#3d7a33' : '#468a3a';
-        ctx.fillRect(0, (i * canvas.height) / stripes, canvas.width, canvas.height / stripes);
+      const img = ctx.createImageData(size, size);
+      const d = img.data;
+      // Low-frequency patchiness from a few overlapping blobs.
+      const blobs = Array.from({ length: 40 }, () => ({ x: rng.range(0, size), y: rng.range(0, size), r: rng.range(40, 160), k: rng.range(-0.06, 0.06) }));
+      // Evaluated on a coarse grid (it is smooth) and sampled per pixel.
+      const G = 64;
+      const coarse = new Float32Array(G * G);
+      for (let gy = 0; gy < G; gy++) {
+        for (let gx = 0; gx < G; gx++) {
+          const x = ((gx + 0.5) / G) * size;
+          const y = ((gy + 0.5) / G) * size;
+          let patch = 0;
+          for (const b of blobs) {
+            const dx = Math.min(Math.abs(x - b.x), size - Math.abs(x - b.x));
+            const dy = Math.min(Math.abs(y - b.y), size - Math.abs(y - b.y));
+            const q = (dx * dx + dy * dy) / (b.r * b.r);
+            if (q < 1) patch += b.k * (1 - q);
+          }
+          coarse[gy * G + gx] = patch;
+        }
       }
+      for (let y = 0; y < size; y++) {
+        const stripe = (y / size) * stripes;
+        const within = stripe - Math.floor(stripe);
+        const light = Math.floor(stripe) % 2 === 0;
+        // Soft transition between stripes.
+        const edge = Math.min(1, Math.min(within, 1 - within) * 14);
+        const lightness = light ? 0.5 + 0.5 * edge : 0.5 - 0.5 * edge;
+        for (let x = 0; x < size; x++) {
+          const patch = coarse[Math.floor((y / size) * G) * G + Math.floor((x / size) * G)] ?? 0;
+          const grain = (rng.next() - 0.5) * 0.12;
+          const v = 0.9 + lightness * 0.11 + grain + patch;
+          const i = (y * size + x) * 4;
+          d[i] = Math.max(0, Math.min(255, 58 * v));
+          d[i + 1] = Math.max(0, Math.min(255, 118 * v + 6 * grain * 40));
+          d[i + 2] = Math.max(0, Math.min(255, 44 * v));
+          d[i + 3] = 255;
+          // Blades lean with the mowing direction: stripes differ in slope.
+          height[y * size + x] = grain * 0.8 + (light ? 0.06 : -0.06) * Math.sin(x * 0.9);
+        }
+      }
+      ctx.putImageData(img, 0, 0);
     }
-    const tex = new CanvasTexture(canvas);
-    tex.wrapS = RepeatWrapping;
-    tex.wrapT = RepeatWrapping;
-    tex.repeat.set(6, 6);
-    tex.colorSpace = SRGBColorSpace;
-    tex.anisotropy = 4;
-    return tex;
+    const normal = document.createElement('canvas');
+    normal.width = size;
+    normal.height = size;
+    const nctx = normal.getContext('2d');
+    if (nctx) {
+      const img = nctx.createImageData(size, size);
+      const d = img.data;
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const h = (xx: number, yy: number) => height[((yy + size) % size) * size + ((xx + size) % size)] ?? 0;
+          const dx = (h(x + 1, y) - h(x - 1, y)) * 2.5;
+          const dy = (h(x, y + 1) - h(x, y - 1)) * 2.5;
+          const len = Math.hypot(dx, dy, 1);
+          const i = (y * size + x) * 4;
+          d[i] = (-dx / len) * 127 + 128;
+          d[i + 1] = (dy / len) * 127 + 128;
+          d[i + 2] = (1 / len) * 127 + 128;
+          d[i + 3] = 255;
+        }
+      }
+      nctx.putImageData(img, 0, 0);
+    }
+    const map = new CanvasTexture(color);
+    const nmap = new CanvasTexture(normal);
+    for (const t of [map, nmap]) {
+      t.wrapS = RepeatWrapping;
+      t.wrapT = RepeatWrapping;
+      t.repeat.set(5, 5);
+      t.anisotropy = 8;
+    }
+    map.colorSpace = SRGBColorSpace;
+    return { map, normal: nmap };
   }, []);
-  useEffect(() => () => texture.dispose(), [texture]);
-  return texture;
+  useEffect(
+    () => () => {
+      textures.map.dispose();
+      textures.normal.dispose();
+    },
+    [textures],
+  );
+  return textures;
 }
 
-/** Worn pitch: tan base, speckle, and scuffed ends where bowlers land and batters stand. */
+/**
+ * The pitch: rolled, dry clay with a thin covering of live grass down the
+ * middle, hairline cracks, and the scuffed, darker areas where batters
+ * stand and bowlers land.
+ */
 function usePitchTexture(): CanvasTexture {
   const texture = useMemo(() => {
+    const w = 256;
+    const h = 2048;
     const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 1024;
+    canvas.width = w;
+    canvas.height = h;
     const ctx = canvas.getContext('2d');
+    const rng = new Rng('pitch');
     if (ctx) {
-      const g = ctx.createLinearGradient(0, 0, 128, 0);
-      g.addColorStop(0, '#b9a26c');
-      g.addColorStop(0.5, '#cdb784');
-      g.addColorStop(1, '#b9a26c');
+      const g = ctx.createLinearGradient(0, 0, w, 0);
+      g.addColorStop(0, '#b49a62');
+      g.addColorStop(0.2, '#c6ae78');
+      g.addColorStop(0.5, '#cdb683');
+      g.addColorStop(0.8, '#c6ae78');
+      g.addColorStop(1, '#b49a62');
       ctx.fillStyle = g;
-      ctx.fillRect(0, 0, 128, 1024);
-      const rng = new Rng('pitch');
-      for (let i = 0; i < 9000; i++) {
-        const shade = rng.int(150, 205);
-        ctx.fillStyle = `rgba(${shade}, ${shade - 25}, ${shade - 70}, ${rng.range(0.1, 0.35)})`;
-        ctx.fillRect(rng.int(0, 127), rng.int(0, 1023), rng.int(1, 3), rng.int(1, 3));
+      ctx.fillRect(0, 0, w, h);
+      // Live grass, thicker away from the ends.
+      for (let i = 0; i < 26000; i++) {
+        const y = rng.range(0, h);
+        const fromEnd = Math.min(y, h - y) / (h / 2);
+        if (!rng.chance(0.25 + 0.55 * fromEnd)) continue;
+        ctx.fillStyle = `rgba(${rng.int(110, 140)}, ${rng.int(130, 160)}, ${rng.int(70, 90)}, ${rng.range(0.15, 0.4)})`;
+        ctx.fillRect(rng.range(0, w), y, 1, rng.range(1, 3));
       }
-      // Footmarks and the batting areas at each end.
-      for (const end of [70, 954]) {
-        for (let i = 0; i < 260; i++) {
-          ctx.fillStyle = `rgba(110, 82, 45, ${rng.range(0.08, 0.25)})`;
-          const x = 64 + rng.boundedNormal(26);
-          const y = end + rng.boundedNormal(40);
+      // Grain.
+      for (let i = 0; i < 30000; i++) {
+        const shade = rng.int(150, 215);
+        ctx.fillStyle = `rgba(${shade}, ${shade - 25}, ${shade - 72}, ${rng.range(0.08, 0.3)})`;
+        ctx.fillRect(rng.range(0, w), rng.range(0, h), rng.range(1, 2.5), rng.range(1, 2.5));
+      }
+      // Hairline cracks.
+      ctx.strokeStyle = 'rgba(90, 68, 38, 0.35)';
+      ctx.lineWidth = 0.8;
+      for (let i = 0; i < 70; i++) {
+        let x = rng.range(20, w - 20);
+        let y = rng.range(0, h);
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        for (let k = 0; k < 6; k++) {
+          x += rng.range(-14, 14);
+          y += rng.range(-14, 14);
+          ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+      // Batting areas and bowlers' footmarks at each end.
+      for (const end of [140, h - 140]) {
+        for (let i = 0; i < 900; i++) {
+          ctx.fillStyle = `rgba(${rng.int(95, 120)}, ${rng.int(72, 90)}, 42, ${rng.range(0.05, 0.2)})`;
+          const x = w / 2 + rng.boundedNormal(48);
+          const y = end + rng.boundedNormal(80);
           ctx.beginPath();
-          ctx.ellipse(x, y, rng.range(1, 4), rng.range(2, 6), 0, 0, Math.PI * 2);
+          ctx.ellipse(x, y, rng.range(2, 7), rng.range(3, 10), rng.range(0, 3), 0, Math.PI * 2);
           ctx.fill();
         }
       }
@@ -100,7 +208,7 @@ function Creases({ dir }: { dir: 1 | -1 }) {
 }
 
 export function Ground() {
-  const outfield = useOutfieldTexture();
+  const outfield = useOutfieldTextures();
   const pitch = usePitchTexture();
   const stadiumRadius = FIELD.boundaryRadius + 16;
   return (
@@ -108,7 +216,7 @@ export function Ground() {
       {/* Outfield */}
       <mesh rotation-x={-Math.PI / 2} receiveShadow>
         <circleGeometry args={[stadiumRadius, 96]} />
-        <meshStandardMaterial map={outfield} roughness={1} />
+        <meshStandardMaterial map={outfield.map} normalMap={outfield.normal} normalScale={[0.6, 0.6]} roughness={0.92} />
       </mesh>
 
       {/* Pitch strip */}
