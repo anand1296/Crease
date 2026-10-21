@@ -37,10 +37,10 @@ export function Scorecard({ innings, batting, bowling }: { innings: InningsState
           <tr>
             <th scope="col">Batter</th>
             <th scope="col" />
-            <th scope="col">R</th>
-            <th scope="col">B</th>
-            <th scope="col">4s</th>
-            <th scope="col">6s</th>
+            <th scope="col" className="num">R</th>
+            <th scope="col" className="num">B</th>
+            <th scope="col" className="num">4s</th>
+            <th scope="col" className="num">6s</th>
           </tr>
         </thead>
         <tbody>
@@ -74,11 +74,11 @@ export function Scorecard({ innings, batting, bowling }: { innings: InningsState
         <thead>
           <tr>
             <th scope="col">{bowling.name} bowling</th>
-            <th scope="col">O</th>
-            <th scope="col">M</th>
-            <th scope="col">R</th>
-            <th scope="col">W</th>
-            <th scope="col">Econ</th>
+            <th scope="col" className="num">O</th>
+            <th scope="col" className="num">M</th>
+            <th scope="col" className="num">R</th>
+            <th scope="col" className="num">W</th>
+            <th scope="col" className="num">Econ</th>
           </tr>
         </thead>
         <tbody>

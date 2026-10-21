@@ -5,6 +5,12 @@ import type { InningsState } from '../game/match/match.ts';
 import { Scorecard } from './Scorecard.tsx';
 import { HowToPlay } from './Menus.tsx';
 import { useEffect, useRef, useState } from 'react';
+import type { GameAction } from '../game/input/keyboard.ts';
+import { keyboard } from '../game/input/keyboardInstance.ts';
+import { shotFromInput } from '../game/input/battingControls.ts';
+import { SHOTS } from '../game/batting/shots.ts';
+import { howOut } from './Scorecard.tsx';
+import { oversText } from '../game/match/match.ts';
 import type { CoachNote } from '../game/ai/coach.ts';
 import { speak } from '../game/audio/voice.ts';
 
@@ -23,7 +29,9 @@ export function Hud() {
       <BowlingPanel />
       <BowlerChoice />
       <Commentary />
-      <ControlsBar />
+      <ControlsPanel />
+      <NextPrompt />
+      <ReviewCard />
       <InningsBreak />
       <Result />
       <HelpOverlay />
@@ -32,6 +40,7 @@ export function Hud() {
   );
 }
 
+/** Broadcast-style score bar along the bottom of the screen. */
 function ScoreStrip() {
   const snap = useGame((s) => s.snap);
   if (!snap) return null;
@@ -39,52 +48,59 @@ function ScoreStrip() {
   const fig = (c: { runs: number; balls: number } | undefined) => (c ? `${c.runs} (${c.balls})` : '0 (0)');
   const rate = snap.balls ? ((snap.runs / snap.balls) * 6).toFixed(2) : '0.00';
   const required = snap.needed !== undefined && snap.ballsLeft ? ((snap.needed / snap.ballsLeft) * 6).toFixed(2) : undefined;
+  const bowlerOvers = bowler.card ? `${Math.floor(bowler.card.balls / 6)}.${bowler.card.balls % 6}` : '0.0';
   return (
-    <section className="strip" aria-label="Scoreboard" data-testid="scoreboard">
-      <div className="strip-main" style={{ borderColor: snap.battingTeam.colors.primary }}>
-        <span className="strip-team" style={{ background: snap.battingTeam.colors.primary, color: snap.battingTeam.colors.secondary }}>
-          {snap.battingTeam.shortName}
-        </span>
-        <span className="strip-score" data-testid="score">
+    <section className="scorebar" aria-label="Scoreboard" data-testid="scoreboard">
+      <div className="sb-team" style={{ background: snap.battingTeam.colors.primary, color: snap.battingTeam.colors.secondary }}>
+        {snap.battingTeam.shortName}
+      </div>
+      <div className="sb-score">
+        <span className="sb-runs" data-testid="score">
           {snap.runs}/{snap.wickets}
         </span>
-        <span className="strip-overs" data-testid="overs">
-          {snap.overs} <small>of {snap.maxOvers}</small>
+        <span className="sb-overs" data-testid="overs">
+          {snap.overs} <small>({snap.maxOvers})</small>
         </span>
-        <span className="strip-rate">RR {rate}</span>
       </div>
-      {snap.target !== undefined ? (
-        <div className="strip-chase" data-testid="chase">
-          Need {snap.needed} from {snap.ballsLeft} balls{required ? ` · required ${required}` : ''}
-        </div>
-      ) : null}
-      <div className="strip-players">
-        <span className="striker">
-          {striker.name}* <b>{fig(striker.card)}</b>
+      <div className="sb-batters">
+        <span className="on">
+          <i aria-hidden="true">▸</i>
+          {striker.name} <b>{fig(striker.card)}</b>
         </span>
         <span>
+          <i aria-hidden="true" />
           {nonStriker.name} <b>{fig(nonStriker.card)}</b>
         </span>
-        <span className="bowler">
-          {bowler.name}{' '}
-          <b>
-            {bowler.card ? `${bowler.card.wickets}-${bowler.card.runs}` : '0-0'}
-          </b>
-          <span className="fatigue" title={`Fatigue ${Math.round(bowler.fatigue * 100)}%`}>
-            <span style={{ width: `${Math.round(bowler.fatigue * 100)}%` }} />
-          </span>
+      </div>
+      <div className="sb-bowler">
+        <span>
+          {bowler.name} <b>{bowler.card ? `${bowler.card.wickets}-${bowler.card.runs}` : '0-0'}</b> <small>{bowlerOvers}</small>
+        </span>
+        <span className="sb-over" aria-label="This over">
+          {snap.recent.map((r, i) => (
+            <span key={i} className={r === 'W' ? 'ball w' : r === '4' || r === '6' ? 'ball b' : 'ball'}>
+              {r}
+            </span>
+          ))}
         </span>
       </div>
-      <div className="recent" aria-label="This over">
-        {snap.recent.map((r, i) => (
-          <span key={i} className={r === 'W' ? 'ball w' : r === '4' || r === '6' ? 'ball b' : 'ball'}>
-            {r}
+      <div className="sb-info">
+        {snap.target !== undefined ? (
+          <span className="sb-chase" data-testid="chase">
+            Need {snap.needed} from {snap.ballsLeft}
+            {required ? <small> · RRR {required}</small> : null}
           </span>
-        ))}
-      </div>
-      <div className="role" data-testid="role">
-        {snap.userBatting ? 'You are batting' : 'You are bowling'}
-        {snap.fieldPhase === 'powerplay' ? <span className="phase-tag" data-testid="powerplay">Powerplay</span> : null}
+        ) : (
+          <span>RR {rate}</span>
+        )}
+        <span className="sb-role" data-testid="role">
+          {snap.userBatting ? 'You are batting' : 'You are bowling'}
+          {snap.fieldPhase === 'powerplay' ? (
+            <span className="phase-tag" data-testid="powerplay">
+              Powerplay
+            </span>
+          ) : null}
+        </span>
       </div>
     </section>
   );
@@ -124,7 +140,8 @@ function OutcomeBanner() {
   const count = useGame((s) => s.snap?.ballCount ?? 0);
   const phase = useGame((s) => s.snap?.phase);
   const ballPhase = useGame((s) => s.snap?.ballPhase);
-  const visible = o && (phase === 'between' || phase === 'aiming' || phase === 'chooseBowler' || ballPhase === 'dead');
+  const reviewKind = useGame((s) => s.snap?.review?.kind);
+  const visible = o && (phase === 'between' || phase === 'aiming' || ballPhase === 'dead' || (phase === 'review' && reviewKind === 'ball'));
   if (!o || !visible) return null;
   const t = timingText(o);
   const big = o.boundary !== undefined || o.wicket !== undefined;
@@ -219,37 +236,6 @@ function bowlingStyleShort(style: string, arm: string): string {
   const a = arm === 'left' ? 'LA' : 'RA';
   const s: Record<string, string> = { fast: 'fast', fastMedium: 'fast-med', medium: 'medium', offSpin: arm === 'left' ? 'orthodox' : 'off-spin', legSpin: 'wrist spin' };
   return `${a} ${s[style] ?? style}`;
-}
-
-function ControlsBar() {
-  const snap = useGame((s) => s.snap);
-  const help = useGame((s) => s.showHelp);
-  // Only between balls: never over the action.
-  if (help || !snap || snap.phase === 'complete' || snap.phase === 'delivery' || snap.phase === 'inningsBreak') return null;
-  return (
-    <footer className="controls" aria-label="Controls">
-      {snap.userBatting ? (
-        <>
-          <span><kbd>↑↓←→</kbd> direction</span>
-          <span><kbd>D</kbd> drive</span>
-          <span><kbd>A</kbd> loft</span>
-          <span><kbd>S</kbd> defend</span>
-          <span><kbd>W</kbd> sweep</span>
-          <span><kbd>X</kbd> leave</span>
-          <span><kbd>Shift</kbd> back foot</span>
-          <span><kbd>Space</kbd> run</span>
-        </>
-      ) : (
-        <>
-          <span><kbd>↑↓←→</kbd> target</span>
-          <span><kbd>Q</kbd><kbd>E</kbd> delivery</span>
-          <span><kbd>Space</kbd> run in / release</span>
-        </>
-      )}
-      <span><kbd>H</kbd> help</span>
-      <span><kbd>P</kbd> pause</span>
-    </footer>
-  );
 }
 
 function InningsBreak() {
@@ -412,5 +398,249 @@ function Coach({ notes }: { notes: { batting: readonly CoachNote[]; bowling: rea
         ))}
       </ul>
     </section>
+  );
+}
+
+// --- Controls panel -----------------------------------------------------------------------
+
+/** Keys currently held, plus the last one pressed (lit briefly), polled each animation frame. */
+function useKeys(): { held: ReadonlySet<GameAction>; flash: GameAction | undefined; dir: { x: -1 | 0 | 1; y: -1 | 0 | 1 }; back: boolean } {
+  const [state, setState] = useState<{ held: ReadonlySet<GameAction>; flash: GameAction | undefined; dir: { x: -1 | 0 | 1; y: -1 | 0 | 1 }; back: boolean }>({
+    held: new Set(),
+    flash: undefined,
+    dir: { x: 0, y: 0 },
+    back: false,
+  });
+  useEffect(() => {
+    const watched: GameAction[] = ['left', 'right', 'up', 'down', 'backFoot', 'ground', 'loft', 'defend', 'sweep', 'leave', 'run', 'bowl', 'nextDelivery', 'prevDelivery'];
+    let raf = 0;
+    let last = '';
+    const loop = () => {
+      const held = watched.filter((a) => keyboard.isHeld(a));
+      const lp = keyboard.lastPress;
+      const flash = lp && performance.now() - lp.at < 450 ? lp.action : undefined;
+      const key = `${held.join(',')}|${flash ?? ''}`;
+      if (key !== last) {
+        last = key;
+        setState({ held: new Set(held), flash, dir: keyboard.direction(), back: keyboard.isHeld('backFoot') });
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return state;
+}
+
+function Key({ label, on, wide }: { label: string; on: boolean; wide?: boolean }) {
+  return <kbd className={`k ${on ? 'on' : ''} ${wide ? 'wide' : ''}`}>{label}</kbd>;
+}
+
+/**
+ * The controls, always on screen while you bat or bowl: every key lights up
+ * as you press it, and the stroke keys show which shot they will play with
+ * the direction you are holding.
+ */
+function ControlsPanel() {
+  const snap = useGame((s) => s.snap);
+  const help = useGame((s) => s.showHelp);
+  const { held, flash, dir, back } = useKeys();
+  if (help || !snap || snap.phase === 'inningsBreak' || snap.phase === 'complete' || snap.phase === 'chooseBowler') return null;
+  if (snap.review && snap.review.kind !== 'ball') return null;
+  const lit = (a: GameAction) => held.has(a) || flash === a;
+  const arrows = (
+    <div className="arrows" aria-hidden="true">
+      <span />
+      <Key label="↑" on={lit('up')} />
+      <span />
+      <Key label="←" on={lit('left')} />
+      <Key label="↓" on={lit('down')} />
+      <Key label="→" on={lit('right')} />
+    </div>
+  );
+  if (snap.userBatting) {
+    const hand = snap.striker.hand;
+    const name = (a: 'ground' | 'loft' | 'defend' | 'sweep') => {
+      const shot = shotFromInput(a, dir, back, hand);
+      return shot.push ? 'Push into the gap' : SHOTS[shot.shot].name;
+    };
+    const rows: { a: GameAction; k: string; label: string }[] = [
+      { a: 'ground', k: 'D', label: name('ground') },
+      { a: 'loft', k: 'A', label: name('loft') },
+      { a: 'defend', k: 'S', label: name('defend') },
+      { a: 'sweep', k: 'W', label: name('sweep') },
+      { a: 'leave', k: 'X', label: 'Leave' },
+      { a: 'run', k: 'Space', label: snap.runsCalled > 0 ? `Run (${snap.runsCalled} called)` : 'Run' },
+    ];
+    return (
+      <section className="keys" aria-label="Batting controls" data-testid="controls-panel">
+        <div className="keys-head">
+          <span>Batting</span>
+          <span className="dim">aim, then press a stroke as the ball arrives</span>
+        </div>
+        <div className="keys-body">
+          <div className="keys-aim">
+            {arrows}
+            <div className="aim-label">{dir.x === 0 && dir.y === 0 ? 'Direction' : 'Aiming'}</div>
+            <Key label="Shift" on={lit('backFoot')} wide />
+            <div className="aim-label">{back ? 'Back foot' : 'Front foot'}</div>
+          </div>
+          <ul>
+            {rows.map((r) => (
+              <li key={r.a} className={lit(r.a) ? 'on' : ''}>
+                <Key label={r.k} on={lit(r.a)} wide={r.k.length > 1} />
+                <span>{r.label}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+    );
+  }
+  return (
+    <section className="keys" aria-label="Bowling controls" data-testid="controls-panel">
+      <div className="keys-head">
+        <span>Bowling</span>
+      </div>
+      <div className="keys-body">
+        <div className="keys-aim">
+          {arrows}
+          <div className="aim-label">Move the target</div>
+        </div>
+        <ul>
+          <li className={lit('prevDelivery') || lit('nextDelivery') ? 'on' : ''}>
+            <Key label="Q" on={lit('prevDelivery')} />
+            <Key label="E" on={lit('nextDelivery')} />
+            <span>Change delivery</span>
+          </li>
+          <li className={lit('bowl') ? 'on' : ''}>
+            <Key label="Space" on={lit('bowl')} wide />
+            <span>Run in, then release on the gold</span>
+          </li>
+        </ul>
+      </div>
+    </section>
+  );
+}
+
+// --- Between balls ------------------------------------------------------------------------
+
+/** "Next ball" prompt while the game waits after an ordinary ball. */
+function NextPrompt() {
+  const snap = useGame((s) => s.snap);
+  const match = useGame((s) => s.match);
+  if (!snap || !match) return null;
+  const waiting = snap.phase === 'review' && snap.review?.kind === 'ball';
+  const dead = snap.phase === 'delivery' && snap.ballPhase === 'dead';
+  if (!waiting && !dead) return null;
+  return (
+    <button type="button" className={`next-prompt ${waiting ? 'ready' : ''}`} onClick={() => match.next()} data-testid="next-ball">
+      {waiting ? (
+        <>
+          Next ball <kbd>Space</kbd> <span className="dim">or</span> <kbd>Enter</kbd>
+        </>
+      ) : (
+        <>
+          <kbd>Enter</kbd> <span className="dim">skip</span>
+        </>
+      )}
+    </button>
+  );
+}
+
+/** Start of an innings, end of an over, a wicket: what happened, the scorecard, and a key to carry on. */
+function ReviewCard() {
+  const snap = useGame((s) => s.snap);
+  const match = useGame((s) => s.match);
+  const review = snap?.review;
+  if (!snap || !match || !review || review.kind === 'ball') return null;
+  const inn = match.current;
+  const batting = match.side(inn.batting).team;
+  const bowling = match.side(inn.bowling).team;
+  const keeper = match.keeperOf(inn.bowling).name;
+  const rate = inn.balls ? ((inn.runs / inn.balls) * 6).toFixed(2) : '0.00';
+  const chase = snap.needed !== undefined && snap.ballsLeft !== undefined ? `${batting.name} need ${snap.needed} from ${snap.ballsLeft} balls` : undefined;
+  const overLine = (o: { number: number; bowler: string; figures: { balls: number; maidens: number; runs: number; wickets: number } | undefined; balls: readonly string[]; runs: number }) => (
+    <div className="over-line">
+      <span className="over-title">End of over {o.number}</span>
+      <span className="over-balls">
+        {o.balls.map((b, i) => (
+          <span key={i} className={b === 'W' ? 'ball w' : b === '4' || b === '6' ? 'ball b' : 'ball'}>
+            {b}
+          </span>
+        ))}
+      </span>
+      <span>
+        {o.runs} run{o.runs === 1 ? '' : 's'} · {o.bowler}{' '}
+        {o.figures ? `${oversText(o.figures.balls)}-${o.figures.maidens}-${o.figures.runs}-${o.figures.wickets}` : ''}
+      </span>
+    </div>
+  );
+  return (
+    <div className="overlay review" role="dialog" aria-label="Between balls" data-testid="review">
+      <div className="panel wide">
+        {review.kind === 'start' ? (
+          <>
+            <h2>{inn.target === undefined ? `${match.config.home.team.name} v ${match.config.away.team.name}` : 'Second innings'}</h2>
+            <p className="lead">
+              {inn.target === undefined ? snap.toss : `${batting.name} need ${inn.target} to win from ${match.config.overs} overs.`}{' '}
+              <strong>{snap.userBatting ? 'You are batting.' : 'You are bowling.'}</strong>
+            </p>
+            {snap.userBatting ? (
+              <ol className="howto">
+                <li>
+                  Hold an <kbd>arrow</kbd> for where to hit it (as you see it on screen); <kbd>Shift</kbd> for the back foot.
+                </li>
+                <li>
+                  As the ball arrives press <kbd>D</kbd> ground shot, <kbd>A</kbd> lofted, <kbd>S</kbd> defend, <kbd>W</kbd> sweep, or <kbd>X</kbd> to leave. Press slightly early — the bat takes a moment to come down.
+                </li>
+                <li>
+                  If you hit it, <kbd>Space</kbd> to run — again for each extra run.
+                </li>
+              </ol>
+            ) : (
+              <ol className="howto">
+                <li>Choose the bowler with the number keys.</li>
+                <li>
+                  <kbd>Q</kbd>/<kbd>E</kbd> choose the delivery; the <kbd>arrows</kbd> move the target on the pitch.
+                </li>
+                <li>
+                  <kbd>Space</kbd> to run in, <kbd>Space</kbd> again when the needle is in the gold.
+                </li>
+              </ol>
+            )}
+            <p className="dim small">The controls stay on screen at the bottom left. After every ball the game waits for you.</p>
+          </>
+        ) : review.kind === 'over' ? (
+          <>
+            {overLine(review.over)}
+            <p className="lead">
+              {batting.name} {inn.runs}/{inn.wickets} after {oversText(inn.balls)} overs · run rate {rate}
+              {chase ? <> · {chase}</> : null}
+            </p>
+            <Scorecard innings={inn} batting={batting} bowling={bowling} />
+          </>
+        ) : (
+          <>
+            <div className="wicket-title">Wicket</div>
+            <h2 className="dismissal">
+              {review.batter.player.name} <span className="dim">{howOut(review.batter, keeper)}</span>{' '}
+              <span className="figs">
+                {review.batter.runs} ({review.batter.balls})
+              </span>
+            </h2>
+            <p className="lead">
+              {review.batter.fours} four{review.batter.fours === 1 ? '' : 's'}, {review.batter.sixes} six{review.batter.sixes === 1 ? '' : 'es'} · fall of wicket {review.fall.wicket}-{review.fall.runs} ({oversText(review.fall.balls)} ov) · partnership{' '}
+              {review.partnership.runs} ({review.partnership.balls}){review.next ? <> · next in: <strong>{review.next}</strong></> : null}
+            </p>
+            {review.over ? overLine(review.over) : null}
+            <Scorecard innings={inn} batting={batting} bowling={bowling} />
+          </>
+        )}
+        <button type="button" className="continue" onClick={() => match.next()} autoFocus data-testid="continue-review">
+          {review.kind === 'start' ? 'Start' : 'Continue'} <kbd>Enter</kbd>
+        </button>
+      </div>
+    </div>
   );
 }

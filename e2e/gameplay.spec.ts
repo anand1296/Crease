@@ -62,6 +62,11 @@ test.describe('gameplay', () => {
     await expect(page.getByTestId('score')).toHaveText('0/0');
     await expect(page.getByTestId('role')).toContainText('You are batting');
     await expect(page.getByTestId('scoreboard')).toContainText('AUS');
+    // The match waits at the intro until the player is ready; the controls are on screen.
+    await expect(page.getByTestId('review')).toBeVisible();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('review')).toBeHidden();
+    await expect(page.getByTestId('controls-panel')).toBeVisible();
 
     // Three strokes.
     const strokes = [{ press: 'KeyD' }, { hold: 'ArrowLeft', press: 'KeyD' }, { press: 'KeyS' }];
@@ -72,6 +77,12 @@ test.describe('gameplay', () => {
       await page.keyboard.press('Space');
       await expect.poll(() => balls(page), { timeout: 90_000 }).toBe(i + 1);
       await expect(page.getByTestId('banner')).toBeVisible();
+      // After every ball the game waits for a key press (a wicket or over end shows a card).
+      await expect.poll(() => page.evaluate(() => window.__crease?.phase?.()), { timeout: 90_000 }).toBe('review');
+      const waitingFor = await page.evaluate(() => (document.querySelector('[data-testid="review"]') ? 'card' : 'next'));
+      if (waitingFor === 'next') await expect(page.getByTestId('next-ball')).toBeVisible();
+      await page.keyboard.press('Enter');
+      await expect.poll(() => page.evaluate(() => window.__crease?.phase?.())).not.toBe('review');
     }
     const score = await page.evaluate(() => window.__crease?.score?.());
     expect((score?.balls ?? 0) + 3).toBeGreaterThanOrEqual(3);
@@ -96,6 +107,8 @@ test.describe('gameplay', () => {
     await page.getByRole('button', { name: 'We bowl' }).click();
     await page.getByTestId('start-match').click();
     await expect(page.getByTestId('role')).toContainText('You are bowling');
+    await expect(page.getByTestId('review')).toBeVisible();
+    await page.keyboard.press('Enter');
 
     await expect(page.getByTestId('bowler-choice')).toBeVisible({ timeout: 20_000 });
     await page.keyboard.press('Digit2');

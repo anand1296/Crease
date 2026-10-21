@@ -120,11 +120,17 @@ describe('Match (computer v computer)', () => {
   });
 });
 
+/** Steps the match, pressing "next" whenever it waits for the player. */
+function tick(m: Match, dt: number): void {
+  if (m.phase === 'review') m.next();
+  else m.step(dt);
+}
+
 describe('Match (human)', () => {
   it('a human bowling side chooses each over’s bowler from the eligible list', () => {
     const m = new Match(config({ home: side(team(0), 'human'), battingFirst: 'away', seed: 'captain' }));
     const dt = 1 / 240;
-    while (m.phase !== 'chooseBowler') m.step(dt);
+    while (m.phase !== 'chooseBowler') tick(m, dt);
     const eligible = m.eligibleBowlers();
     expect(eligible.length).toBeGreaterThanOrEqual(5);
     expect(eligible.some((p) => p.id === m.keeperOf('home').id)).toBe(false);
@@ -136,19 +142,79 @@ describe('Match (human)', () => {
     // Bowl the over; the same bowler is then not eligible.
     const phase = () => m.phase;
     for (let ball = 0; ball < 6; ball++) {
-      while (phase() !== 'aiming') m.step(dt);
+      while (phase() !== 'aiming') tick(m, dt);
       m.bowlButton();
-      while (phase() === 'delivery') m.step(dt);
+      while (phase() === 'delivery') tick(m, dt);
       if (m.current.balls >= 6) break;
     }
-    while (phase() !== 'chooseBowler' && phase() !== 'complete' && phase() !== 'inningsBreak') m.step(dt);
+    while (phase() !== 'chooseBowler' && phase() !== 'complete' && phase() !== 'inningsBreak') tick(m, dt);
     if (phase() === 'chooseBowler') expect(m.eligibleBowlers().some((p) => p.id === pick.id)).toBe(false);
   });
 
   it('a human batter who calls no runs scores only boundaries', () => {
     const m = new Match(config({ home: side(team(0), 'human'), seed: 'no-runs', overs: 2 }));
     const dt = 1 / 240;
-    while (m.history.length < 8 && m.phase !== 'complete' && m.time < 2000) m.step(dt);
+    while (m.history.length < 8 && m.phase !== 'complete' && m.time < 2000) tick(m, dt);
     for (const o of m.history) expect(o.runs === 0 || o.boundary !== undefined).toBe(true);
+  });
+
+  it('waits for the player after every ball, and summarises overs and wickets', () => {
+    const m = new Match(config({ home: side(team(0), 'human'), seed: 'review', overs: 3 }));
+    const dt = 1 / 240;
+    const kinds = new Set<string>();
+    let waited = 0;
+    let wicketCards = 0;
+    let overSummaries = 0;
+    while (m.phase !== 'complete' && m.phase !== 'inningsBreak' && m.time < 5000) {
+      m.step(dt);
+      if (m.phase === 'review') {
+        const r = m.review;
+        if (!r) throw new Error('review without details');
+        kinds.add(r.kind);
+        // It really waits: stepping does nothing until the player moves on.
+        const balls = m.history.length;
+        for (let i = 0; i < 2400; i++) m.step(dt);
+        expect(m.phase).toBe('review');
+        expect(m.history.length).toBe(balls);
+        if (r.kind === 'over' || (r.kind === 'wicket' && r.over)) overSummaries += 1;
+        if (r.kind === 'over') {
+          expect(r.over.balls.length).toBeGreaterThanOrEqual(6);
+          expect(r.over.number).toBeGreaterThanOrEqual(1);
+        }
+        if (r.kind === 'wicket') {
+          wicketCards += 1;
+          expect(r.batter.dismissal).toBeDefined();
+          expect(r.fall.batter).toBe(r.batter.player.name);
+        }
+        waited += 1;
+        expect(m.next()).toBe(true);
+        expect(m.phase).toBe('between');
+      }
+    }
+    expect(waited).toBeGreaterThanOrEqual(12);
+    expect(kinds.has('ball')).toBe(true);
+    // Overs are summarised (on their own, or on the wicket card when the last ball took a wicket).
+    expect(overSummaries).toBeGreaterThanOrEqual(2);
+    // Every wicket got a wicket card.
+    const wickets = m.history.filter((o) => o.wicket).length;
+    expect(wicketCards).toBe(wickets);
+  });
+
+  it('runs at the chosen speed without changing what happens', () => {
+    const a = new Match(config({ seed: 'speed' }));
+    const b = new Match(config({ seed: 'speed' }));
+    b.speed = 0.65;
+    let fa = 0;
+    let fb = 0;
+    while (a.phase !== 'complete' && fa < 200000) {
+      a.advance(1 / 60);
+      fa++;
+    }
+    while (b.phase !== 'complete' && fb < 300000) {
+      b.advance(1 / 60);
+      fb++;
+    }
+    expect(b.result?.summary).toBe(a.result?.summary);
+    expect(fb / fa).toBeCloseTo(1 / 0.65, 1);
   });
 });

@@ -243,12 +243,17 @@ function Players({ match }: { match: Match }) {
   const runnerBat = useRef<Group>(null);
   const batState = useMemo(() => ({ body: new Vector3(), hands: new Vector3(), dir: new Vector3(0, -1, 0) }), []);
   const look = useMemo(() => new Vector3(), []);
+  const lastCycle = useRef<unknown>(null);
 
   useFrame((_, dtRaw) => {
     const dt = Math.min(0.05, dtRaw);
     const c = match.cycle;
     const t = match.time;
     const field = c?.opts.field ?? match.field;
+    // When a ball ends (and when the next begins) the director cuts to the wide shot; under that
+    // cut everyone is put back in their place, as on television — nobody wanders back across the screen.
+    const reset = c !== lastCycle.current;
+    lastCycle.current = c;
     const wicket = c?.phase === 'dead' && c.outcome?.wicket !== undefined;
     const keeper = match.keeperOf(match.current.bowling);
     // Everyone watches the ball (or, before it is bowled, the bowler).
@@ -256,7 +261,7 @@ function Players({ match }: { match: Match }) {
     const bowlerMotion = motions.get(match.bowler.id);
     if (ballPos && c?.phase !== 'runUp') look.set(ballPos.x, ballPos.y, ballPos.z);
     else if (bowlerMotion) look.set(bowlerMotion.pos.x, 1.6, bowlerMotion.pos.z);
-    // Fielders walk in a few paces as the bowler runs up, and drift back after the ball.
+    // The ring walks in a pace or two as the bowler runs up.
     const walkIn = c?.phase === 'runUp' ? Math.min(1, c.time / c.releaseTime) : c?.phase === 'inFlight' ? 1 : 0;
 
     // ---- Fielding side ----
@@ -270,12 +275,21 @@ function Players({ match }: { match: Match }) {
       }
       const p = m.pose;
       const isBowler = f.position.id === 'bowler';
+      if (reset && !isBowler) {
+        m.pos.set(f.start.x, 0, f.start.z);
+        m.facing = f.player.id === keeper.id ? Math.PI : Math.atan2(0 - f.start.x, STRIKER_STUMPS_Z - f.start.z);
+      }
+      if (reset && isBowler && !c) {
+        const mark = bowlerMark(match);
+        m.pos.set(mark.x, 0, mark.z);
+        m.facing = 0;
+      }
       const facingBatter = Math.atan2(0 - m.pos.x, STRIKER_STUMPS_Z - m.pos.z);
       if (isBowler) {
         poseBowler(match, m, dt, t);
       } else if (f.player.id === keeper.id) {
         const live = c && (c.phase === 'struck' || c.phase === 'dead') ? c.fielderPos[i] : undefined;
-        const moved = approach(m, live?.x ?? f.start.x, live?.z ?? f.start.z, live ? 8 : 3, dt);
+        const moved = live ? approach(m, live.x, live.z, 8, dt) : 0;
         if (moved > 0.01) stride(m, moved, dt, 8);
         else {
           const rise = c?.phase === 'inFlight' ? Math.min(1, c.flightTime / 0.5) : c && c.phase !== 'runUp' ? 1 : 0;
@@ -287,10 +301,12 @@ function Players({ match }: { match: Match }) {
         const live = c && (c.phase === 'struck' || c.phase === 'dead') ? c.fielderPos[i] : undefined;
         // Close catchers stay put; the ring walks in about two metres.
         const toBat = Math.hypot(f.start.x, f.start.z - STRIKER_STUMPS_Z);
-        const inBy = toBat > 12 ? 1.8 * walkIn : 0;
+        const inBy = toBat > 12 ? 1.2 * walkIn : 0;
         const homeX = f.start.x + ((0 - f.start.x) / Math.max(1, toBat)) * inBy;
         const homeZ = f.start.z + ((STRIKER_STUMPS_Z - f.start.z) / Math.max(1, toBat)) * inBy;
-        const moved = approach(m, live?.x ?? homeX, live?.z ?? homeZ, live ? 9 : c?.phase === 'runUp' ? 1.3 : 2.2, dt);
+        // Between balls everyone stands still; during the delivery the ring walks in slowly; once the
+        // ball is hit, only the fielders the simulation moves (chaser, backer-up) go anywhere.
+        const moved = live ? approach(m, live.x, live.z, 9, dt) : c ? approach(m, homeX, homeZ, 0.9, dt) : 0;
         if (moved > 0.004) stride(m, moved, dt, 8);
         else if (c && c.phase !== 'runUp') {
           readyStance(p, t + i);
@@ -340,6 +356,11 @@ function Players({ match }: { match: Match }) {
         motions.set(id, m);
       }
       const p = m.pose;
+      if (reset && !running) {
+        if (id === strikerId) m.pos.set(-off * 0.45, 0, STRIKER_POPPING_Z + 0.22);
+        else m.pos.set((match.bowler.bowlingArm === 'right' ? -1 : 1) * 1.3, 0, BOWLER_STUMPS_Z + 1.0);
+        m.facing = id === strikerId ? (off > 0 ? Math.PI / 2 : -Math.PI / 2) : 0;
+      }
       if (running) {
         const z = runnerZ(id === strikerId);
         const lane = id === strikerId ? RUN_LANE : -RUN_LANE;
@@ -474,6 +495,15 @@ function carryBat(bat: Group, h: HumanoidHandle, facing: number): void {
   tmpB.set(Math.sin(facing) * 0.6, -0.8, Math.cos(facing) * 0.6).normalize();
   tmpQ.setFromUnitVectors(DOWN, tmpB);
   bat.quaternion.copy(tmpQ);
+}
+
+/** Where the bowler stands before running in. */
+function bowlerMark(match: Match): { x: number; z: number } {
+  const bowler = match.bowler;
+  const right = bowler.bowlingArm === 'right';
+  const c = match.cycle;
+  const runLength = c ? (c.releaseTime > 1.5 ? 14 : 6) : bowler.bowlingStyle === 'offSpin' || bowler.bowlingStyle === 'legSpin' ? 6 : 14;
+  return { x: right ? 1.0 : -1.0, z: BOWLER_STUMPS_Z - runLength };
 }
 
 function poseBowler(match: Match, m: Motion, dt: number, t: number): void {
@@ -696,9 +726,12 @@ function signal(p: Pose, s: Signal, t: number): void {
 function Umpires({ match }: { match: Match }) {
   const ends = useRef<(HumanoidHandle | null)[]>([null, null]);
   const motions = useMemo(() => [newMotion(-0.3, BOWLER_STUMPS_Z - 2.1), newMotion(-21, STRIKER_POPPING_Z)], []);
+  const lastCycle = useRef<unknown>(null);
   useFrame((_, dtRaw) => {
     const dt = Math.min(0.05, dtRaw);
     const c = match.cycle;
+    const reset = c !== lastCycle.current;
+    lastCycle.current = c;
     const t = match.time;
     const off = offSideSign(match.striker.battingHand);
     const leftArm = match.bowler.bowlingArm === 'left';
@@ -712,6 +745,10 @@ function Umpires({ match }: { match: Match }) {
       const h = ends.current[i];
       const spot = spots[i];
       if (!h || !spot) return;
+      if (reset) {
+        m.pos.set(spot.x, 0, spot.z);
+        m.facing = spot.facing;
+      }
       const moved = approach(m, spot.x, spot.z, 2.5, dt);
       if (moved > 0.004) stride(m, moved, dt, 6);
       else {

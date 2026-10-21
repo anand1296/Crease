@@ -10,7 +10,7 @@ import type { PitchId } from '../game/data/pitches.ts';
 import { TEAMS, type Team } from '../game/data/teams.ts';
 import type { DeliveryTypeId } from '../game/bowling/deliveryTypes.ts';
 import { keyboard } from '../game/input/keyboardInstance.ts';
-import { type BowlingSetup, Match, type MatchPhase, type MatchResult, type InningsState, type BattingCard, type BowlingCard, type SideId } from '../game/match/match.ts';
+import { type BowlingSetup, GAME_SPEEDS, type GameSpeed, Match, type MatchPhase, type Review, type MatchResult, type InningsState, type BattingCard, type BowlingCard, type SideId } from '../game/match/match.ts';
 import { defaultXi, keeperFor } from '../game/match/squad.ts';
 import type { DifficultyId } from '../game/model/difficulty.ts';
 import type { Hand, Player } from '../game/model/player.ts';
@@ -33,6 +33,7 @@ export interface MatchSetup {
   readonly difficulty: DifficultyId;
   readonly pitch: PitchId;
   readonly batFirst: BatFirst;
+  readonly speed: GameSpeed;
   /** Selected XIs in batting order (player ids). */
   readonly userXi: readonly string[];
   readonly opponentXi: readonly string[];
@@ -60,6 +61,8 @@ export interface MatchSnapshot {
   readonly bowler: { readonly name: string; readonly style: string; readonly card: BowlingCard | undefined; readonly fatigue: number };
   readonly lastOutcome: BallOutcome | undefined;
   readonly ballCount: number;
+  /** Set while the game waits for the player between balls. */
+  readonly review: Review | undefined;
   /** Latest commentary line and how many there have been (to notice a new one). */
   readonly commentary: CommentaryLine | undefined;
   readonly commentaryCount: number;
@@ -159,6 +162,7 @@ function snapshot(m: Match, toss: string): MatchSnapshot {
     },
     lastOutcome: m.lastOutcome,
     ballCount: m.history.length,
+    review: m.phase === 'review' ? m.review : undefined,
     commentary: m.commentary[m.commentary.length - 1],
     commentaryCount: m.commentary.length,
     fieldPhase: fieldingPhase(m.config.overs, inn.balls),
@@ -186,6 +190,7 @@ const DEFAULT_SETUP: MatchSetup = {
   difficulty: 'normal',
   pitch: 'balanced',
   batFirst: 'toss',
+  speed: 'normal',
   userXi: ids(defaultXi(firstTeam)),
   opponentXi: ids(defaultXi(secondTeam)),
 };
@@ -226,6 +231,7 @@ function createMatch(setup: MatchSetup, seed: string): { match: Match; toss: str
     difficulty: setup.difficulty,
     seed,
   });
+  match.speed = GAME_SPEEDS[setup.speed];
   return { match, toss };
 }
 

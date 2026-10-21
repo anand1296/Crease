@@ -401,7 +401,6 @@ export class DeliveryCycle {
   private moveFielders(dt: number): void {
     const plan = this.fieldingPlan;
     const contact = this.contactTime;
-    const ball = this.play?.ball.position;
     this.opts.field.forEach((f, i) => {
       const p = this.fielderPos[i];
       if (!p) return;
@@ -422,18 +421,60 @@ export class DeliveryCycle {
         }
         return;
       }
-      // Everyone else: a few steps towards the ball while it is live.
-      if (this.phase === 'struck' && ball && since < 2.5 && !f.keeper) {
-        const dx = ball.x - p.x;
-        const dz = ball.z - p.z;
-        const d = Math.hypot(dx, dz);
-        if (d > 3) {
-          p.x += (dx / d) * 2.2 * dt;
-          p.z += (dz / d) * 2.2 * dt;
-        }
+      if (this.phase !== 'struck' || !plan || contact === undefined || since < 0.4) return;
+      const target = this.supportTarget(i, f.keeper, f.position.id === 'bowler');
+      if (!target) return;
+      const dx = target.x - p.x;
+      const dz = target.z - p.z;
+      const d = Math.hypot(dx, dz);
+      const speed = target.urgent ? fielderSpeed(f.player.fielding) * 0.8 : 3;
+      if (d > 0.3) {
+        const step = Math.min(d, speed * dt);
+        p.x += (dx / d) * step;
+        p.z += (dz / d) * step;
       }
     });
   }
+
+  /**
+   * Where a fielder who is not chasing goes once the ball is hit — or
+   * nowhere. As in a real field: the keeper comes up to the stumps for the
+   * return, the bowler goes to the stumps at his end, and the nearest other
+   * fielder backs up the chaser; everyone else stays where they are.
+   */
+  private supportTarget(i: number, keeper: boolean, bowler: boolean): { x: number; z: number; urgent: boolean } | undefined {
+    const plan = this.fieldingPlan;
+    if (!plan) return undefined;
+    const far = Math.hypot(plan.interceptPos.x, plan.interceptPos.z - STRIKER_STUMPS_Z) > 12;
+    if (keeper) return far ? { x: 0, z: STRIKER_STUMPS_Z + 0.7, urgent: true } : undefined;
+    if (bowler) return far ? { x: 0.4, z: BOWLER_STUMPS_Z - 0.7, urgent: true } : undefined;
+    if (!far) return undefined;
+    // The backer-up: the nearest other outfielder to the interception, going behind it.
+    if (this.backer === undefined) {
+      let best = -1;
+      let bestD = Infinity;
+      this.opts.field.forEach((f, k) => {
+        if (k === plan.fielder || f.keeper || f.position.id === 'bowler') return;
+        const q = this.fielderPos[k];
+        if (!q) return;
+        const dd = Math.hypot(q.x - plan.interceptPos.x, q.z - plan.interceptPos.z);
+        if (dd < bestD) {
+          bestD = dd;
+          best = k;
+        }
+      });
+      this.backer = best;
+    }
+    if (i !== this.backer) return undefined;
+    // A boundary: nobody can stop it, but the nearest fielder still chases it to the rope.
+    if (plan.kind === 'boundary') return { x: plan.interceptPos.x * 0.97, z: plan.interceptPos.z * 0.97, urgent: true };
+    const ix = plan.interceptPos.x;
+    const iz = plan.interceptPos.z;
+    const out = Math.hypot(ix, iz - STRIKER_STUMPS_Z) || 1;
+    return { x: ix + (ix / out) * 8, z: iz + ((iz - STRIKER_STUMPS_Z) / out) * 8, urgent: false };
+  }
+
+  private backer: number | undefined;
 
   /** Where the ball should be drawn: in flight, or in a fielder's hands. */
   ballPosition(out: Vec3): Vec3 {

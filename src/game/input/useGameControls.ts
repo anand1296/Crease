@@ -40,6 +40,16 @@ export function useGameControls(): void {
           break;
       }
       if (g.paused) return;
+      // Between balls the game waits for the player: Enter or Space moves on.
+      if (m.phase === 'review') {
+        if (action === 'confirm' || action === 'bowl' || action === 'run') m.next();
+        return;
+      }
+      // Enter skips the rest of a dead ball.
+      if (action === 'confirm' && m.phase === 'delivery' && m.cycle?.phase === 'dead') {
+        m.next();
+        return;
+      }
       if (m.phase === 'inningsBreak' && (action === 'confirm' || action === 'bowl')) {
         m.continueAfterBreak();
         return;

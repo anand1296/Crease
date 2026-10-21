@@ -110,7 +110,39 @@ export interface BowlingSetup {
   readonly length: number;
 }
 
-export type MatchPhase = 'between' | 'chooseBowler' | 'aiming' | 'delivery' | 'inningsBreak' | 'complete';
+export type MatchPhase = 'between' | 'review' | 'chooseBowler' | 'aiming' | 'delivery' | 'inningsBreak' | 'complete';
+
+/**
+ * The pause after a ball when a human is playing: the game waits for a key
+ * press before the next delivery, and after a wicket or the end of an over
+ * shows what happened (the dismissal, the over) with the scorecard.
+ */
+export type Review =
+  | { readonly kind: 'start' }
+  | { readonly kind: 'ball' }
+  | {
+      readonly kind: 'wicket';
+      readonly batter: BattingCard;
+      readonly fall: FallOfWicket;
+      readonly partnership: { readonly runs: number; readonly balls: number };
+      readonly next: string | undefined;
+      /** The over also ended with this ball. */
+      readonly over?: OverSummary;
+    }
+  | { readonly kind: 'over'; readonly over: OverSummary };
+
+export interface OverSummary {
+  /** Overs completed in the innings (1-based number of the over just bowled). */
+  readonly number: number;
+  readonly bowler: string;
+  readonly figures: BowlingCard | undefined;
+  readonly balls: readonly string[];
+  readonly runs: number;
+}
+
+/** How fast the game runs relative to real time (the simulation itself is unchanged). */
+export const GAME_SPEEDS = { relaxed: 0.65, normal: 0.8, real: 1 } as const;
+export type GameSpeed = keyof typeof GAME_SPEEDS;
 
 export const LINE_RANGE = { min: -0.6, max: 1.0 } as const;
 export const LENGTH_RANGE = { min: 0.3, max: 12.5 } as const;
@@ -132,6 +164,10 @@ export class Match {
   recent: string[] = [];
   readonly history: BallOutcome[] = [];
   setup: BowlingSetup;
+  /** Set while phase is 'review'. */
+  review: Review | undefined;
+  /** Real-time multiplier (see GAME_SPEEDS). */
+  speed = 1;
   strikerIndex = 0;
   nonStrikerIndex = 1;
   private nextIndex = 2;
@@ -155,6 +191,9 @@ export class Match {
   /** What the captain was protecting for each batter, to notice field changes. */
   private readonly protecting = new Map<string, string>();
   private fieldChange: string | undefined;
+  /** The batter who came in after the last wicket. */
+  private incoming: string | undefined;
+  private fieldCache: { key: string; decision: ReturnType<typeof setField> } | undefined;
   private announcedOver = -1;
 
   constructor(config: MatchConfig) {
@@ -164,6 +203,7 @@ export class Match {
     this.commentator = new Commentator(config.seed);
     this.startInnings(config.battingFirst);
     this.setup = defaultSetup(this.bowler);
+    if (this.humanInvolved) this.waitForStart();
   }
 
   // --- Accessors -------------------------------------------------------------------
@@ -279,7 +319,7 @@ export class Match {
 
   advance(frameSeconds: number): number {
     if (this.paused) return 0;
-    const steps = this.clock.advance(frameSeconds);
+    const steps = this.clock.advance(frameSeconds * this.speed);
     for (let i = 0; i < steps; i++) this.step(this.clock.stepSeconds);
     return steps;
   }
@@ -307,6 +347,7 @@ export class Match {
           if (this.phaseTimer <= 0) this.continueAfterBreak();
         }
         break;
+      case 'review':
       case 'chooseBowler':
       case 'aiming':
       case 'complete':
@@ -382,12 +423,42 @@ export class Match {
     this.emit();
   }
 
+  /**
+   * Move on: from the review to the next ball, or skip the rest of a dead
+   * ball's pause. Returns whether anything happened.
+   */
+  next(): boolean {
+    if (this.paused) return false;
+    if (this.phase === 'review') {
+      this.review = undefined;
+      this.enterBetween();
+      return true;
+    }
+    if (this.phase === 'delivery' && this.cycle?.phase === 'dead' && this.cycle.outcome) {
+      this.afterBall();
+      return true;
+    }
+    return false;
+  }
+
+  private waitForStart(): void {
+    this.review = { kind: 'start' };
+    this.phase = 'review';
+    this.emit();
+  }
+
+  /** A human is playing (so the game waits for them between balls). */
+  get humanInvolved(): boolean {
+    return this.humanBatting || this.humanBowling;
+  }
+
   /** Start the second innings after the break. */
   continueAfterBreak(): void {
     if (this.phase !== 'inningsBreak') return;
     const first = this.current;
     this.startInnings(first.bowling, first.runs + 1);
-    this.enterBetween();
+    if (this.humanInvolved) this.waitForStart();
+    else this.enterBetween();
   }
 
   // --- Lifecycle ----------------------------------------------------------------------
@@ -670,14 +741,49 @@ export class Match {
   private afterBall(): void {
     const o = this.lastOutcome;
     this.cycle = undefined;
+    this.incoming = undefined;
     if (o) {
       // Odd completed runs (not boundaries) mean the batters changed ends.
       if (o.runs % 2 === 1 && !o.boundary) this.swapStrike();
       if (o.wicket) this.replaceBatter(o);
     }
     if (this.inningsOver()) return;
-    if (this.ballsThisOver >= 6) this.endOver();
-    this.enterBetween();
+    let over: OverSummary | undefined;
+    if (this.ballsThisOver >= 6) {
+      const bowler = this.bowler;
+      const balls = this.recent.slice();
+      const runs = this.runsThisOver;
+      this.endOver();
+      // Figures after the over is closed, so a maiden is counted.
+      over = { number: Math.floor(this.current.balls / 6), bowler: bowler.name, figures: this.card(bowler), balls, runs };
+    }
+    if (!this.humanInvolved) {
+      this.enterBetween();
+      return;
+    }
+    // Wait for the player: show the wicket or the over, or just prompt for the next ball.
+    const inn = this.current;
+    const fall = inn.fallOfWickets[inn.fallOfWickets.length - 1];
+    if (o?.wicket && fall && fall.wicket === inn.wickets && fall.balls === inn.balls) {
+      const batter = inn.battingCards.find((c) => c.player.name === fall.batter);
+      const prev = inn.fallOfWickets[inn.fallOfWickets.length - 2];
+      this.review = batter
+        ? {
+            kind: 'wicket',
+            batter,
+            fall,
+            partnership: { runs: fall.runs - (prev?.runs ?? 0), balls: fall.balls - (prev?.balls ?? 0) },
+            next: this.incoming,
+            ...(over ? { over } : {}),
+          }
+        : { kind: 'ball' };
+    } else if (over) {
+      this.review = { kind: 'over', over };
+    } else {
+      this.review = { kind: 'ball' };
+    }
+    this.phase = 'review';
+    this.emit();
   }
 
   private replaceBatter(o: BallOutcome): void {
@@ -690,6 +796,7 @@ export class Match {
     const outIsStriker = (w.batter === 'striker') === (o.runs % 2 === 0);
     const incoming = this.nextIndex;
     this.nextIndex += 1;
+    this.incoming = xi[incoming]?.name;
     const inn = this.current;
     this.innings[this.innings.length - 1] = {
       ...inn,
@@ -791,13 +898,19 @@ export class Match {
       .slice()
       .sort((a, b) => b.fielding.catching - a.fielding.catching);
     const hand = this.striker.battingHand;
-    // The AI captain sets the field for this batter, bowler and phase of the innings.
-    const decision = setField({
-      overs: this.config.overs,
-      ballsBowled: this.current.balls,
-      spinner: isSpinner(bowler.bowlingStyle),
-      wagon: this.wagon(this.striker),
-    });
+    // The AI captain sets the field for this batter and bowler, reviewing it at the start of each
+    // over and when a new batter comes in — not every ball, so fielders are not forever moving.
+    const key = `${this.innings.length}-${Math.floor(this.current.balls / 6)}-${this.striker.id}-${bowler.id}`;
+    let decision = this.fieldCache?.key === key ? this.fieldCache.decision : undefined;
+    if (!decision) {
+      decision = setField({
+        overs: this.config.overs,
+        ballsBowled: this.current.balls,
+        spinner: isSpinner(bowler.bowlingStyle),
+        wagon: this.wagon(this.striker),
+      });
+      this.fieldCache = { key, decision };
+    }
     if (decision.protecting && this.protecting.get(this.striker.id) !== decision.protecting) {
       this.protecting.set(this.striker.id, decision.protecting);
       this.fieldChange = decision.protecting;

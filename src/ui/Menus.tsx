@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { TEAMS, type Team } from '../game/data/teams.ts';
 import { PITCHES, type PitchId } from '../game/data/pitches.ts';
 import { DIFFICULTIES, type DifficultyId } from '../game/model/difficulty.ts';
+import type { GameSpeed } from '../game/match/match.ts';
 import { checkXi } from '../game/match/squad.ts';
 import type { Player } from '../game/model/player.ts';
 import { type BatFirst, findTeam, styleName, useGame } from '../state/game.ts';
@@ -155,6 +156,13 @@ export function MatchSetup() {
             options={batOptions}
             onChange={(batFirst) => update({ batFirst })}
             render={(b) => (b === 'toss' ? 'Toss for it' : b === 'user' ? 'We bat' : 'We bowl')}
+          />
+          <Segmented<GameSpeed>
+            label="Game speed"
+            value={setup.speed}
+            options={['relaxed', 'normal', 'real']}
+            onChange={(speed) => update({ speed })}
+            render={(v) => (v === 'relaxed' ? 'Relaxed' : v === 'normal' ? 'Normal' : 'Real time')}
           />
         </div>
         <p className="pitch-note">{PITCHES[setup.pitch].description}</p>

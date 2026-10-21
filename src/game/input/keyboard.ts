@@ -91,6 +91,8 @@ export class KeyboardInput {
   onPress: (action: GameAction, event: KeyboardEvent) => void = () => undefined;
   /** When false (menus), keys pass through to the page untouched. */
   enabled = true;
+  /** The most recent action pressed and when (for the on-screen key indicator). */
+  lastPress: { action: GameAction; at: number } | undefined;
 
   constructor(bindings: Bindings = DEFAULT_BINDINGS) {
     this.bindings = bindings;
@@ -142,7 +144,10 @@ export class KeyboardInput {
     this.held.add(e.code);
     if (e.repeat) return;
     for (const action of GAME_ACTIONS) {
-      if (this.bindings[action].includes(e.code)) this.onPress(action, e);
+      if (this.bindings[action].includes(e.code)) {
+        this.lastPress = { action, at: performance.now() };
+        this.onPress(action, e);
+      }
     }
   };
 
