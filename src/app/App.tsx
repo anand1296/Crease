@@ -1,10 +1,11 @@
 import { lazy, type ReactNode, Suspense, useState } from 'react';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
+import { Hud } from '../ui/Hud.tsx';
+import { useGameControls } from '../game/input/useGameControls.ts';
+import { useGame } from '../state/game.ts';
 
 // three.js is ~600 kB; load it after the shell paints so there is a loading state.
-const GameCanvas = lazy(() =>
-  import('../game/scenes/GameCanvas.tsx').then((m) => ({ default: m.GameCanvas })),
-);
+const GameCanvas = lazy(() => import('../game/scenes/GameCanvas.tsx').then((m) => ({ default: m.GameCanvas })));
 
 type Status = 'loading' | 'ready';
 
@@ -19,9 +20,11 @@ function hasWebGL(): boolean {
 
 function Panel({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="panel" role="alert">
-      <h2>{title}</h2>
-      {children}
+    <div className="overlay">
+      <div className="panel" role="alert">
+        <h2>{title}</h2>
+        {children}
+      </div>
     </div>
   );
 }
@@ -29,6 +32,8 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
 export function App() {
   const [status, setStatus] = useState<Status>('loading');
   const [webgl] = useState(hasWebGL);
+  const restart = useGame((s) => s.restart);
+  useGameControls();
 
   return (
     <div className="app" data-testid="app" data-status={webgl ? status : 'unsupported'}>
@@ -37,17 +42,24 @@ export function App() {
           fallback={(error, reset) => (
             <Panel title="Something went wrong">
               <p>{error.message}</p>
-              <button type="button" onClick={reset}>
-                Try again
+              <button
+                type="button"
+                onClick={() => {
+                  restart();
+                  reset();
+                }}
+              >
+                Restart
               </button>
             </Panel>
           )}
         >
           <div className="stage" data-testid="game-canvas">
             <Suspense fallback={null}>
-              <GameCanvas seed="p0-demo" onReady={() => setStatus('ready')} />
+              <GameCanvas onReady={() => setStatus('ready')} />
             </Suspense>
           </div>
+          {status === 'ready' ? <Hud /> : null}
         </ErrorBoundary>
       ) : (
         <Panel title="WebGL is not available">
@@ -55,9 +67,9 @@ export function App() {
         </Panel>
       )}
 
-      <header className="hud-top">
+      <header className="brand">
         <span className="wordmark">CREASE</span>
-        <span className="build-tag">pre-alpha · P0</span>
+        <span className="build-tag">pre-alpha · P1</span>
       </header>
 
       {webgl && status === 'loading' && (
@@ -65,8 +77,6 @@ export function App() {
           Rolling the pitch…
         </div>
       )}
-
-      <footer className="hud-bottom">Demo deliveries on the fixed-step simulation — batting arrives in P1.</footer>
     </div>
   );
 }

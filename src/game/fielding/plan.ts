@@ -91,6 +91,15 @@ export function projectPath(ball: Readonly<BallState>, ground?: GroundModel): { 
 }
 
 export const fielderSpeed = (f: FieldingAttributes): number => 5.4 + 2.6 * (f.fielding / 100);
+/** Fielders accelerate from standing; nobody reaches top speed in the first stride. */
+export const FIELDER_ACCEL = 6;
+
+/** Seconds to cover `d` metres from standing, accelerating to `vmax`. */
+export function timeToCover(d: number, vmax: number, accel = FIELDER_ACCEL): number {
+  if (d <= 0) return 0;
+  const accelDistance = (vmax * vmax) / (2 * accel);
+  return d <= accelDistance ? Math.sqrt((2 * d) / accel) : vmax / accel + (d - accelDistance) / vmax;
+}
 export const fielderReaction = (f: FieldingAttributes, close: boolean): number =>
   (close ? 0.12 : 0.35) + 0.2 * (1 - f.fielding / 100);
 
@@ -102,10 +111,10 @@ const CATCH_HEIGHT = 2.6;
 const MIN_CATCH_HEIGHT = 0.08;
 
 /** Batters' running: call and start, then each run of ~17.7 m between creases. */
-export const RUN = { start: 0.6, first: 3.1, subsequent: 3.15 } as const;
+export const RUN = { start: 0.35, first: 2.95, subsequent: 3.0 } as const;
 export const runTime = (n: number): number => (n <= 0 ? 0 : RUN.start + RUN.first + (n - 1) * RUN.subsequent);
 /** Batters only take a run if they would make their ground with this much to spare. */
-const SAFETY_MARGIN = 0.45;
+const SAFETY_MARGIN = 0.3;
 
 export function buildField(fielders: readonly Player[], positions: readonly FieldPosition[], batterHand: Hand): Fielder[] {
   return positions.slice(0, fielders.length).map((position, i) => {
@@ -123,38 +132,44 @@ interface Reach {
   readonly dive: boolean;
 }
 
-/** Earliest point on the path each fielder can get to, then the earliest of all. */
+/**
+ * Earliest point on the path each fielder can get to, then the earliest of
+ * all. A fielder dives only when a clean take is not available within half a
+ * second — nobody dives at a ball they could simply walk in and collect.
+ */
 function firstReach(path: readonly PathSample[], field: readonly Fielder[], boundaryT: number | undefined): Reach | undefined {
   let best: Reach | undefined;
+  const better = (a: Reach, b: Reach | undefined) =>
+    !b || a.sample.t < b.sample.t || (a.sample.t === b.sample.t && (a.spare > b.spare || (b.dive && !a.dive)));
   field.forEach((f, i) => {
     const close = Math.hypot(f.start.x, f.start.z - STRIKER_STUMPS_Z) < 8;
     const speed = fielderSpeed(f.player.fielding);
     const reaction = fielderReaction(f.player.fielding, close);
+    let dive: Reach | undefined;
+    let clean: Reach | undefined;
     for (const s of path) {
-      // Later than the current best: this fielder cannot be first. At the same
-      // instant, the fielder with more time to settle under it takes it.
-      if (best && s.t > best.sample.t) break;
+      if (best && s.t > best.sample.t + (dive ? 0.5 : 0)) break;
       if (boundaryT !== undefined && s.t >= boundaryT) break;
+      if (dive && s.t > dive.sample.t + 0.5) break;
       const airborne = !s.grounded;
       if (airborne && (s.y > CATCH_HEIGHT || s.y < MIN_CATCH_HEIGHT)) continue;
       if (!airborne && s.y > 0.6) continue;
       const d = Math.hypot(s.x - f.start.x, s.z - f.start.z);
       const run = Math.max(0, d - STANDING_REACH);
-      const tNeeded = run > 0 ? reaction + run / speed : reaction * 0.6;
+      const tNeeded = run > 0 ? reaction + timeToCover(run, speed) : reaction * 0.6;
       const spare = s.t - tNeeded;
-      const tie = best !== undefined && s.t === best.sample.t;
       if (spare >= 0) {
-        if (!tie || !best || spare > best.spare || best.dive) best = { fielder: i, sample: s, spare, dive: false };
+        clean = { fielder: i, sample: s, spare, dive: false };
         break;
       }
-      // A dive buys extra reach at the cost of a harder take.
-      const diveRun = Math.max(0, d - DIVE_REACH);
-      const tDive = reaction + diveRun / speed;
-      if (s.t - tDive >= 0) {
-        if (!tie) best = { fielder: i, sample: s, spare: 0, dive: true };
-        break;
+      if (!dive) {
+        // A dive buys extra reach at the cost of a harder take.
+        const diveRun = Math.max(0, d - DIVE_REACH);
+        if (s.t - (reaction + timeToCover(diveRun, speed)) >= 0) dive = { fielder: i, sample: s, spare: 0, dive: true };
       }
     }
+    const candidate = clean ?? dive;
+    if (candidate && better(candidate, best)) best = candidate;
   });
   return best;
 }
@@ -179,9 +194,13 @@ export function planFielding(
     const pace = Math.max(0, s.speed - 18) / 25;
     if (!s.grounded) {
       // Catch chance.
-      const difficulty = clamp01((reach.dive ? 0.55 : 0.25 - Math.min(0.25, reach.spare * 0.3)) + pace + (s.y > 2.2 ? 0.15 : 0));
+      // Close catchers (keeper, slips) are there for fast edges: pace troubles them less.
+      const paceFactor = f.keeper ? 0.4 : f.position.id.startsWith('slip') || f.position.id === 'gully' ? 0.6 : 1;
+      const difficulty = clamp01(
+        (reach.dive ? 0.55 : 0.2 - Math.min(0.2, reach.spare * 0.3)) + pace * paceFactor + (s.y > 2.2 ? 0.15 : 0),
+      );
       const skill = f.player.fielding.catching / 100;
-      const pHold = clamp01(0.55 + 0.45 * skill - difficulty * (1.15 - 0.5 * skill));
+      const pHold = clamp01(0.97 - (1 - skill) * 0.25 - difficulty * (0.85 - 0.45 * skill));
       if (rng.chance(pHold)) {
         return { kind: 'caught', fielder: reach.fielder, interceptT: s.t, interceptPos: pos, runs: 0, difficulty };
       }
@@ -196,7 +215,8 @@ export function planFielding(
     const difficulty = clamp01((reach.dive ? 0.45 : 0.1) + pace);
     const pClean = clamp01(0.9 + 0.1 * (f.player.fielding.fielding / 100) - difficulty * 0.55);
     if (rng.chance(pClean) || attemptNo === 2) {
-      const pickup = 0.35 + (reach.dive ? 0.6 : 0) + delay;
+      // Gathering a moving ball and setting to throw; longer after a dive.
+      const pickup = 0.55 + (reach.dive ? 0.9 : 0) + delay;
       const returnT = s.t + pickup + throwTime(f, pos);
       return { kind: 'fielded', fielder: reach.fielder, interceptT: s.t, interceptPos: pos, runs: safeRuns(returnT), returnT, difficulty };
     }
@@ -222,7 +242,7 @@ function throwTime(f: Fielder, pos: Readonly<Vec3>): number {
   const toBowler = Math.hypot(pos.x, pos.z - BOWLER_STUMPS_Z);
   const d = Math.min(toStriker, toBowler);
   const speed = 20 + 12 * (f.player.fielding.throwing / 100);
-  return 0.25 + d / speed;
+  return 0.35 + d / speed;
 }
 
 export function safeRuns(returnT: number): number {

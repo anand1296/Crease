@@ -1,10 +1,8 @@
 import { useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { BOWLER_STUMPS_Z, STRIKER_STUMPS_Z } from '../data/field.ts';
-import { BROADCAST_CAMERA } from '../camera/presets.ts';
-import { DemoBall } from './DemoBall.tsx';
-import { Figures } from './Figures.tsx';
 import { Ground } from './Ground.tsx';
+import { SessionView } from './SessionView.tsx';
 import { Stumps } from './Stumps.tsx';
 
 /** Calls `onReady` once, after the first frame has actually been rendered. */
@@ -18,15 +16,9 @@ function FirstFrame({ onReady }: { onReady: () => void }) {
   return null;
 }
 
-export function GameCanvas({ onReady, seed }: { onReady: () => void; seed: string }) {
+export function GameCanvas({ onReady }: { onReady: () => void }) {
   return (
-    <Canvas
-      shadows
-      dpr={[1, 2]}
-      camera={{ fov: BROADCAST_CAMERA.fov, near: 0.1, far: 600, position: BROADCAST_CAMERA.position }}
-      gl={{ antialias: true, powerPreference: 'high-performance' }}
-      onCreated={({ camera }) => camera.lookAt(...BROADCAST_CAMERA.target)}
-    >
+    <Canvas shadows dpr={[1, 2]} camera={{ fov: 17, near: 0.1, far: 600, position: [0, 6.2, -26.1] }} gl={{ antialias: true, powerPreference: 'high-performance' }}>
       <color attach="background" args={['#9cc3e2']} />
       <fog attach="fog" args={['#b6d0e6', 120, 260]} />
       <hemisphereLight args={['#e6f1ff', '#47663a', 0.75]} />
@@ -46,8 +38,7 @@ export function GameCanvas({ onReady, seed }: { onReady: () => void; seed: strin
       <Ground />
       <Stumps z={STRIKER_STUMPS_Z} />
       <Stumps z={BOWLER_STUMPS_Z} />
-      <Figures />
-      <DemoBall seed={seed} />
+      <SessionView />
       <FirstFrame onReady={onReady} />
     </Canvas>
   );

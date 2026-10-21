@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test.describe('P0 smoke', () => {
+test.describe('smoke', () => {
   test('boots, renders the 3D scene and runs the simulation without errors', async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
@@ -10,9 +10,7 @@ test.describe('P0 smoke', () => {
 
     await page.goto('/');
     await expect(page).toHaveTitle(/Crease/);
-
-    const app = page.getByTestId('app');
-    await expect(app).toHaveAttribute('data-status', 'ready', { timeout: 30_000 });
+    await expect(page.getByTestId('app')).toHaveAttribute('data-status', 'ready', { timeout: 30_000 });
 
     const canvas = page.locator('[data-testid="game-canvas"] canvas');
     await expect(canvas).toBeVisible();
@@ -20,23 +18,13 @@ test.describe('P0 smoke', () => {
     expect(box?.width ?? 0).toBeGreaterThan(300);
     expect(box?.height ?? 0).toBeGreaterThan(200);
 
-    // The fixed-step simulation advances and the ball actually moves.
-    const read = () =>
-      page.evaluate(() => ({
-        steps: window.__crease?.simSteps?.() ?? 0,
-        z: window.__crease?.ballPosition?.().z ?? Number.NaN,
-        delivery: window.__crease?.deliveryIndex?.() ?? -1,
-      }));
-    const first = await read();
-    await expect.poll(async () => (await read()).steps, { timeout: 10_000 }).toBeGreaterThan(first.steps + 100);
-    await expect
-      .poll(async () => {
-        const now = await read();
-        return now.z !== first.z || now.delivery !== first.delivery;
-      })
-      .toBe(true);
+    // The fixed-step simulation advances and a delivery gets under way.
+    const steps = () => page.evaluate(() => window.__crease?.simSteps?.() ?? 0);
+    const first = await steps();
+    await expect.poll(steps, { timeout: 10_000 }).toBeGreaterThan(first + 100);
+    await expect.poll(() => page.evaluate(() => window.__crease?.phase?.()), { timeout: 10_000 }).toBe('delivery');
+    await expect(page.getByTestId('scoreboard')).toBeVisible();
 
-    await expect(page.getByText('CREASE')).toBeVisible();
     expect(errors).toEqual([]);
   });
 });

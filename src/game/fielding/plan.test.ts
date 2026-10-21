@@ -26,20 +26,27 @@ function plans(n: number, dir: number, elev: number, speed: number, f: readonly 
 const share = (xs: FieldingPlan[], kind: FieldingPlan['kind']) => xs.filter((p) => p.kind === kind).length / xs.length;
 
 describe('planFielding', () => {
-  it('a soft push back down the pitch is stopped with no run', () => {
-    const p = planFielding(hit(14, -20, 9), field, new Rng(1));
+  it('a firm push straight at a ring fielder is stopped with no run', () => {
+    const p = planFielding(hit(24, -10, 17), field, new Rng(1));
     expect(p.kind).toBe('fielded');
     expect(p.runs).toBe(0);
+    expect(field[p.fielder ?? -1]?.position.id).toBe('midoff');
+  });
+
+  it('a soft push into space gets a quick single', () => {
+    const p = planFielding(hit(47, -14, 13), field, new Rng(1));
+    expect(p.kind).toBe('fielded');
+    expect(p.runs).toBe(1);
   });
 
   it('a firmly driven ball through the off-side gap goes for four', () => {
-    const xs = plans(30, 73, -4, 32);
+    const xs = plans(30, 47, -4, 32);
     expect(share(xs, 'boundary')).toBeGreaterThan(0.7);
     expect(xs.every((p) => p.kind !== 'boundary' || p.runs === 4)).toBe(true);
   });
 
   it('the same drive hit straight at cover is stopped', () => {
-    const p = planFielding(hit(55, -4, 30), field, new Rng(3));
+    const p = planFielding(hit(70, -4, 30), field, new Rng(3));
     expect(p.kind).toBe('fielded');
     expect(p.runs).toBeLessThanOrEqual(1);
   });
@@ -51,7 +58,7 @@ describe('planFielding', () => {
   });
 
   it('a mistimed lofted shot towards mid-on is usually caught', () => {
-    const xs = plans(40, -14, 38, 19);
+    const xs = plans(40, -24, 38, 19);
     expect(share(xs, 'caught')).toBeGreaterThan(0.6);
     expect(xs.filter((p) => p.kind === 'caught').every((p) => field[p.fielder ?? -1]?.position.id === 'midon')).toBe(true);
   });
@@ -66,8 +73,8 @@ describe('planFielding', () => {
   it('better catchers hold more chances', () => {
     const withCatching = (v: number): Fielder[] =>
       field.map((f) => ({ ...f, player: { ...f.player, fielding: { ...f.player.fielding, catching: v } } satisfies Player }));
-    const butter = share(plans(80, -14, 38, 22, withCatching(20)), 'caught');
-    const safe = share(plans(80, -14, 38, 22, withCatching(95)), 'caught');
+    const butter = share(plans(80, -24, 38, 21, withCatching(20)), 'caught');
+    const safe = share(plans(80, -24, 38, 21, withCatching(95)), 'caught');
     expect(safe).toBeGreaterThan(butter + 0.15);
   });
 

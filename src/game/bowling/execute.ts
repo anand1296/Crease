@@ -140,7 +140,7 @@ export function executeDelivery(plan: DeliveryPlan, ctx: ExecutionContext): Exec
     swingAccel: intendedMove.swingAccel * clamp(1 + rng.boundedNormal(0.3), 0.1, 1.6) +
       (def.swing === 0 && !spinner ? rng.boundedNormal(0.6 * (b.swing / 100)) : 0),
     // Seam direction is random: the bowler cannot control which way it goes.
-    seamDeltaV: spinner ? rng.boundedNormal(0.15) : rng.boundedNormal(def.seam * (0.25 + 0.75 * (b.swing / 100))),
+    seamDeltaV: spinner ? rng.boundedNormal(0.08) : rng.boundedNormal(def.seam * (0.1 + 0.3 * (b.swing / 100))),
     spinSide: intendedMove.spinSide * clamp(1 + rng.boundedNormal(0.15), 0.5, 1.4),
     spinTop: intendedMove.spinTop * clamp(1 + rng.boundedNormal(0.15), 0.5, 1.4),
     bounceFactor: 1 + rng.boundedNormal(ctx.pitch.bounceVariability),

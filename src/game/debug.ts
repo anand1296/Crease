@@ -4,8 +4,17 @@
  */
 export interface CreaseDebug {
   ballPosition?: () => { x: number; y: number; z: number };
-  deliveryIndex?: () => number;
   simSteps?: () => number;
+  /** Session phase and current ball phase. */
+  phase?: () => string;
+  ballPhase?: () => string | null;
+  /** Seconds until the ball reaches the striker's popping crease (undefined when not in flight). */
+  eta?: () => number | undefined;
+  /** Number of balls completed this session. */
+  balls?: () => number;
+  /** Total runs and wickets. */
+  score?: () => { runs: number; wickets: number; balls: number };
+  lastHeadline?: () => string | undefined;
 }
 
 declare global {

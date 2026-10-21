@@ -183,8 +183,13 @@ export const ALL_SHOTS: readonly ShotId[] = Object.values(SHOTS).map((s) => s.id
 export interface ShotAttempt {
   readonly shot: ShotId;
   readonly footwork: Footwork;
-  /** Overrides the shot's direction (used by the lofted shot, aimed by the input direction). */
+  /** Overrides the shot's direction (used by the lofted shot and the push, aimed by the input direction). */
   readonly aimDeg?: number;
+  /**
+   * Defensive push: the block played with a little more bat and placed into
+   * a gap for a single, at a little more risk than a dead bat.
+   */
+  readonly push?: boolean;
 }
 
 export function attempt(shot: ShotId, footwork?: Footwork, aimDeg?: number): ShotAttempt {
@@ -192,3 +197,11 @@ export function attempt(shot: ShotId, footwork?: Footwork, aimDeg?: number): Sho
   const fw = footwork && def.footwork.includes(footwork) ? footwork : def.footwork[0];
   return aimDeg === undefined ? { shot, footwork: fw } : { shot, footwork: fw, aimDeg };
 }
+
+/** A defensive push into a gap. */
+export function push(aimDeg: number, footwork: Footwork = 'front'): ShotAttempt {
+  return { shot: 'block', footwork, aimDeg, push: true };
+}
+
+/** Bat settings for a push, overriding the block's dead-bat values. */
+export const PUSH = { batSpeed: 5, restitution: 0.26, elevation: -12, timingToleranceScale: 0.75 } as const;

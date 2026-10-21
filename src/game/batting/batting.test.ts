@@ -116,7 +116,8 @@ describe('3. timing matters, continuously', () => {
   it('the timing window is tighter against pace than against spin', () => {
     const lateBy = 25;
     const vsPace = simulateMany(base({ plan: { type: 'fast', line: 0.05, length: 3.5 }, attempt: attempt('straightDrive'), timingMs: lateBy }), 25);
-    const vsSpin = simulateMany(base({ bowler: offie, plan: { type: 'offBreak', line: 0.05, length: 3.5 }, attempt: attempt('straightDrive'), timingMs: lateBy }), 25);
+    // The off-break turns in, so it is aimed a little wider to finish in the straight drive's zone.
+    const vsSpin = simulateMany(base({ bowler: offie, plan: { type: 'offBreak', line: 0.18, length: 3.5 }, attempt: attempt('straightDrive'), timingMs: lateBy }), 25);
     expect(mean(vsSpin.map((s) => s.quality))).toBeGreaterThan(mean(vsPace.map((s) => s.quality)) + 0.1);
   });
 

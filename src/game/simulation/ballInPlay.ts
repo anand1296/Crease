@@ -10,10 +10,12 @@ import {
   type BallState,
   type GroundModel,
   clearMovement,
+  cloneBall,
   createBall,
   newStepEvents,
   stepBall,
 } from '../physics/ball.ts';
+import { offSideSign } from '../model/player.ts';
 
 /**
  * One delivery, from release until the ball is dead (or handed to fielding).
@@ -51,6 +53,10 @@ interface Stroke {
   /** When the bat reaches the contact point. */
   readonly batTime: number;
   readonly planeZ: number;
+  /** Where the batter set the bat (world x, y at the contact plane), from what they could see when committing. */
+  readonly expected: { readonly x: number; readonly y: number };
+  /** Whether the ball had already pitched when the batter committed. */
+  readonly sawBounce: boolean;
   arrival?: number;
   resolved: boolean;
 }
@@ -72,6 +78,7 @@ export class BallInPlay {
   private readonly stepEvents = newStepEvents();
   private struckAt = 0;
   private edged = false;
+  private bounceTime?: number;
 
   constructor(opts: BallInPlayOptions) {
     this.opts = opts;
@@ -90,17 +97,69 @@ export class BallInPlay {
     return this.stroke?.attempt;
   }
 
+  /** Stroke timing and placement, for animating the bat in sync with the simulation. */
+  get strokeInfo():
+    | { readonly attempt: ShotAttempt; readonly pressTime: number; readonly batTime: number; readonly planeZ: number; readonly expected: { readonly x: number; readonly y: number } }
+    | undefined {
+    const s = this.stroke;
+    return s ? { attempt: s.attempt, pressTime: s.pressTime, batTime: s.batTime, planeZ: s.planeZ, expected: s.expected } : undefined;
+  }
+
   /** Commits to a stroke now (or at `atTime`). One stroke per delivery. */
   playShot(attempt: ShotAttempt, atTime: number = this.time): boolean {
     if (!this.canPlayShot) return false;
     const def = SHOTS[attempt.shot];
     const pitchZ = this.delivery.actual.pitch?.z;
     const planeZ = contactPlaneZ(attempt, this.opts.striker.batting.footwork, pitchZ);
-    this.stroke = { attempt, pressTime: atTime, batTime: atTime + def.swingTime, planeZ, resolved: false };
+    const expected = this.perceivedAt(planeZ);
+    this.stroke = {
+      attempt,
+      pressTime: atTime,
+      batTime: atTime + def.swingTime,
+      planeZ,
+      expected,
+      sawBounce: this.ball.bounces > 0,
+      resolved: false,
+    };
     // Pads move with the footwork; their line is fixed when the stroke is chosen.
     const line = predictArrival(this.delivery, planeZ, this.opts.ground)?.x ?? this.ball.position.x;
     this.boxes = batterBoxes(this.opts.striker.battingHand, attempt, line, this.opts.striker.batting.footwork, pitchZ);
     return true;
+  }
+
+  /**
+   * Where the batter expects the ball at plane z, judged from what is visible
+   * now: the flight so far, swing and spin only as well as their technique
+   * reads them, and a true bounce. Seam movement cannot be anticipated; a
+   * wrong'un is read as the stock ball unless the batter picks it.
+   */
+  private perceivedAt(z: number): { x: number; y: number } {
+    const ball = cloneBall(this.ball);
+    if (ball.bounces === 0) {
+      const technique = this.opts.striker.batting.technique / 100;
+      // Swing is visible as the ball curves; spin has to be read from the hand and the air.
+      const swingRead = 0.75 + 0.25 * technique;
+      const read = 0.45 + 0.5 * technique;
+      const wrongUn = this.delivery.type.id === 'doosra' || this.delivery.type.id === 'googly';
+      const picked = !wrongUn || this.opts.rng.fork('read').chance(0.2 + 0.6 * technique);
+      const m = ball.movement;
+      m.swingAccel *= swingRead;
+      m.seamDeltaV = 0;
+      m.spinSide = (picked ? m.spinSide : -m.spinSide) * read;
+      m.bounceFactor = 1;
+    }
+    const ev = newStepEvents();
+    const dt = 1 / 240;
+    let prev = { ...ball.position };
+    for (let t = 0; t < 3; t += dt) {
+      stepBall(ball, dt, this.opts.ground, ev);
+      if (prev.z < z && ball.position.z >= z) {
+        const f = (z - prev.z) / (ball.position.z - prev.z);
+        return { x: prev.x + (ball.position.x - prev.x) * f, y: prev.y + (ball.position.y - prev.y) * f };
+      }
+      prev = { ...ball.position };
+    }
+    return { x: ball.position.x, y: ball.position.y };
   }
 
   get bodyBoxes(): readonly Box[] {
@@ -117,6 +176,7 @@ export class BallInPlay {
     stepBall(b, dt, this.opts.ground, this.stepEvents);
     this.time += dt;
 
+    if (this.stepEvents.bounced && this.phase === 'delivery' && this.bounceTime === undefined) this.bounceTime = this.time;
     if (this.stepEvents.bounced) {
       const ev: BallEvent = { type: 'bounce', t: this.time, x: this.stepEvents.bounceX, z: this.stepEvents.bounceZ, struck: this.phase === 'struck' };
       raised.push(ev);
@@ -157,12 +217,19 @@ export class BallInPlay {
           const f = early ? (s.planeZ - p0.z) / (p1.z - p0.z) : 1;
           const at = vec3(p0.x + (p1.x - p0.x) * f, p0.y + (p1.y - p0.y) * f, p0.z + (p1.z - p0.z) * f);
           s.resolved = true;
+          // Once the ball pitches the batter can correct the bat — if there is time before it arrives.
+          const technique = this.opts.striker.batting.technique / 100;
+          const sinceBounce = s.sawBounce || this.bounceTime === undefined ? 1 : this.time - this.bounceTime;
+          const adjust = Math.min(0.9, Math.max(0, (sinceBounce - 0.1) / 0.25)) * (0.6 + 0.4 * technique);
+          const off = offSideSign(this.opts.striker.battingHand);
           const result = resolveContact({
             attempt: s.attempt,
             batter: this.opts.striker,
             ballPosition: at,
             ballVelocity: b.velocity,
             timingError: s.batTime - s.arrival,
+            lineError: (at.x - s.expected.x) * off * (1 - adjust),
+            heightError: (at.y - s.expected.y) * (1 - adjust),
             rng: this.opts.rng,
           });
           this.contact = result;

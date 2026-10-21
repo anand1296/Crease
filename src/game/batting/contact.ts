@@ -2,7 +2,7 @@ import type { Rng } from '../core/rng.ts';
 import { type Vec3, length3, vec3 } from '../core/vec3.ts';
 import { FIELD } from '../data/field.ts';
 import { type Player, offSideSign } from '../model/player.ts';
-import { SHOTS, type ShotAttempt, type ShotDef } from './shots.ts';
+import { PUSH, SHOTS, type ShotAttempt, type ShotDef } from './shots.ts';
 
 /**
  * Bat–ball contact.
@@ -32,6 +32,14 @@ export interface ContactInput {
   readonly ballVelocity: Readonly<Vec3>;
   /** Seconds the bat arrived after the ball (positive = late, negative = early). */
   readonly timingError: number;
+  /**
+   * How far the ball is from where the batter set the bat, metres: sideways
+   * (batter-relative, + towards the off side) and vertically, after whatever
+   * adjustment they could make once they saw it pitch. Late movement off the
+   * seam, unread spin and uneven bounce all show up here.
+   */
+  readonly lineError?: number;
+  readonly heightError?: number;
   readonly rng: Rng;
 }
 
@@ -42,6 +50,8 @@ export interface ContactResult {
   readonly quality: number;
   /** Timing error normalised by the shot's tolerance (±1 ≈ one tolerance). */
   readonly timing: number;
+  /** Raw timing error, seconds (positive = late). */
+  readonly timingSeconds: number;
   /** Positional error normalised by tolerance. */
   readonly reach: number;
   /** Where the ball hit the bat: across the face (+ towards the off-side edge) and along the blade (+ towards the handle), metres from the sweet spot. */
@@ -157,11 +167,22 @@ function rotateYawPitch(v: Readonly<Vec3>, yawRad: number, pitchRad: number): Ve
   return vec3(h > 0 ? (x / h) * hs : 0, Math.sin(elev) * speed, h > 0 ? (z / h) * hs : 0);
 }
 
-function noContact(kind: 'miss' | 'leave', u: Readonly<Vec3>, def: ShotDef, quality: number, timing: number, reach: number, across: number, aimDeg: number): ContactResult {
+function noContact(
+  kind: 'miss' | 'leave',
+  u: Readonly<Vec3>,
+  def: ShotDef,
+  quality: number,
+  timing: number,
+  timingSeconds: number,
+  reach: number,
+  across: number,
+  aimDeg: number,
+): ContactResult {
   return {
     kind,
     quality,
     timing,
+    timingSeconds,
     reach,
     across,
     along: 0,
@@ -176,10 +197,21 @@ function noContact(kind: 'miss' | 'leave', u: Readonly<Vec3>, def: ShotDef, qual
 
 export function resolveContact(input: ContactInput): ContactResult {
   const { attempt, batter, rng } = input;
-  const def = SHOTS[attempt.shot];
+  const base = SHOTS[attempt.shot];
+  // A push is the defensive stroke played with a little more bat, into a gap.
+  const def: ShotDef =
+    attempt.push && base.kind === 'defence'
+      ? {
+          ...base,
+          batSpeed: PUSH.batSpeed,
+          restitution: PUSH.restitution,
+          elevation: PUSH.elevation,
+          timingTolerance: base.timingTolerance * PUSH.timingToleranceScale,
+        }
+      : base;
   const aimDeg = attempt.aimDeg ?? def.direction;
   const u = input.ballVelocity;
-  if (def.kind === 'leave') return noContact('leave', u, def, 0, 0, 0, 0, aimDeg);
+  if (def.kind === 'leave') return noContact('leave', u, def, 0, 0, input.timingError, 0, 0, aimDeg);
 
   const off = offSideSign(batter.battingHand);
   const bat = batter.batting;
@@ -211,13 +243,14 @@ export function resolveContact(input: ContactInput): ContactResult {
   // --- 2. Where the ball meets the bat ---------------------------------------
   // Across the face: a ball wider than the shot wants finds the outside edge,
   // one tighter than it wants the inside edge; lateness opens the face.
-  const acrossBias = clamp(dLine, -0.3, 0.3) * 0.3 + 0.006 * timing;
+  const acrossBias = clamp(dLine, -0.3, 0.3) * 0.3 + 0.006 * timing + (input.lineError ?? 0);
   const across = acrossBias + rng.boundedNormal((0.009 + 0.03 * (1 - quality)) * control);
-  // Along the blade: balls higher than ideal hit higher on the bat.
-  const along = clamp(dHeight, -0.4, 0.4) * 0.3 + rng.boundedNormal((0.02 + 0.08 * (1 - quality)) * control);
+  // Along the blade: balls higher than ideal hit higher on the bat; extra bounce finds the splice or the glove.
+  const along =
+    clamp(dHeight, -0.4, 0.4) * 0.3 + (input.heightError ?? 0) * 0.8 + rng.boundedNormal((0.02 + 0.08 * (1 - quality)) * control);
 
   if (Math.abs(timing) > 3.2 || reach > 3.5 || Math.abs(across) > MISS_BEYOND) {
-    return noContact('miss', u, def, quality, timing, reach, across, aimDeg);
+    return noContact('miss', u, def, quality, timing, input.timingError, reach, across, aimDeg);
   }
 
   const power = 0.75 + 0.55 * (bat.power / 100);
@@ -244,7 +277,7 @@ export function resolveContact(input: ContactInput): ContactResult {
     );
     const a = anglesOf(v, off);
     return {
-      kind: 'edge', edge, quality: quality * 0.4, timing, reach, across, along,
+      kind: 'edge', edge, quality: quality * 0.4, timing, timingSeconds: input.timingError, reach, across, along,
       velocity: v, exitSpeed: length3(v), directionDeg: a.directionDeg, elevationDeg: a.elevationDeg,
       intendedDirectionDeg: aimDeg, intendedElevationDeg: intendedElev,
     };
@@ -280,6 +313,7 @@ export function resolveContact(input: ContactInput): ContactResult {
     kind: quality > 0.6 ? 'middled' : 'mistimed',
     quality,
     timing,
+    timingSeconds: input.timingError,
     reach,
     across,
     along,
