@@ -1,4 +1,4 @@
-import { defineConfig, devices } from '@playwright/test';
+import { defineConfig, devices, type ReporterDescription } from '@playwright/test';
 
 /**
  * Browser smoke tests run against the production build.
@@ -6,24 +6,30 @@ import { defineConfig, devices } from '@playwright/test';
  * Against a deployed URL (e.g. a Vercel preview): E2E_BASE_URL=https://… npm run test:e2e
  */
 const externalBaseUrl = process.env.E2E_BASE_URL;
+const ci = Boolean(process.env.CI);
+
+const reporter: ReporterDescription[] = ci ? [['github'], ['html', { open: 'never' }]] : [['list']];
 
 export default defineConfig({
   testDir: 'e2e',
-  forbidOnly: Boolean(process.env.CI),
-  retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
+  forbidOnly: ci,
+  retries: ci ? 1 : 0,
+  reporter,
   use: {
     baseURL: externalBaseUrl ?? 'http://localhost:4173',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
-  webServer: externalBaseUrl
-    ? undefined
+  // Only start a local preview server when not testing a deployed URL.
+  ...(externalBaseUrl
+    ? {}
     : {
-        command: 'npx vite preview --port 4173 --strictPort',
-        url: 'http://localhost:4173',
-        reuseExistingServer: !process.env.CI,
-      },
+        webServer: {
+          command: 'npx vite preview --port 4173 --strictPort',
+          url: 'http://localhost:4173',
+          reuseExistingServer: !ci,
+        },
+      }),
   projects: [
     {
       name: 'desktop',
