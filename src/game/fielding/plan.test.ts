@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Rng } from '../core/rng.ts';
 import { FIELD, STRIKER_STUMPS_Z } from '../data/field.ts';
 import { BOWLER_FOLLOW_THROUGH, STANDARD_FIELD } from '../data/fieldPositions.ts';
-import { TEAMS } from '../data/teams.ts';
+import { SAMPLE_TEAMS as TEAMS } from '../data/sampleTeams.ts';
 import { directionVector } from '../batting/contact.ts';
 import type { Player } from '../model/player.ts';
 import { createBall } from '../physics/ball.ts';

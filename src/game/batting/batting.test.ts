@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { TEAMS, findPlayer } from '../data/teams.ts';
+import { findPlayer } from '../data/teams.ts';
+import { SAMPLE_TEAMS as TEAMS } from '../data/sampleTeams.ts';
 import type { Player } from '../model/player.ts';
 import type { DeliveryPlan } from '../bowling/execute.ts';
 import { type StrokeScenario, mean, rate, sd, simulateMany, simulateStroke } from './harness.ts';

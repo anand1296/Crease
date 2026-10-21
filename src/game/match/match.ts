@@ -452,9 +452,14 @@ export class Match {
     const progress = inn.balls / total;
     const wicketsLeft = 10 - inn.wickets;
     const caution = wicketsLeft <= 3 ? 0.35 : wicketsLeft <= 5 ? 0.15 : 0;
-    if (inn.target === undefined) return clamp(-0.05 + 0.85 * progress - caution, -0.5, 1);
     const ballsLeft = Math.max(1, total - inn.balls);
-    const required = ((inn.target - inn.runs) / ballsLeft) * 6;
+    const required = inn.target === undefined ? 0 : ((inn.target - inn.runs) / ballsLeft) * 6;
+    if (this.config.overs <= 20) {
+      // T20 (or shorter): positive from the start, all-out attack at the death.
+      if (inn.target === undefined) return clamp(0.95 + 0.55 * progress - caution, -0.2, 1.6);
+      return clamp(0.75 + (required - 7.5) / 4 - caution * 0.5, -0.3, 1.6);
+    }
+    if (inn.target === undefined) return clamp(-0.05 + 0.85 * progress - caution, -0.5, 1);
     return clamp((required - 5) / 5 - caution * 0.5, -0.5, 1);
   }
 

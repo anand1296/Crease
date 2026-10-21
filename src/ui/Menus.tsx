@@ -252,6 +252,7 @@ export function SquadPicker() {
                       </td>
                       <td>
                         {p.name}
+                        {team.captainId === p.id ? <span className="tag">c</span> : null}
                         {team.keeperIds.includes(p.id) ? <span className="tag">wk</span> : null}
                         <span className="hand">{p.battingHand === 'left' ? 'LHB' : 'RHB'}</span>
                       </td>

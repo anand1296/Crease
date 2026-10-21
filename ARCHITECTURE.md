@@ -28,7 +28,7 @@ Simulation (core, physics,        deterministic TypeScript — no React or three
 | `game/core/fixedStep.ts` | Fixed-timestep accumulator with frame clamping and interpolation factor |
 | `game/core/vec3.ts` | Allocation-free vector helpers |
 | `game/physics/ball.ts` | Ball flight, drag, swing, spin, Coulomb bounce, seam/turn, rolling, rest |
-| `game/data/` | Ground dimensions, pitch presets, fielding positions, four fictional squads of sixteen |
+| `game/data/` | Ground dimensions, pitch presets, fielding positions, the four national T20 squads and kit-clash rule (`teams.ts`), fictional fixture sides for the physics tests (`sampleTeams.ts`) |
 | `game/model/` | Player and difficulty types |
 | `game/bowling/deliveryTypes.ts` | The 12 delivery recipes |
 | `game/bowling/solver.ts` | Shooting-method launch solver; flight sampling |

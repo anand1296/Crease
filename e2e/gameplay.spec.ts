@@ -43,7 +43,7 @@ test.describe('gameplay', () => {
     // Main menu → setup.
     await page.getByTestId('menu-play').click();
     await expect(page.getByTestId('setup')).toBeVisible();
-    await page.getByRole('button', { name: 'Sunrise Strikers' }).first().click();
+    await page.getByRole('button', { name: 'Australia' }).first().click();
     await page.getByRole('button', { name: '2', exact: true }).click();
     await page.getByRole('button', { name: 'We bat' }).click();
 
@@ -61,7 +61,7 @@ test.describe('gameplay', () => {
     await page.getByTestId('start-match').click();
     await expect(page.getByTestId('score')).toHaveText('0/0');
     await expect(page.getByTestId('role')).toContainText('You are batting');
-    await expect(page.getByTestId('scoreboard')).toContainText('SRS');
+    await expect(page.getByTestId('scoreboard')).toContainText('AUS');
 
     // Three strokes.
     const strokes = [{ press: 'KeyD' }, { hold: 'ArrowLeft', press: 'KeyD' }, { press: 'KeyS' }];

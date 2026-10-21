@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 — Real T20 squads (2026-10-22)
+
+- **Teams**: India, Pakistan, Australia and England with each board's most recently announced men's T20I squad (India and Pakistan named 6 Oct 2026, England 13 Oct 2026, Australia's Bangladesh squad of June 2026); real batting hands and bowling styles, captains and keepers marked; ratings are the game's own approximations.
+- **Kits** in national colours; alternate strips when colours clash (India v England).
+- **T20 batting AI**: in games of 20 overs or fewer the computer bats like a T20 side (≈170 a side at 8–9 an over).
+- The old fictional sides remain only as test fixtures for the physics tests.
+
+
 ## 0.4.0 — Realistic players, broadcast camera, graphics and sound (2026-10-22)
 
 - **Players**: skinned, motion-captured human models (Microsoft Rocketbox, MIT) replace the primitive figures; team kits painted through a baked kit mask; helmets, caps, sun hats, pads, keeper's mitts; varied skin tones; running, idling and celebrations from motion capture; strokes and bowling retargeted from the procedural rig with IK hands on the bat; heads follow the ball; fielders walk in.

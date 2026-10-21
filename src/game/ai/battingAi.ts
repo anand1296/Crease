@@ -78,7 +78,9 @@ export function decideStroke(delivery: ExecutedDelivery, o: BattingAiOptions): B
 
 /** Shot selection from the perceived line (batter-relative), length and height at the stumps. */
 export function chooseShot(line: number, length: number, heightAtStumps: number, intent: number, rng: Rng): ShotAttempt {
-  const aggressive = rng.chance(0.35 + 0.35 * intent);
+  const aggressive = rng.chance(0.35 + 0.35 * Math.min(1, intent));
+  // Above 1: T20 hitting — clearing the ring off good-length balls too.
+  const slog = Math.max(0, intent - 1);
   const wide = line > 0.45;
   const legSide = line < -0.12;
 
@@ -94,12 +96,18 @@ export function chooseShot(line: number, length: number, heightAtStumps: number,
     // Full / half-volley: drive.
     if (wide) return aggressive ? attempt('coverDrive') : attempt('leave');
     if (legSide) return attempt(aggressive ? 'flick' : 'onDrive');
-    if (aggressive && rng.chance(0.25 + 0.25 * intent)) return attempt('loftedDrive');
+    if (aggressive && rng.chance(0.25 + 0.25 * Math.min(1, intent) + 0.5 * slog)) {
+      return line < 0.05 && rng.chance(0.4) ? attempt('loftedAttack', 'front', -40) : attempt('loftedDrive');
+    }
     return attempt(line > 0.15 ? 'coverDrive' : line > 0.03 ? 'offDrive' : 'straightDrive');
   }
   if (length < 7.5) {
     // Good length: respect it, but look to work it into a gap for a single.
     const fw = length > 6 ? 'back' : 'front';
+    if (slog > 0 && rng.chance(slog * 1.1)) {
+      // Into the arc: over midwicket off the stumps, over cover from outside off.
+      return line > 0.15 ? attempt('loftedAttack', 'front', 35) : attempt('loftedAttack', fw, -45);
+    }
     if (wide) return attempt('leave', 'front');
     if (legSide) return aggressive ? attempt('flick', fw) : push(-40, fw);
     if (aggressive && line > 0.2 && length < 5) return attempt('coverDrive');
@@ -107,7 +115,7 @@ export function chooseShot(line: number, length: number, heightAtStumps: number,
     return attempt('block', fw);
   }
   // Short.
-  if (heightAtStumps > 1.7) return attempt('leave', 'back');
+  if (heightAtStumps > 1.7) return slog > 0.3 && line < 0.3 && rng.chance(slog) ? attempt('hook') : attempt('leave', 'back');
   if (line > 0.3) return attempt(aggressive ? 'squareCut' : 'leave', 'back');
   if (heightAtStumps > 1.1) return aggressive ? attempt('pull') : attempt('block', 'back');
   return aggressive ? attempt('pull') : push(line > 0.1 ? 60 : -60, 'back');

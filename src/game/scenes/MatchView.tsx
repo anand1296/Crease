@@ -7,7 +7,7 @@ import { sound } from '../audio/sound.ts';
 import { keyboard } from '../input/keyboardInstance.ts';
 import { exposeDebug } from '../debug.ts';
 import { BOWLER_STUMPS_Z, FIELD, STRIKER_POPPING_Z, STRIKER_STUMPS_Z } from '../data/field.ts';
-import type { Team } from '../data/teams.ts';
+import { type Team, kitColors } from '../data/teams.ts';
 import { directionVector } from '../batting/contact.ts';
 import { SHOTS } from '../batting/shots.ts';
 import type { Match } from '../match/match.ts';
@@ -43,11 +43,14 @@ const darken = (hex: string, k: number) => {
   return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
 };
 
-function kitFor(team: Team, player: Player, role: 'batter' | 'keeper' | 'fielder'): Kit {
+function kitFor(match: Match, team: Team, player: Player, role: 'batter' | 'keeper' | 'fielder'): Kit {
+  const home = match.config.home.team.id === team.id;
+  const opponent = home ? match.config.away.team : match.config.home.team;
+  const colors = kitColors(team, opponent, home);
   return {
-    shirt: team.colors.primary,
-    trim: team.colors.secondary,
-    trousers: darken(team.colors.primary, 0.55),
+    shirt: colors.primary,
+    trim: colors.secondary,
+    trousers: colors.trousers ?? darken(colors.primary, 0.55),
     skin: skinFor(player.id),
     headwear: role === 'batter' ? 'helmet' : role === 'keeper' ? 'cap' : hash(player.id) % 4 === 0 ? 'hat' : 'cap',
     pads: role !== 'fielder',
@@ -385,12 +388,17 @@ function Players({ match }: { match: Match }) {
   });
 
   const keeperId = match.keeperOf(match.current.bowling).id;
+  // Stable kit objects: a new one would rebuild the player's model.
+  const kits = useMemo(
+    () => new Map(fielding.xi.map((p) => [p.id, kitFor(match, fielding.team, p, p.id === keeperId ? 'keeper' : 'fielder')])),
+    [match, fielding, keeperId],
+  );
   return (
     <group>
       {fielding.xi.map((p) => (
         <Cricketer
           key={p.id}
-          kit={kitFor(fielding.team, p, p.id === keeperId ? 'keeper' : 'fielder')}
+          kit={kits.get(p.id) ?? kitFor(match, fielding.team, p, 'fielder')}
           avatar={avatarFor(p.id)}
           tone={toneFor(p.id)}
           ref={(h) => {
@@ -399,7 +407,7 @@ function Players({ match }: { match: Match }) {
         />
       ))}
       {batting.xi.map((p) => (
-        <BatterSlot key={p.id} player={p} team={batting.team} handles={handles} />
+        <BatterSlot key={p.id} match={match} player={p} team={batting.team} handles={handles} />
       ))}
       <Bat refObj={strikerBat} />
       <Bat refObj={runnerBat} />
@@ -424,12 +432,13 @@ const m0 = (m: Motion | undefined) => m?.facing ?? 0;
 const easeRun = (u: number) => u * u * (3 - 2 * u) * 0.35 + u * 0.65;
 
 /** Only the two batters at the crease are drawn. */
-function BatterSlot({ player, team, handles }: { player: Player; team: Team; handles: React.RefObject<Map<string, HumanoidHandle | null>> }) {
+function BatterSlot({ match, player, team, handles }: { match: Match; player: Player; team: Team; handles: React.RefObject<Map<string, HumanoidHandle | null>> }) {
   const atCrease = useGame((s) => (s.snap ? s.snap.striker.id === player.id || s.snap.nonStriker.id === player.id : false));
+  const kit = useMemo(() => kitFor(match, team, player, 'batter'), [match, team, player]);
   if (!atCrease) return null;
   return (
     <Cricketer
-      kit={kitFor(team, player, 'batter')}
+      kit={kit}
       avatar={avatarFor(player.id)}
       tone={toneFor(player.id)}
       ref={(h) => {

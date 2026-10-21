@@ -2,7 +2,7 @@
 
 A browser-based 3D cricket game, built with React, TypeScript and Three.js. Inspired by the depth and replayability of classic cricket games: batting that rewards timing and shot selection, bowling with real variation, and an opponent that plays the ball rather than the dice.
 
-> **Status: alpha (0.4.0).** Play a full limited-overs match against the computer: pick from four fictional teams of sixteen, choose your playing XI and batting order, set the overs (2–50), difficulty and pitch, toss, bat and bowl both innings, and finish with a result and full scorecards. Real ball physics, sixteen strokes, twelve delivery types, LBW, wides, run-outs and bowler quotas; motion-captured, skinned player models in team kits; umpires who signal; a broadcast-style camera; post-processed graphics; and synthesised sound, including a physically modelled bat-on-ball crack. See [Roadmap](#roadmap).
+> **Status: alpha (0.5.0).** Play a full limited-overs match against the computer: pick India, Pakistan, Australia or England with their current T20I squads, choose your playing XI and batting order, set the overs (2–50), difficulty and pitch, toss, bat and bowl both innings, and finish with a result and full scorecards. Real ball physics, sixteen strokes, twelve delivery types, LBW, wides, run-outs and bowler quotas; motion-captured, skinned player models in team kits; umpires who signal; a broadcast-style camera; post-processed graphics; and synthesised sound, including a physically modelled bat-on-ball crack. See [Roadmap](#roadmap).
 
 ## Running locally
 
@@ -29,7 +29,7 @@ Browser tests: to test a deployed build use `E2E_BASE_URL=https://… npm run te
 
 ## How to play
 
-**Main menu → Play a match.** Choose your team and the opposition (Harbour City Mariners, Highland Rangers, Sunrise Strikers, Riverside Royals; sixteen players each), the number of overs, difficulty, pitch and who bats first (or toss for it). **Choose playing XI** opens the squad board: tick eleven players, reorder the batting order with ↑/↓, and the board warns you if the side has no keeper, fewer than five bowlers or no spinner. Then **Start match**.
+**Main menu → Play a match.** Choose your team and the opposition (India, Pakistan, Australia, England — each board's most recently announced men's T20I squad, 15–16 players), the number of overs, difficulty, pitch and who bats first (or toss for it). **Choose playing XI** opens the squad board: tick eleven players, reorder the batting order with ↑/↓, and the board warns you if the side has no keeper, fewer than five bowlers or no spinner. Then **Start match**.
 
 Each bowler may bowl at most a fifth of the overs (rounded up) and never two overs in a row. Out of overs, all out, or the target reached ends an innings; the result screen shows the margin, top performers and both scorecards. <kbd>H</kbd> shows the controls in the game.
 
@@ -111,4 +111,4 @@ Built in phases; each phase ships a verified vertical slice.
 
 - **Players**: four Microsoft Rocketbox avatars (MIT licence, © 2020 Microsoft; [repository](https://github.com/microsoft/Microsoft-Rocketbox), notice in `public/players/LICENSE-Rocketbox.md`) with Rocketbox motion-capture clips (run, jog, walk, idle, cheer). They are converted offline by `scripts/avatars/` (FBX → glTF, 1024² textures, a baked kit mask so any team colours can be painted on, compact clip data) and the results are committed under `public/players/`.
 - Everything else — the ground, stadium, crowd, ball, equipment, textures and all sounds — is generated procedurally in code.
-- All teams, players and sponsors are fictional. The UI typeface is Barlow Condensed (SIL Open Font License 1.1), bundled via `@fontsource/barlow-condensed`.
+- Teams and players are real: each board's most recently announced men's T20I squad as of October 2026 (sources in `src/game/data/teams.ts`). Names, batting hands and bowling styles are factual; the numeric ratings are the game's own approximations. Kits use national colours only, with no badges, logos or kit-maker marks, and the sponsors on the boards are fictional. Player names are used for a non-commercial fan project; a commercial release would need the relevant player and board licences. The UI typeface is Barlow Condensed (SIL Open Font License 1.1), bundled via `@fontsource/barlow-condensed`.

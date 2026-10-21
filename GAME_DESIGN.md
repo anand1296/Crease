@@ -157,7 +157,7 @@ The [batting report](docs/batting-report.md) shows the resulting distributions. 
 
 It then commits with a timing error drawn from its timing attribute, and its stroke goes through exactly the same contact physics as the human's.
 
-**Match situation**: in a match the batting AI's intent follows the state of the game: it attacks more as the required rate climbs or the overs run out, and defends more when wickets have fallen quickly or the tail is in. The computer captain bowls its best available bowler within the quota rules.
+**Match situation**: in a match the batting AI's intent follows the state of the game: it attacks more as the required rate climbs or the overs run out, and defends more when wickets have fallen quickly or the tail is in. In games of 20 overs or fewer it plays T20 cricket: positive from the first ball, and above ordinary aggression it starts clearing the ring off good-length balls (lofted over midwicket from the stumps, over cover from outside off) and hooking. Computer v computer T20s with the real squads average about 170 in the first innings at 8–9 an over, with five or six wickets down; a test holds that to 130–230 and 7–11.5 an over. Fifty-over games keep the one-day calibration. The computer captain bowls its best available bowler within the quota rules.
 
 **Difficulty**: Easy, Normal and Hard scale the AI's execution error (×1.6 / 1 / 0.65), perception error, tactical discipline and reaction delay.
 
@@ -168,7 +168,7 @@ Computer v computer at Normal, measured over 400 balls on three seeds: 3.5–5.1
 `src/game/match/match.ts` runs a limited-overs match between two sides, either of which may be human or computer.
 
 - **Setup**: overs (2, 5, 10, 20 or 50), difficulty, pitch (affects bounce, pace and turn), and who bats first, or a toss won by a seeded coin.
-- **Squads**: four fictional teams of sixteen. The playing XI must be eleven different players from the squad; the squad board warns, but allows, a side with no wicketkeeper, fewer than five bowling options or no spinner. The batting order is the XI's order.
+- **Squads**: India, Pakistan, Australia and England with their most recent T20I squads (15–16 players). When two kits clash (India and England are both blue), the away side wears its alternate strip. The playing XI must be eleven different players from the squad; the squad board warns, but allows, a side with no wicketkeeper, fewer than five bowling options or no spinner. The batting order is the XI's order.
 - **Bowler quotas**: at most `ceil(overs / 5)` overs each (one each in a 2–5 over game, four in 20, ten in 50), never two overs in a row, and never the keeper. A human bowling side picks the bowler at the start of each over.
 - **Overs** are six legal balls. Strike changes on odd runs and at the end of each over. A run-out removes whichever batter was running to the broken end.
 - **Extras**: a no-ball or a wide adds one run and is re-bowled. A wide is a ball passing more than 0.85 m outside off stump or 0.45 m outside leg (relative to the batter), or above head height (1.95 m), that the batter does not hit. No wicket of any kind falls off a no-ball (a simplification: under the Laws a run-out still stands).
