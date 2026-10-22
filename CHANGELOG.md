@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.1 — A saved match always resumes on the start card (2026-10-23)
+
+- A match saved while the game was waiting for "Next ball" now loads on the card to start again from, like any other save (it used to come back to the bare prompt).
+
 ## 0.13.0 — Byes, leg byes, overthrows, sending a batter back, spin off the bat, your own field, free hits, super overs (2026-10-23)
 
 - **Leg byes**: a ball that hits the pad (or body) and isn't out now runs on — glancing fine down the leg side with some pace, or dropping at his feet — and the batters can run. Leg byes count only if a stroke was offered or he was hit getting out of the way; otherwise the runs don't count. They go to the extras, not the batter or the bowler. If a review then gives it out, the leg byes are wiped.

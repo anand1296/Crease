@@ -4,7 +4,7 @@
 
 | | |
 | --- | --- |
-| Version | 0.13.0 (October 2026) |
+| Version | 0.13.1 (October 2026) |
 | Repository | https://github.com/anand1296/Crease |
 | Hosting | Vercel (static site, Git-integrated: every push to `main` deploys; pull requests get previews) |
 | Stack | TypeScript (strict) · React 19 · Three.js r180 via React Three Fiber 9 · Vite 7 · Zustand 5 · Vitest 3 · Playwright |

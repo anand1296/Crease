@@ -999,7 +999,8 @@ export class Match {
     this.clock.reset();
     // A saved ball in play starts again; a human gets a moment to get ready.
     if (this.phase === 'delivery' || this.phase === 'appeal' || this.phase === 'drs') this.phase = 'between';
-    if (this.phase === 'between' && this.humanInvolved) this.waitForStart();
+    // Loaded between balls: the player gets the card to start again from (not the bare "next ball").
+    if ((this.phase === 'between' || (this.phase === 'review' && this.review?.kind === 'ball')) && this.humanInvolved) this.waitForStart();
     this.emit();
   }
 

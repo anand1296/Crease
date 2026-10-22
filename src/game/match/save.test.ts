@@ -87,4 +87,16 @@ describe('saving and loading a match', () => {
     expect(loaded.history.length).toBe(balls);
     expect(loaded.striker.id).toBe(m.striker.id);
   });
+
+  it('saved while waiting for "next ball", it loads on the card to start again from', () => {
+    const m = new Match(config({ home: side(team(0), 'human'), seed: 'save-review' }));
+    m.next();
+    playUntil(m, () => m.phase === 'review' && m.review?.kind === 'ball' && m.history.length >= 2);
+    const state = JSON.parse(JSON.stringify(m.saveState()));
+    const loaded = new Match(config({ home: side(team(0), 'human'), seed: 'save-review' }));
+    loaded.restoreState(state);
+    expect(loaded.phase).toBe('review');
+    expect(loaded.review?.kind).toBe('start');
+    expect(loaded.history.length).toBe(m.history.length);
+  });
 });
