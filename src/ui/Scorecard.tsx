@@ -43,6 +43,7 @@ export function Scorecard({ innings, batting, bowling }: { innings: InningsState
             <th scope="col" className="num">B</th>
             <th scope="col" className="num">4s</th>
             <th scope="col" className="num">6s</th>
+            <th scope="col" className="num">SR</th>
           </tr>
         </thead>
         <tbody>
@@ -54,6 +55,7 @@ export function Scorecard({ innings, batting, bowling }: { innings: InningsState
               <td className="num">{c.balls}</td>
               <td className="num">{c.fours}</td>
               <td className="num">{c.sixes}</td>
+              <td className="num">{c.balls ? ((c.runs / c.balls) * 100).toFixed(1) : '–'}</td>
             </tr>
           ))}
           <tr>
@@ -62,7 +64,7 @@ export function Scorecard({ innings, batting, bowling }: { innings: InningsState
               {innings.wides} wd, {innings.noBalls} nb
             </td>
             <td className="num strong">{extras}</td>
-            <td colSpan={3} />
+            <td colSpan={4} />
           </tr>
         </tbody>
       </table>
@@ -81,6 +83,7 @@ export function Scorecard({ innings, batting, bowling }: { innings: InningsState
             <th scope="col" className="num">R</th>
             <th scope="col" className="num">W</th>
             <th scope="col" className="num">Econ</th>
+            <th scope="col" className="num">Dots</th>
           </tr>
         </thead>
         <tbody>
@@ -92,6 +95,7 @@ export function Scorecard({ innings, batting, bowling }: { innings: InningsState
               <td className="num">{c.runs}</td>
               <td className="num strong">{c.wickets}</td>
               <td className="num">{c.balls ? ((c.runs / c.balls) * 6).toFixed(1) : '–'}</td>
+              <td className="num">{c.dots}</td>
             </tr>
           ))}
         </tbody>

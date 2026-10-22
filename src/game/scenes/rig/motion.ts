@@ -23,6 +23,7 @@ export function resetPose(p: Pose): void {
   p.handL = undefined;
   p.handR = undefined;
   p.clip = undefined;
+  p.armLayer = undefined;
   p.look = undefined;
   p.grip = undefined;
 }
@@ -342,4 +343,57 @@ export function throwAction(p: Pose, tau: number, rightArmed: boolean): void {
   p.drop = 0.06;
   p.bob = 0;
   p.grip = tau < 0 ? 0.6 : 0.1;
+}
+
+// --- Moments between balls --------------------------------------------------------------------
+
+/** Polishing the ball on the trousers, walking back to the mark (layered on the walk clip). */
+export function polishBall(p: Pose, rightArmed: boolean, t: number): void {
+  const arm = rightArmed ? p.armR : p.armL;
+  setLimb(arm, 0.12 + Math.sin(t * 9) * 0.1, 0.06, 1.2 + Math.sin(t * 9) * 0.15);
+  p.armLayer = rightArmed ? 'R' : 'L';
+  p.grip = 0.6;
+}
+
+/** Directing a fielder: the arm out to the side pointing, with a wave to move him on. */
+export function pointField(p: Pose, rightArmed: boolean, t: number): void {
+  const arm = rightArmed ? p.armR : p.armL;
+  setLimb(arm, 1.05 + Math.sin(t * 5) * 0.12, 0.85, 0.15 + Math.max(0, Math.sin(t * 5)) * 0.35);
+  p.armLayer = rightArmed ? 'R' : 'L';
+}
+
+/** An appeal: both arms flung up, leaning back towards the umpire. */
+export function appeal(p: Pose, t: number): void {
+  resetPose(p);
+  p.lean = -0.12;
+  setLimb(p.armL, 2.75 + Math.sin(t * 6) * 0.08, 0.35, 0.15);
+  setLimb(p.armR, 2.75 + Math.sin(t * 6 + 1) * 0.08, 0.35, 0.15);
+  setLimb(p.legL, 0.1, 0.05, 0.1);
+}
+
+/** Raising the bat to the crowd (and, for a hundred, the other arm wide). */
+export function raiseBat(p: Pose, batInRight: boolean, t: number, hundred: boolean): void {
+  resetPose(p);
+  const bat = batInRight ? p.armR : p.armL;
+  const other = batInRight ? p.armL : p.armR;
+  setLimb(bat, 2.8 + Math.sin(t * 2.4) * 0.06, 0.25, 0.3);
+  if (hundred) setLimb(other, 1.9, 1.1, 0.2);
+  else setLimb(other, 0.3, 0.12, 0.5);
+  p.lean = -0.05;
+  p.grip = 1;
+}
+
+/**
+ * Taking guard: bat held upright on the crease in front of him, a couple of
+ * taps to mark it. `tap` 0–1 through the routine.
+ */
+export function takeGuard(p: Pose, tap: number): void {
+  resetPose(p);
+  p.lean = 0.28;
+  p.drop = 0.05;
+  setLimb(p.armL, 0.55, 0.05, 0.75 + Math.abs(Math.sin(tap * Math.PI * 4)) * 0.12);
+  setLimb(p.armR, 0.55, 0.05, 0.75 + Math.abs(Math.sin(tap * Math.PI * 4)) * 0.12);
+  setLimb(p.legL, 0.05, 0.08, 0.1);
+  setLimb(p.legR, 0.05, 0.08, 0.1);
+  p.grip = 1;
 }

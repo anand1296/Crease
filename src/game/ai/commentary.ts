@@ -33,6 +33,10 @@ export interface BallCall {
   readonly wicket?: { readonly kind: 'bowled' | 'caught' | 'lbw' | 'runOut' | 'stumped'; readonly fielder?: string | undefined; readonly out: string } | undefined;
   /** An lbw appeal turned down, and why. */
   readonly notOutLbw?: string | undefined;
+  /** The striker reached fifty or a hundred with this ball. */
+  readonly milestone?: 50 | 100 | undefined;
+  /** The lbw decision went to the third umpire. */
+  readonly reviewed?: { readonly by: string; readonly out: boolean; readonly overturned: boolean; readonly umpiresCall: boolean } | undefined;
   readonly padded?: boolean | undefined;
   /** The striker's score after the ball. */
   readonly batterRuns: number;
@@ -149,7 +153,7 @@ export class Commentator {
       f.bat = out;
       excitement = 2;
       if (c.wicket.kind === 'bowled') parts.push(this.say(c.delivery.name === 'Yorker' ? 'yorked' : 'bowled', f));
-      else if (c.wicket.kind === 'lbw') parts.push(this.say('lbw', f));
+      else if (c.wicket.kind === 'lbw') parts.push(c.reviewed ? `${out} is trapped in front.` : this.say('lbw', f));
       else if (c.wicket.kind === 'runOut') parts.push(this.say('runOut', f));
       else if (c.wicket.kind === 'stumped') parts.push(this.say('stumped', f));
       else if (c.contact === 'edge' && c.wicket.fielder && (c.directionDeg === undefined || Math.abs(c.directionDeg) > 150)) parts.push(this.say('caughtBehind', f));
@@ -199,6 +203,22 @@ export class Commentator {
       if (c.overRuns === 0) parts.push(`A maiden from ${bowl}.`);
       else parts.push(`${c.overRuns} from the over.`);
       if (c.chase && c.chase.needed > 0 && c.chase.balls > 0) parts.push(`${c.chase.team} need ${c.chase.needed} from ${c.chase.balls} ball${c.chase.balls === 1 ? '' : 's'}.`);
+    }
+    if (c.milestone && !c.wicket) {
+      parts.push(
+        c.milestone === 100
+          ? `And that's the hundred! ${bat} raises the bat, off comes the helmet — ${c.batterBalls} balls of quality.`
+          : `That brings up the fifty for ${bat}, off ${c.batterBalls} balls. A wave of the bat to the dressing room.`,
+      );
+      excitement = 2;
+    }
+    if (c.reviewed) {
+      const r = c.reviewed;
+      parts.push(`${r.by} send it upstairs…`);
+      if (r.overturned) parts.push(r.out ? 'Three reds on ball tracking — overturned, and he has to go!' : 'Ball tracking has it missing. Overturned — he survives!');
+      else if (r.umpiresCall) parts.push(r.out ? "Umpire's call on the wickets — the out decision stands, but they keep the review." : "Umpire's call — not out stands, review retained.");
+      else parts.push(r.out ? 'Smashing into the stumps. A wasted review.' : 'Missing comfortably. That review is gone.');
+      excitement = 2;
     }
     return { text: parts.join(' '), excitement };
   }

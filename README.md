@@ -74,6 +74,10 @@ The same ball again is <kbd>Space</kbd>, <kbd>Space</kbd>, <kbd>Space</kbd>.
 
 ### General
 
+**Reviews (DRS)**: when an lbw decision goes against you, press <kbd>T</kbd> within 15 seconds to review it (or <kbd>Enter</kbd> to accept it). The third umpire's ball tracking shows where the ball pitched, where it hit the pad and whether it was going on to hit the stumps; less than half the ball in line or hitting is *umpire's call*, which keeps the on-field decision (and your review). Each side has two unsuccessful reviews per innings; the scoreboard shows how many you have left.
+
+**Confidence and stamina** (the bars under each batter's name, and next to the bowler's): confidence widens the timing gauge's sweet spot — boundaries and well-timed shots build it, plays-and-misses cost it; tired batters run and hit less well; bowlers tire faster bowling flat out or in long spells.
+
 **Autoplay**: <kbd>Y</kbd> lets the computer play your side (batting or bowling) for the rest of the over — or the next over, between overs — and <kbd>U</kbd> for the rest of the innings, at twice the pace and without stopping between balls. Press the key again, or *Take over*, and you have the controls back from the next ball. The buttons are at the top left of the screen.
 
 <kbd>P</kbd> / <kbd>Esc</kbd> pause (resume, sound, commentary, restart, quit to menu) · <kbd>Enter</kbd> / <kbd>Space</kbd> next ball, continue past a card, skip a replay · <kbd>C</kbd> camera · <kbd>M</kbd> sound on/off · <kbd>V</kbd> commentary on/off · <kbd>H</kbd> help. The game pauses itself when the window loses focus.

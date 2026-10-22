@@ -20,6 +20,10 @@ export interface CreaseDebug {
   /** Pins the camera (tests and close-up captures only); undefined releases it. */
   /** Holds the toss scene at this many seconds after the coin is flicked (undefined: live). */
   pinToss?: (seconds: number | undefined) => void;
+  /** Seconds into a decision review, while one is on. */
+  drsTime?: () => number | undefined;
+  /** The camera director's current shot. */
+  shot?: () => string | undefined;
   setCamera?: (view: { pos: [number, number, number]; look: [number, number, number]; fov: number } | undefined) => void;
   /** Ball position, when one is in play or in the bowler's hand. */
   ballWorld?: () => [number, number, number] | undefined;
@@ -42,13 +46,13 @@ declare global {
   }
 }
 
-/** Merges `patch` into the debug handle and returns a function that undoes it. */
+/** Merges `patch` into the debug handle and returns a function that removes those entries again (if still its own). */
 export function exposeDebug(patch: CreaseDebug): () => void {
   if (typeof window === 'undefined') return () => undefined;
-  const previous = window.__crease;
-  window.__crease = { ...previous, ...patch };
+  window.__crease = { ...window.__crease, ...patch };
   return () => {
-    if (previous) window.__crease = previous;
-    else delete window.__crease;
+    const handle = window.__crease as Record<string, unknown> | undefined;
+    if (!handle) return;
+    for (const [key, value] of Object.entries(patch)) if (handle[key] === value) Reflect.deleteProperty(handle, key);
   };
 }

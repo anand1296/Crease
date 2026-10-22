@@ -3,6 +3,7 @@ import { type Vec3, copyVec3, vec3 } from '../core/vec3.ts';
 import { FIELD, STRIKER_STUMPS_Z } from '../data/field.ts';
 import { type Box, batterBoxes, contactPlaneZ } from '../batting/body.ts';
 import { type ContactResult, resolveContact } from '../batting/contact.ts';
+import { type LbwTracking, buildTracking, umpireDecision } from './tracking.ts';
 import { SHOTS, STEP_OUT_TIME, type ShotAttempt } from '../batting/shots.ts';
 import type { ExecutedDelivery } from '../bowling/execute.ts';
 import type { Player } from '../model/player.ts';
@@ -37,8 +38,11 @@ export type BallPhase = 'delivery' | 'struck' | 'dead';
 
 /** The umpire's leg-before-wicket decision (Law 36, without umpire's-call margins). */
 export interface LbwVerdict {
+  /** The on-field umpire's decision. */
   readonly out: boolean;
   readonly reason: 'out' | 'pitched outside leg' | 'impact outside line' | 'missing stumps' | 'going over';
+  /** What ball tracking shows (for a review, and the broadcast graphic). */
+  readonly tracking: LbwTracking;
 }
 
 export interface BallInPlayOptions {
@@ -46,6 +50,9 @@ export interface BallInPlayOptions {
   readonly striker: Player;
   readonly ground: GroundModel;
   readonly rng: Rng;
+  /** The striker's form (see batting/form.ts): timing window and power multipliers. */
+  readonly timingScale?: number;
+  readonly powerScale?: number;
 }
 
 const STUMP_HALF_WIDTH = FIELD.wicketWidth / 2 + FIELD.ballRadius;
@@ -67,6 +74,9 @@ interface Stroke {
   resolved: boolean;
 }
 
+/** How long after a shot key the arrows (and Shift) can still change the stroke, seconds. */
+export const AIM_GRACE = 0.15;
+
 export class BallInPlay {
   readonly ball: BallState;
   readonly previous: Vec3;
@@ -78,7 +88,10 @@ export class BallInPlay {
   /** Struck ball: first bounce after contact, apex height. */
   firstBounceAfterContact?: { x: number; z: number; t: number };
   apex = 0;
-  private stroke?: Stroke;
+  private stroke: Stroke | undefined;
+  /** The delivery's path, sampled at 60 Hz until it reaches the batter (for ball tracking). */
+  private readonly trail: Vec3[] = [];
+  private trailStep = 0;
   private boxes: Box[];
   private readonly opts: BallInPlayOptions;
   private readonly stepEvents = newStepEvents();
@@ -109,6 +122,19 @@ export class BallInPlay {
     | undefined {
     const s = this.stroke;
     return s ? { attempt: s.attempt, pressTime: s.pressTime, batTime: s.batTime, planeZ: s.planeZ, expected: s.expected } : undefined;
+  }
+
+  /**
+   * Changes the direction of the stroke just committed to: arrows pressed a
+   * moment after the shot key (meant to be "together") still count. Only
+   * within AIM_GRACE of the press, and only before the bat gets there.
+   */
+  reaim(attempt: ShotAttempt): boolean {
+    const s = this.stroke;
+    if (!s || s.resolved || this.phase !== 'delivery' || this.time - s.pressTime > AIM_GRACE) return false;
+    if (s.attempt.shot === attempt.shot && s.attempt.aimDeg === attempt.aimDeg && s.attempt.footwork === attempt.footwork) return false;
+    this.stroke = undefined;
+    return this.playShot(attempt, s.pressTime);
   }
 
   /** Commits to a stroke now (or at `atTime`). One stroke per delivery. */
@@ -180,6 +206,7 @@ export class BallInPlay {
     const b = this.ball;
     copyVec3(this.previous, b.position);
     const t0 = this.time;
+    if (this.phase === 'delivery' && this.trailStep++ % 4 === 0) this.trail.push({ ...b.position });
     stepBall(b, dt, this.opts.ground, this.stepEvents);
     this.time += dt;
 
@@ -247,6 +274,8 @@ export class BallInPlay {
             timingError: !early ? readyTime - s.arrival : s.arrival > s.batTime ? s.batTime - s.arrival : readyTime === s.batTime ? s.batTime - s.arrival : 0,
             lineError: (at.x - s.expected.x) * off * (1 - adjust),
             heightError: (at.y - s.expected.y) * (1 - adjust),
+            ...(this.opts.timingScale !== undefined ? { timingScale: this.opts.timingScale } : {}),
+            ...(this.opts.powerScale !== undefined ? { powerScale: this.opts.powerScale } : {}),
             rng: this.opts.rng,
           });
           this.contact = result;
@@ -311,30 +340,40 @@ export class BallInPlay {
    * from the impact, it would have hit the stumps.
    */
   private judgeLbw(): LbwVerdict {
-    const off = offSideSign(this.opts.striker.battingHand);
-    const half = STUMP_HALF_WIDTH;
-    const pitch = this.delivery.actual.pitch && this.bounceTime !== undefined ? this.events.find((e) => e.type === 'bounce') : undefined;
-    if (pitch && pitch.type === 'bounce' && pitch.x * off < -half) return { out: false, reason: 'pitched outside leg' };
-    const impactLine = this.ball.position.x * off;
-    const noStroke = !this.stroke || this.stroke.attempt.shot === 'leave';
-    if (impactLine < -half || (impactLine > half && !noStroke)) return { out: false, reason: 'impact outside line' };
+    const off = offSideSign(this.opts.striker.battingHand) > 0 ? 1 : -1;
+    const bounce = this.events.find((e) => e.type === 'bounce' && !e.struck);
+    const pitch = bounce && bounce.type === 'bounce' ? { x: bounce.x, z: bounce.z } : undefined;
+    const impact = { ...this.ball.position };
     // Project the ball on as if the batter were not there.
     const ghost = cloneBall(this.ball);
     const ev = newStepEvents();
+    const projection: Vec3[] = [{ ...impact }];
+    let atStumps: { x: number; y: number } | undefined;
     let prev = { ...ghost.position };
-    for (let t = 0; t < 1.5; t += 1 / 240) {
+    for (let i = 0; i < 360; i++) {
       stepBall(ghost, 1 / 240, this.opts.ground, ev);
       if (prev.z < STRIKER_STUMPS_Z && ghost.position.z >= STRIKER_STUMPS_Z) {
         const f = (STRIKER_STUMPS_Z - prev.z) / (ghost.position.z - prev.z);
-        const x = prev.x + (ghost.position.x - prev.x) * f;
-        const y = prev.y + (ghost.position.y - prev.y) * f;
-        if (y > STUMP_TOP) return { out: false, reason: 'going over' };
-        if (Math.abs(x) > half) return { out: false, reason: 'missing stumps' };
-        return { out: true, reason: 'out' };
+        atStumps = { x: prev.x + (ghost.position.x - prev.x) * f, y: prev.y + (ghost.position.y - prev.y) * f };
+        projection.push({ x: atStumps.x, y: atStumps.y, z: STRIKER_STUMPS_Z });
+        break;
       }
+      if (i % 4 === 3) projection.push({ ...ghost.position });
       prev = { ...ghost.position };
     }
-    return { out: false, reason: 'missing stumps' };
+    const tracking = buildTracking({
+      path: [...this.trail, impact],
+      projection,
+      pitch,
+      impact,
+      // Never reaching the stumps (it died, or went the other way): missing.
+      atStumps: atStumps ?? { x: ghost.position.x, y: -1 },
+      off,
+      shotOffered: !!this.stroke && this.stroke.attempt.shot !== 'leave',
+      stumpsZ: STRIKER_STUMPS_Z,
+    });
+    const umpire = umpireDecision(tracking, this.opts.rng.fork('umpire'));
+    return { out: umpire.decision === 'out', reason: umpire.reason, tracking };
   }
 
   private crossedStumps(p0: Readonly<Vec3>, p1: Readonly<Vec3>, raised: BallEvent[], afterContact: boolean): boolean {

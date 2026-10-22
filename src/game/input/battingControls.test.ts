@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ALL_SHOTS, SHOTS, type ShotId } from '../batting/shots.ts';
-import { type BatAction, type ScreenDirection, directionOf, shotFromInput, sideOf } from './battingControls.ts';
+import { type BatAction, type ScreenDirection, directionOf, fieldRegion, shotFromInput, sideOf } from './battingControls.ts';
 
 const D = (x: -1 | 0 | 1, y: -1 | 0 | 1): ScreenDirection => ({ x, y });
 const DOWN = -1;
@@ -71,5 +71,22 @@ describe('batting controls (Cricket 07 scheme)', () => {
       const s = shotFromInput(a, d, l, 'right');
       expect(SHOTS[s.shot].footwork.includes(s.footwork)).toBe(true);
     });
+  });
+});
+
+describe('where the shot goes', () => {
+  it('names a region all round the ground, and every region is reachable from the keys', () => {
+    expect(fieldRegion(shotFromInput('front', D(-1, DOWN), false, 'right'))).toBe('cover');
+    expect(fieldRegion(shotFromInput('front', D(1, DOWN), false, 'left'))).toBe('cover');
+    expect(fieldRegion(shotFromInput('back', D(-1, UP), false, 'right'))).toBe('third man');
+    expect(fieldRegion(shotFromInput('front', D(0, UP), false, 'right'))).toBe('fine leg');
+    expect(fieldRegion(shotFromInput('front', D(1, DOWN), false, 'right'))).toBe('mid-on');
+    expect(fieldRegion(shotFromInput('front', D(0, DOWN), true, 'right'))).toBe('straight, over the bowler');
+    const reached = new Set<string>();
+    for (const a of ['front', 'back', 'feet'] as const)
+      for (const x of [-1, 0, 1] as const)
+        for (const y of [-1, 0, 1] as const) for (const l of [false, true]) reached.add(fieldRegion(shotFromInput(a, D(x, y), l, 'right')));
+    for (const r of ['straight', 'mid-off', 'cover', 'point', 'third man', 'fine leg', 'square leg', 'midwicket', 'mid-on', 'long-off', 'long-on', 'deep cover', 'deep midwicket'])
+      expect(reached.has(r), r).toBe(true);
   });
 });

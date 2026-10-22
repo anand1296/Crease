@@ -24,7 +24,7 @@ export interface Vec {
 }
 
 export interface Shot {
-  readonly name: 'wide' | 'aim' | 'closeUp' | 'runUp' | 'delivery' | 'stroke' | 'chase' | 'stumps' | 'hold';
+  readonly name: 'wide' | 'aim' | 'closeUp' | 'runUp' | 'delivery' | 'stroke' | 'chase' | 'throw' | 'celebrate' | 'stumps' | 'hold';
   /** Which fixed camera a chase shot uses (so the director stays on it for the rest of the ball). */
   readonly cam?: string;
   readonly pos: Vec;
@@ -65,6 +65,27 @@ export interface DirectorInput {
   readonly previousCam?: string | undefined;
   /** Where the bowler is (on the ground), for framing the run-up. */
   readonly bowler?: Vec | undefined;
+  /**
+   * A fielder's throw: from where, to which stumps, and the time since the
+   * ball left his hand (negative while he winds up).
+   */
+  readonly throwing?: { readonly from: Vec; readonly target: Vec; readonly since: number } | undefined;
+  /** After the ball: a celebration to show (a wicket's huddle, a batter raising his bat), and how wide it is. */
+  readonly celebrate?: { readonly at: Vec; readonly span: number } | undefined;
+}
+
+/**
+ * The camera for a throw: one that sees the ball travel in to the stumps.
+ * The ball should go away from the camera into the stumps: the main camera
+ * behind the bowler for throws from his side of the target, the camera
+ * behind the keeper for throws from the other side; from square of the
+ * target, the camera across the ground from the thrower, which sees the
+ * whole line.
+ */
+export function throwCamera(from: Vec, target: Vec): string {
+  if (from.z < target.z - 6) return 'main';
+  if (from.z > target.z + 6) return 'reverse';
+  return from.x >= 0 ? 'squareMinus' : 'squarePlus';
 }
 
 const smooth = (u: number) => {
@@ -222,6 +243,33 @@ export function direct(input: DirectorInput): Shot {
     const f = runUpFrame(bowler);
     // Follow closely: the operator keeps the bowler at the foot of the frame.
     return { name, pos: f.pos, look: f.look, fov: f.fov, cut, ease: 9 };
+  }
+
+  // A celebration: a long lens from behind the bowler's arm, off to one side, on the bowler and his team-mates
+  // after a wicket, or the batter raising his bat for a fifty or hundred.
+  if (input.celebrate && phase === 'dead') {
+    const sub = input.celebrate.at;
+    const pos = { x: sub.x + 10, y: 8.5, z: Math.min(sub.z, BOWLER_STUMPS_Z) - 42 };
+    const look = { x: sub.x, y: 1.25, z: sub.z };
+    const d = Math.hypot(pos.x - look.x, pos.y - look.y, pos.z - look.z);
+    const fov = Math.max(2.5, ((2 * Math.atan(input.celebrate.span / 2 / d)) * 180) / Math.PI);
+    return { name: 'celebrate', pos, look, fov, cut: input.previous !== 'celebrate', ease: 3 };
+  }
+
+  // A throw: the camera that sees it come in, following the ball to the stumps and holding on them.
+  const th = input.throwing;
+  if (th && ball && th.since > -0.35) {
+    const cam = input.previous === 'throw' && input.previousCam ? input.previousCam : throwCamera(th.from, th.target);
+    const pos = { ...(CHASE_CAMERAS[cam] ?? MAIN_CAMERA) };
+    // The ball and the stumps it is going to, framed together; once it arrives, tight on the stumps.
+    const arrived = th.since > 0 && Math.hypot(ball.x - th.target.x, ball.z - th.target.z) < 2.5;
+    const k = arrived ? 0.85 : 0.5;
+    const look = { x: lerp(ball.x, th.target.x, k), y: lerp(Math.max(0.6, ball.y * 0.8), 0.6, k), z: lerp(ball.z, th.target.z, k) };
+    const spread = arrived ? 0 : Math.hypot(ball.x - th.target.x, ball.z - th.target.z);
+    const dist = Math.hypot(pos.x - look.x, pos.y - look.y, pos.z - look.z);
+    const span = Math.max(6, spread * 1.15 + 4, ball.y * 1.6 + 3);
+    const fov = Math.min(50, Math.max(4.5, ((2 * Math.atan(span / 2 / dist)) * 180) / Math.PI));
+    return { name: 'throw', cam, pos, look, fov, cut: input.previous !== 'throw', ease: 5 };
   }
 
   // Bowled, or run out at the striker's end: a low shot of the broken wicket.

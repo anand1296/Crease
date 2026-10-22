@@ -4,14 +4,18 @@ import { effortSpeed } from '../game/bowling/execute.ts';
 import type { BallOutcome } from '../game/session/deliveryCycle.ts';
 import type { InningsState } from '../game/match/match.ts';
 import { Scorecard } from './Scorecard.tsx';
+import { MatchStats } from './MatchStats.tsx';
 import { HowToPlay } from './Menus.tsx';
 import { useEffect, useRef, useState } from 'react';
 import type { GameAction } from '../game/input/keyboard.ts';
 import { keyboard } from '../game/input/keyboardInstance.ts';
-import { type BatAction, shotFromInput } from '../game/input/battingControls.ts';
-import { SHOTS } from '../game/batting/shots.ts';
+import { type BatAction, fieldRegion, shotAngle, shotFromInput } from '../game/input/battingControls.ts';
+import { SHOTS, type ShotAttempt } from '../game/batting/shots.ts';
+import type { Hand } from '../game/model/player.ts';
 import { howOut } from './Scorecard.tsx';
 import { oversText } from '../game/match/match.ts';
+import { REVIEW_WINDOW } from '../game/simulation/tracking.ts';
+import { DRS_TIMES } from '../game/match/match.ts';
 import type { CoachNote } from '../game/ai/coach.ts';
 import { speak } from '../game/audio/voice.ts';
 
@@ -33,6 +37,8 @@ export function Hud() {
       <Commentary />
       <ControlsPanel />
       <AutoplayControl />
+      <AppealPrompt />
+      <DrsPanel />
       <NextPrompt />
       <ReviewCard />
       <ReplayBadge />
@@ -41,6 +47,26 @@ export function Hud() {
       <HelpOverlay />
       <PauseOverlay />
     </>
+  );
+}
+
+/** A thin bar: confidence (gold) or stamina (green, amber, red as it runs out). */
+function Meter({ kind, value, label }: { kind: 'confidence' | 'stamina'; value: number; label: string }) {
+  const v = Math.max(0, Math.min(1, value));
+  const tone = kind === 'confidence' ? 'conf' : v > 0.6 ? 'good' : v > 0.3 ? 'ok' : 'bad';
+  return (
+    <span className={`meter ${kind}`} title={label} aria-label={label} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(v * 100)}>
+      <span className={tone} style={{ width: `${v * 100}%` }} />
+    </span>
+  );
+}
+
+function FormBars({ form }: { form: { confidence: number; fatigue: number } }) {
+  return (
+    <span className="form-bars">
+      <Meter kind="confidence" value={form.confidence} label={`Confidence ${Math.round(form.confidence * 100)}%`} />
+      <Meter kind="stamina" value={1 - form.fatigue} label={`Stamina ${Math.round((1 - form.fatigue) * 100)}%`} />
+    </span>
   );
 }
 
@@ -70,15 +96,18 @@ function ScoreStrip() {
         <span className="on">
           <i aria-hidden="true">▸</i>
           {striker.name} <b>{fig(striker.card)}</b>
+          <FormBars form={striker.form} />
         </span>
         <span>
           <i aria-hidden="true" />
           {nonStriker.name} <b>{fig(nonStriker.card)}</b>
+          <FormBars form={nonStriker.form} />
         </span>
       </div>
       <div className="sb-bowler">
         <span>
           {bowler.name} <b>{bowler.card ? `${bowler.card.wickets}-${bowler.card.runs}` : '0-0'}</b> <small>{bowlerOvers}</small>
+          <Meter kind="stamina" value={1 - bowler.fatigue} label={`Stamina ${Math.round((1 - bowler.fatigue) * 100)}%${bowler.spell > 1 ? `, ${bowler.spell} overs in this spell` : ''}`} />
         </span>
         <span className="sb-over" aria-label="This over">
           {snap.recent.map((r, i) => (
@@ -99,6 +128,9 @@ function ScoreStrip() {
         )}
         <span className="sb-role" data-testid="role">
           {snap.userSide === 'batting' ? 'You are batting' : 'You are bowling'}
+          <span className="drs-tag" title="Unsuccessful reviews left this innings" data-testid="reviews-left">
+            DRS {snap.userSide === 'bowling' ? snap.reviews.bowling : snap.reviews.batting}
+          </span>
           {snap.fieldPhase === 'powerplay' ? (
             <span className="phase-tag" data-testid="powerplay">
               Powerplay
@@ -145,7 +177,7 @@ function OutcomeBanner() {
   const phase = useGame((s) => s.snap?.phase);
   const ballPhase = useGame((s) => s.snap?.ballPhase);
   const reviewKind = useGame((s) => s.snap?.review?.kind);
-  const visible = o && (phase === 'between' || phase === 'aiming' || ballPhase === 'dead' || (phase === 'review' && reviewKind === 'ball'));
+  const visible = o && phase !== 'appeal' && phase !== 'drs' && (phase === 'between' || phase === 'aiming' || ballPhase === 'dead' || (phase === 'review' && reviewKind === 'ball'));
   if (!o || !visible) return null;
   const t = timingText(o);
   const big = o.boundary !== undefined || o.wicket !== undefined;
@@ -540,31 +572,63 @@ function PauseOverlay() {
   const toggleCommentary = useGame((s) => s.toggleCommentary);
   const replaysOn = useGame((s) => s.replaysOn);
   const toggleReplays = useGame((s) => s.toggleReplays);
+  const match = useGame((s) => s.match);
+  const [tab, setTab] = useState<'menu' | 'scorecard' | 'stats'>('menu');
   if (!paused) return null;
+  const tabs = [
+    ['menu', 'Paused'],
+    ['scorecard', 'Scorecard'],
+    ['stats', 'Stats'],
+  ] as const;
   return (
     <div className="overlay" role="dialog" aria-label="Paused" data-testid="pause">
-      <div className="panel">
-        <h2>Paused</h2>
-        <div className="buttons">
-          <button type="button" onClick={() => setPaused(false)} autoFocus>
-            Resume (P)
-          </button>
-          <button type="button" className="secondary" onClick={toggleMute}>
-            Sound: {muted ? 'off' : 'on'} (M)
-          </button>
-          <button type="button" className="secondary" onClick={toggleCommentary}>
-            Commentary: {commentaryOn ? 'on' : 'off'} (V)
-          </button>
-          <button type="button" className="secondary" onClick={toggleReplays}>
-            Replays: {replaysOn ? 'on' : 'off'}
-          </button>
-          <button type="button" className="secondary" onClick={rematch}>
-            Restart match
-          </button>
-          <button type="button" className="secondary" onClick={quit}>
-            Quit to main menu
-          </button>
+      <div className={`panel${tab === 'menu' ? '' : ' wide pause-wide'}`}>
+        <div className="pause-tabs" role="tablist">
+          {tabs.map(([id, label]) => (
+            <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)} data-testid={`pause-${id}`}>
+              {label}
+            </button>
+          ))}
         </div>
+        {tab === 'menu' ? (
+          <div className="buttons">
+            <button type="button" onClick={() => setPaused(false)} autoFocus>
+              Resume (P)
+            </button>
+            <button type="button" className="secondary" onClick={toggleMute}>
+              Sound: {muted ? 'off' : 'on'} (M)
+            </button>
+            <button type="button" className="secondary" onClick={toggleCommentary}>
+              Commentary: {commentaryOn ? 'on' : 'off'} (V)
+            </button>
+            <button type="button" className="secondary" onClick={toggleReplays}>
+              Replays: {replaysOn ? 'on' : 'off'}
+            </button>
+            <button type="button" className="secondary" onClick={rematch}>
+              Restart match
+            </button>
+            <button type="button" className="secondary" onClick={quit}>
+              Quit to main menu
+            </button>
+          </div>
+        ) : match && tab === 'scorecard' ? (
+          <div className="cards pause-scroll" data-testid="pause-scorecards">
+            {match.innings
+              .map((inn, i) => <Scorecard key={i} innings={inn} batting={match.side(inn.batting).team} bowling={match.side(inn.bowling).team} />)
+              .reverse()}
+          </div>
+        ) : match ? (
+          <div className="pause-scroll">
+            <MatchStats match={match} />
+          </div>
+        ) : null}
+        {tab !== 'menu' ? (
+          <div className="buttons row">
+            <button type="button" onClick={() => setPaused(false)}>
+              Resume (P)
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -676,35 +740,76 @@ function Key({ label, on, wide }: { label: string; on: boolean; wide?: boolean }
  */
 function TimingGauge() {
   const contact = useGame((s) => s.snap?.contact);
-  if (!contact || contact.kind === 'leave') return null;
-  const t = Math.max(-2.5, Math.min(2.5, contact.timing));
-  const ms = Math.round(contact.timingSeconds * 1000);
-  const word =
-    contact.kind === 'miss'
+  const scale = useGame((s) => s.snap?.timingScale ?? 1);
+  const confidence = useGame((s) => s.snap?.striker.form.confidence ?? 0.5);
+  // The gauge is drawn in a normal batter's timing units: a confident batter's sweet spot is wider.
+  const RANGE = 2.5;
+  const perfect = 0.3 * scale;
+  const ok = 0.8 * scale;
+  const zone = (half: number) => ({ left: `${50 - (half / RANGE) * 50}%`, width: `${(half / RANGE) * 100}%` });
+  const hit = contact && contact.kind !== 'leave' ? contact : undefined;
+  const t = hit ? Math.max(-RANGE, Math.min(RANGE, hit.timing * scale)) : 0;
+  const ms = hit ? Math.round(hit.timingSeconds * 1000) : 0;
+  const raw = hit ? Math.abs(hit.timing) : 0;
+  const word = !hit
+    ? 'Ready'
+    : hit.kind === 'miss'
       ? 'Missed'
-      : Math.abs(t) < 0.3
+      : raw < 0.3
         ? 'Perfect'
-        : Math.abs(t) < 0.8
-          ? t < 0 ? 'A touch early' : 'A touch late'
-          : t < 0 ? 'Early' : 'Late';
-  const tone = contact.kind === 'miss' ? 'bad' : Math.abs(t) < 0.3 ? 'good' : Math.abs(t) < 0.8 ? 'ok' : 'bad';
+        : raw < 0.8
+          ? hit.timing < 0 ? 'A touch early' : 'A touch late'
+          : hit.timing < 0 ? 'Early' : 'Late';
+  const tone = !hit ? '' : hit.kind === 'miss' ? 'bad' : raw < 0.3 ? 'good' : raw < 0.8 ? 'ok' : 'bad';
+  const feel = confidence > 0.7 ? 'Seeing it well' : confidence > 0.45 ? 'Settled' : confidence > 0.3 ? 'Uncertain' : 'Nervous';
   return (
-    <div className="timing" data-testid="timing-gauge" aria-label={`Timing: ${word}, ${ms} ms`}>
+    <div className="timing" data-testid="timing-gauge" aria-label={hit ? `Timing: ${word}, ${ms} ms` : `Timing gauge, ${feel}`}>
       <div className="timing-head">
         <span className="dim">Timing</span>
         <strong className={tone}>{word}</strong>
-        <span className="dim">{ms === 0 ? '0 ms' : ms < 0 ? `${-ms} ms early` : `${ms} ms late`}</span>
+        <span className="dim">{hit ? (ms === 0 ? '0 ms' : ms < 0 ? `${-ms} ms early` : `${ms} ms late`) : feel}</span>
       </div>
       <div className="timing-bar">
-        <span className="zone ok" />
-        <span className="zone good" />
-        <span className={`mark ${tone}`} style={{ left: `${50 + (t / 2.5) * 50}%` }} />
+        <span className="zone ok" style={zone(ok)} />
+        <span className="zone good" style={zone(perfect)} />
+        {hit ? <span className={`mark ${tone}`} style={{ left: `${50 + (t / RANGE) * 50}%` }} /> : null}
       </div>
       <div className="timing-scale dim">
         <span>early</span>
+        <span>sweet spot {scale >= 1 ? `+${Math.round((scale - 1) * 100)}` : `−${Math.round((1 - scale) * 100)}`}%</span>
         <span>late</span>
       </div>
     </div>
+  );
+}
+
+/**
+ * Where the front-foot (filled) and back-foot (ring) strokes will go, on a
+ * small plan of the ground as the camera sees it: the batter in the middle,
+ * straight down the ground towards the bottom, his off side on the left
+ * for a right-hander.
+ */
+function FieldRadar({ hand, front, back }: { hand: Hand; front: ShotAttempt; back: ShotAttempt }) {
+  const offLeft = hand === 'right';
+  const at = (a: ShotAttempt) => {
+    const kind = SHOTS[a.shot].kind;
+    if (kind === 'leave' || (kind === 'defence' && !a.push)) return undefined;
+    const rad = (shotAngle(a) * Math.PI) / 180;
+    const r = kind === 'loft' || a.shot === 'slogSweep' ? 26 : 19;
+    return { x: 30 + (offLeft ? -1 : 1) * Math.sin(rad) * r, y: 30 + Math.cos(rad) * r };
+  };
+  const f = at(front);
+  const b = at(back);
+  return (
+    <svg className="radar" viewBox="0 0 60 60" width="60" height="60" aria-hidden="true">
+      <circle cx="30" cy="30" r="28" className="radar-ground" />
+      <circle cx="30" cy="30" r="14" className="radar-ring" />
+      <rect x="28.6" y="22" width="2.8" height="16" className="radar-pitch" />
+      {b ? <line x1="30" y1="30" x2={b.x} y2={b.y} className="radar-back" /> : null}
+      {b ? <circle cx={b.x} cy={b.y} r="3" className="radar-back-dot" /> : null}
+      {f ? <line x1="30" y1="30" x2={f.x} y2={f.y} className="radar-front" /> : null}
+      {f ? <circle cx={f.x} cy={f.y} r="3.2" className="radar-front-dot" /> : null}
+    </svg>
   );
 }
 
@@ -712,7 +817,7 @@ function ControlsPanel() {
   const snap = useGame((s) => s.snap);
   const help = useGame((s) => s.showHelp);
   const { held, flash, dir, back } = useKeys();
-  if (help || !snap || snap.phase === 'inningsBreak' || snap.phase === 'complete' || snap.phase === 'chooseBowler') return null;
+  if (help || !snap || snap.phase === 'inningsBreak' || snap.phase === 'complete' || snap.phase === 'chooseBowler' || snap.phase === 'appeal' || snap.phase === 'drs') return null;
   if (snap.review && snap.review.kind !== 'ball') return null;
   const lit = (a: GameAction) => held.has(a) || flash === a;
   const arrows = (
@@ -727,15 +832,16 @@ function ControlsPanel() {
   );
   if (snap.userBatting) {
     const hand = snap.striker.hand;
-    const name = (a: BatAction) => {
-      const shot = shotFromInput(a, dir, back, hand);
-      return SHOTS[shot.shot].name;
-    };
+    const shot = (a: BatAction) => shotFromInput(a, dir, back, hand);
+    const name = (a: BatAction) => SHOTS[shot(a).shot].name;
+    const where = (a: BatAction) => fieldRegion(shot(a));
     const struck = snap.ballPhase === 'struck';
-    const rows: { a: GameAction; k: string; label: string; what: string }[] = [
-      { a: 'shotFront', k: 'S', what: 'Front foot', label: name('front') },
-      { a: 'shotBack', k: 'W', what: 'Back foot', label: name('back') },
-      { a: 'shotFeet', k: 'D', what: struck ? 'Run' : 'Use your feet', label: struck ? (snap.runsCalled > 0 ? `${snap.runsCalled} called` : 'call a run') : `${name('feet')}` },
+    const rows: { a: GameAction; k: string; label: string; what: string; to?: string }[] = [
+      { a: 'shotFront', k: 'S', what: 'Front foot', label: name('front'), to: where('front') },
+      { a: 'shotBack', k: 'W', what: 'Back foot', label: name('back'), to: where('back') },
+      struck
+        ? { a: 'shotFeet', k: 'D', what: 'Run', label: snap.runsCalled > 0 ? `${snap.runsCalled} called` : 'call a run' }
+        : { a: 'shotFeet', k: 'D', what: 'Use your feet', label: name('feet'), to: where('feet') },
       { a: 'leave', k: 'A', what: 'Leave', label: '' },
     ];
     return (
@@ -747,6 +853,7 @@ function ControlsPanel() {
         <div className="keys-body">
           <div className="keys-aim">
             {arrows}
+            <FieldRadar hand={hand} front={shot('front')} back={shot('back')} />
             <div className="aim-label">{dir.x === 0 && dir.y === 0 ? 'No arrow: defend' : '↓ is straight'}</div>
             <Key label="Shift" on={lit('lofted')} wide />
             <div className="aim-label">{back ? 'Lofted' : 'Along the ground'}</div>
@@ -756,7 +863,10 @@ function ControlsPanel() {
               <li key={r.a} className={lit(r.a) ? 'on' : ''}>
                 <Key label={r.k} on={lit(r.a)} />
                 <span className="what">{r.what}</span>
-                <span>{r.label}</span>
+                <span>
+                  {r.label}
+                  {r.to ? <span className="where"> to {r.to}</span> : null}
+                </span>
               </li>
             ))}
             <li className={lit('run') ? 'on' : ''}>
@@ -772,6 +882,114 @@ function ControlsPanel() {
   }
   // Bowling has its own panel (BowlingPanel), which shows its keys.
   return null;
+}
+
+/** Re-renders every `ms` while `on` (for countdowns that run on the match clock). */
+function useTicker(on: boolean, ms = 200): void {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!on) return;
+    const id = window.setInterval(() => setTick((n) => n + 1), ms);
+    return () => window.clearInterval(id);
+  }, [on, ms]);
+}
+
+/**
+ * An lbw decision: given or not, and — for the side that lost it — the
+ * chance to review it within 15 seconds (T), or accept it (Enter).
+ */
+function AppealPrompt() {
+  const snap = useGame((s) => s.snap);
+  const match = useGame((s) => s.match);
+  const a = snap?.appeal;
+  useTicker(a !== undefined);
+  if (!snap || !match || !a || snap.phase !== 'appeal') return null;
+  const left = Math.max(0, Math.ceil(REVIEW_WINDOW - (match.appeal?.waited ?? 0)));
+  const out = a.onField === 'out';
+  return (
+    <div className={`appeal ${out ? 'given' : 'not-given'}`} role="alertdialog" aria-label="LBW decision" data-testid="appeal">
+      <div className="appeal-head">
+        <span className="dim">LBW appeal</span>
+        <strong>{out ? 'OUT' : 'NOT OUT'}</strong>
+      </div>
+      {a.yours ? (
+        <>
+          <p>
+            {out ? 'Given out. Do you want to review it?' : 'Not given. Do you want to review it?'} {a.reviewsLeft} review{a.reviewsLeft === 1 ? '' : 's'} left.
+          </p>
+          <div className="appeal-actions">
+            <button type="button" className="primary" onClick={() => match.requestReview()} data-testid="review-yes">
+              Review <kbd>T</kbd>
+            </button>
+            <button type="button" onClick={() => match.acceptDecision()} data-testid="review-no">
+              {out ? 'Walk off' : 'Accept'} <kbd>Enter</kbd>
+            </button>
+            <span className="appeal-clock" aria-label={`${left} seconds to decide`}>
+              {left}s
+            </span>
+          </div>
+        </>
+      ) : (
+        <p className="dim">{a.reviewer} are thinking about a review…</p>
+      )}
+    </div>
+  );
+}
+
+const PITCHING_LABEL: Record<string, string> = { inLine: 'In line', outsideOff: 'Outside off', outsideLeg: 'Outside leg', full: 'Full toss' };
+const IMPACT_LABEL: Record<string, string> = { inLine: 'In line', umpiresCall: "Umpire's call", outsideOff: 'Outside off', outsideLeg: 'Outside leg' };
+const WICKETS_LABEL: Record<string, string> = { hitting: 'Hitting', umpiresCall: "Umpire's call", missing: 'Missing' };
+const zoneTone = (v: string) => (v === 'inLine' || v === 'hitting' || v === 'full' ? 'good' : v === 'umpiresCall' ? 'ok' : 'bad');
+
+/**
+ * The third umpire's review, as television shows it: the tracking replays
+ * on the field while the verdicts appear one by one — pitching, impact,
+ * wickets — then the decision.
+ */
+function DrsPanel() {
+  const phase = useGame((s) => s.snap?.phase);
+  const match = useGame((s) => s.match);
+  useTicker(phase === 'drs', 150);
+  const r = match?.drs;
+  if (phase !== 'drs' || !match || !r) return null;
+  const t = r.appeal.tracking;
+  const steps = [
+    { at: DRS_TIMES.pitching, label: 'Pitching', value: PITCHING_LABEL[t.pitching] ?? t.pitching, tone: zoneTone(t.pitching) },
+    { at: DRS_TIMES.impact, label: 'Impact', value: !t.shotOffered && t.impactZone === 'outsideOff' ? 'Outside off, no shot' : (IMPACT_LABEL[t.impactZone] ?? t.impactZone), tone: !t.shotOffered && t.impactZone === 'outsideOff' ? 'good' : zoneTone(t.impactZone) },
+    { at: DRS_TIMES.wickets, label: 'Wickets', value: WICKETS_LABEL[t.wickets] ?? t.wickets, tone: zoneTone(t.wickets) },
+  ];
+  const decided = r.t >= DRS_TIMES.decision;
+  const res = r.result;
+  return (
+    <div className="drs" data-testid="drs" aria-live="polite">
+      <div className="drs-head">
+        <span>Decision review</span>
+        <span className="dim">{match.side(r.appeal.reviewer).team.shortName} review</span>
+      </div>
+      <ul>
+        {steps.map((st) => (
+          <li key={st.label} className={r.t >= st.at ? `shown ${st.tone}` : ''}>
+            <span className="dim">{st.label}</span>
+            <strong>{r.t >= st.at ? st.value : '…'}</strong>
+          </li>
+        ))}
+      </ul>
+      {decided ? (
+        <div className={`drs-decision ${res.decision === 'out' ? 'out' : 'not-out'}`} data-testid="drs-decision">
+          <strong>{res.decision === 'out' ? 'OUT' : 'NOT OUT'}</strong>
+          <span>
+            {res.umpiresCall ? "Umpire's call. " : res.overturned ? 'Decision overturned. ' : 'Original decision stands. '}
+            {res.retained ? 'Review retained.' : 'Review lost.'}
+          </span>
+        </div>
+      ) : null}
+      {r.t > 1 ? (
+        <span className="drs-skip dim">
+          <kbd>Enter</kbd> skip
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 /**

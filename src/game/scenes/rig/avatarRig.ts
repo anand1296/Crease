@@ -45,6 +45,9 @@ const tq2 = new Quaternion();
 const tv = new Vector3();
 const tv2 = new Vector3();
 const tv3 = new Vector3();
+const tv4 = new Vector3();
+const tq3 = new Quaternion();
+const tq4 = new Quaternion();
 const tm = new Matrix4();
 const basisX = new Vector3();
 const basisY = new Vector3();
@@ -180,6 +183,7 @@ export class AvatarRig {
     let targetRootY: number;
     if (pose.clip) {
       targetRootY = this.sampleClip(this.clips[pose.clip.name], pose.clip.time);
+      if (pose.armLayer) this.layerArms(pose.armLayer, frames, targetRootY);
     } else {
       targetRootY = this.procedural(pose, frames, root);
     }
@@ -204,6 +208,24 @@ export class AvatarRig {
     this.grip(pose.grip ?? 0);
     // Keep world positions (for hands) in step with what is drawn.
     this.forward(this.out, bip.position);
+  }
+
+  /**
+   * Over a sampled clip, poses one arm (or both) from the control rig: the
+   * clip's body, the procedural arm. Shoulders stay where the clip has them.
+   */
+  private layerArms(which: 'L' | 'R' | 'both', fr: RigFrames, rootY: number): void {
+    this.forward(this.target, tv4.set(0, rootY, 0));
+    for (const s of ['L', 'R'] as const) {
+      if (which !== 'both' && which !== s) continue;
+      const ua = this.info(`Bip01_${s}_UpperArm`);
+      const fa = this.info(`Bip01_${s}_Forearm`);
+      // The rig's arm frames are relative to its torso; carry them onto the clip's chest.
+      const chest = tq3.copy(this.q(this.wq, 'Bip01_Spine2')).multiply(tq4.copy(this.info('Bip01_Spine2').bindQ).invert());
+      if (ua.r0) this.setWorld(`Bip01_${s}_UpperArm`, tq.copy(chest).multiply(fr.torso.clone().invert()).multiply(s === 'L' ? fr.upperArmL : fr.upperArmR).multiply(ua.r0));
+      if (fa.r0) this.setWorld(`Bip01_${s}_Forearm`, tq.copy(chest).multiply(fr.torso.clone().invert()).multiply(s === 'L' ? fr.forearmL : fr.forearmR).multiply(fa.r0));
+      this.keepBind(`Bip01_${s}_Hand`);
+    }
   }
 
   /** Samples a clip into `target`; returns the root height (cm). */

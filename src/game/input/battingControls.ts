@@ -1,4 +1,4 @@
-import { type Footwork, type ShotAttempt, type ShotId, attempt } from '../batting/shots.ts';
+import { type Footwork, SHOTS, type ShotAttempt, type ShotId, attempt } from '../batting/shots.ts';
 import type { Hand } from '../model/player.ts';
 
 /**
@@ -50,14 +50,15 @@ const at = (shot: ShotId, fw: Footwork, aim?: number): ShotAttempt => attempt(sh
 function groundShot(fw: Footwork, d: number): ShotAttempt {
   if (fw === 'back') {
     switch (d) {
+      // Back foot: the punch past mid-off, the cut, and working it square and behind on the leg side.
       case 0: return at('straightDrive', 'back');
-      case 45: return at('offDrive', 'back', 45);
+      case 45: return at('offDrive', 'back');
       case 90: return at('squareCut', 'back');
       case 135: return at('lateCut', 'back');
       case 180: return at('legGlance', 'back');
       case -135: return at('pull', 'back', -118);
       case -90: return at('pull', 'back');
-      default: return at('onDrive', 'back');
+      default: return at('flick', 'back', -45);
     }
   }
   if (fw === 'out') {
@@ -86,6 +87,8 @@ function groundShot(fw: Footwork, d: number): ShotAttempt {
 
 function loftedShot(fw: Footwork, d: number | undefined): ShotAttempt {
   if (d === undefined || d === 0) return fw === 'back' ? at('loftedAttack', 'back', 0) : at('loftedDrive', fw);
+  // Down the pitch and over the top: long-off and long-on.
+  if (fw === 'out' && (d === 45 || d === -45)) return at('loftedAttack', 'out', d > 0 ? 25 : -25);
   if (fw === 'front') {
     if (d === 135) return at('reverseSweep', 'front');
     if (d === -135) return at('slogSweep', 'front');
@@ -105,4 +108,36 @@ export function shotFromInput(action: BatAction, dir: ScreenDirection, lofted: b
   if (lofted) return loftedShot(fw, d);
   if (d === undefined) return at('block', fw);
   return groundShot(fw, d);
+}
+
+/** The direction a stroke is aimed, degrees from straight (+ off side). */
+export function shotAngle(a: ShotAttempt): number {
+  return a.aimDeg ?? SHOTS[a.shot].direction;
+}
+
+/**
+ * Where on the field a stroke is aimed, by the fielding position there
+ * (the deep position for a lofted shot).
+ */
+export function fieldRegion(a: ShotAttempt): string {
+  const def = SHOTS[a.shot];
+  if (def.kind === 'leave') return 'left alone';
+  if (def.kind === 'defence' && !a.push) return 'dead bat';
+  const deg = shotAngle(a);
+  const deep = def.kind === 'loft' || a.shot === 'slogSweep';
+  const off = deg >= 0;
+  const x = Math.abs(deg);
+  if (x < 12) return deep ? 'straight, over the bowler' : 'straight';
+  if (off) {
+    if (x < 35) return deep ? 'long-off' : 'mid-off';
+    if (x < 66) return deep ? 'deep cover' : 'cover';
+    if (x < 104) return deep ? 'deep point' : 'point';
+    if (x < 128) return deep ? 'third man' : 'backward point';
+    return 'third man';
+  }
+  if (x < 35) return deep ? 'long-on' : 'mid-on';
+  if (x < 70) return deep ? 'deep midwicket' : 'midwicket';
+  if (x < 104) return deep ? 'deep square leg' : 'square leg';
+  if (x < 135) return deep ? 'deep backward square' : 'backward square leg';
+  return 'fine leg';
 }

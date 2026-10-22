@@ -19,6 +19,7 @@ import type { DifficultyId } from '../game/model/difficulty.ts';
 import type { Hand, Player } from '../game/model/player.ts';
 import type { BallOutcome } from '../game/session/deliveryCycle.ts';
 import type { ContactResult } from '../game/batting/contact.ts';
+import { type BatterState, timingScale } from '../game/batting/form.ts';
 import { COIN_SETTLED, type CoinFace, type TossChoice, coinFor, computerChoice, flightTime, tossLine } from '../game/match/toss.ts';
 
 /**
@@ -91,9 +92,17 @@ export interface MatchSnapshot {
   /** Autoplay asked for (the rest of the over or the innings), and whether the computer is playing this ball. */
   readonly autoplay: Autoplay;
   readonly autoplaying: boolean;
-  readonly striker: { readonly id: string; readonly name: string; readonly hand: Hand; readonly card: BattingCard | undefined };
-  readonly nonStriker: { readonly id: string; readonly name: string; readonly card: BattingCard | undefined };
-  readonly bowler: { readonly name: string; readonly style: string; readonly card: BowlingCard | undefined; readonly fatigue: number };
+  readonly striker: { readonly id: string; readonly name: string; readonly hand: Hand; readonly card: BattingCard | undefined; readonly form: BatterState };
+  readonly nonStriker: { readonly id: string; readonly name: string; readonly card: BattingCard | undefined; readonly form: BatterState };
+  readonly bowler: { readonly name: string; readonly style: string; readonly card: BowlingCard | undefined; readonly fatigue: number; readonly spell: number };
+  /** An lbw decision open to review: who may review (you or the computer side), and reviews left. */
+  readonly appeal:
+    | { readonly onField: 'out' | 'notOut'; readonly yours: boolean; readonly reviewer: string; readonly reviewsLeft: number }
+    | undefined;
+  /** Unsuccessful reviews left this innings, batting side and bowling side. */
+  readonly reviews: { readonly batting: number; readonly bowling: number };
+  /** The striker's timing window relative to normal (confidence and tiredness), for the gauge's sweet spot. */
+  readonly timingScale: number;
   readonly lastOutcome: BallOutcome | undefined;
   /** The stroke's contact (timing, quality) for the timing gauge: this ball's once it is hit, else the last ball's. */
   readonly contact: ContactResult | undefined;
@@ -226,13 +235,24 @@ function snapshot(m: Match, toss: string): MatchSnapshot {
     userSide: m.userSide,
     autoplay: m.autoplay,
     autoplaying: m.autoplaying,
-    striker: { id: m.striker.id, name: m.striker.name, hand: m.striker.battingHand, card: card(m.striker) },
-    nonStriker: { id: m.nonStriker.id, name: m.nonStriker.name, card: card(m.nonStriker) },
+    striker: { id: m.striker.id, name: m.striker.name, hand: m.striker.battingHand, card: card(m.striker), form: { ...m.formOf(m.striker) } },
+    nonStriker: { id: m.nonStriker.id, name: m.nonStriker.name, card: card(m.nonStriker), form: { ...m.formOf(m.nonStriker) } },
+    timingScale: timingScale(m.formOf(m.striker)),
+    appeal: m.appeal
+      ? {
+          onField: m.appeal.onField,
+          yours: m.humanReviews(m.appeal),
+          reviewer: m.side(m.appeal.reviewer).team.name,
+          reviewsLeft: m.reviewsLeft[m.appeal.reviewer],
+        }
+      : undefined,
+    reviews: { batting: m.reviewsLeft[inn.batting], bowling: m.reviewsLeft[inn.bowling] },
     bowler: {
       name: bowler.name,
       style: styleName(bowler),
       card: inn.bowlingCards.find((c) => c.player.id === bowler.id),
       fatigue: m.bowlerFatigue,
+      spell: m.spellOf(bowler),
     },
     lastOutcome: m.lastOutcome,
     contact: m.humanBatting ? (m.cycle?.play?.contact ?? (m.phase === 'review' ? m.lastOutcome?.contact : undefined)) : undefined,
@@ -291,7 +311,11 @@ function afterPaint(fn: () => void): void {
   requestAnimationFrame(() => setTimeout(fn, 0));
 }
 let seedCounter = 0;
-const newSeed = () => `crease-${Date.now().toString(36)}-${seedCounter++}`;
+/** A fresh match seed; a `?seed=` in the address fixes it (to replay a match, and for tests). */
+const newSeed = () => {
+  const fixed = typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('seed');
+  return fixed ? `${fixed}${seedCounter++ ? `-${seedCounter}` : ''}` : `crease-${Date.now().toString(36)}-${seedCounter++}`;
+};
 
 function pick(team: Team, xiIds: readonly string[]): Player[] {
   const chosen = xiIds.map((id) => team.players.find((p) => p.id === id)).filter((p): p is Player => p !== undefined);

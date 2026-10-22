@@ -1,7 +1,7 @@
 {
   "name": "crease",
   "private": true,
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Browser-based 3D cricket game — React, TypeScript, Three.js",
   "type": "module",
   "engines": {

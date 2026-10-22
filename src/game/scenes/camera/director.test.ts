@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHASE_CAMERAS, MAIN_CAMERA, STROKE_HOLD, TIGHT, WIDE, chaseCamera, direct, frameBetween, type DirectorInput, type Shot, type Vec } from './director.ts';
+import { CHASE_CAMERAS, MAIN_CAMERA, throwCamera, STROKE_HOLD, TIGHT, WIDE, chaseCamera, direct, frameBetween, type DirectorInput, type Shot, type Vec } from './director.ts';
 import { BOWLER_STUMPS_Z, STRIKER_STUMPS_Z } from '../../data/field.ts';
 
 /** Where `p` appears in the shot, vertically: 0 the foot of the frame, 1 the top (outside 0–1: out of frame). */
@@ -122,5 +122,51 @@ describe('camera director', () => {
     // The ball runs on behind square: the director stays on the same camera.
     const later = direct({ ...base, phase: 'struck', time: 5, contactTime: 3, ball: { x: 30, y: 0.1, z: 15 }, previous: 'chase', previousCam: first.cam });
     expect(later.cam).toBe('squareMinus');
+  });
+
+  it('follows a throw in to the stumps it is aimed at, from a camera that sees it arrive', () => {
+    const keeperEnd = { x: 0, y: 0.5, z: STRIKER_STUMPS_Z };
+    const bowlerEnd = { x: 0, y: 0.5, z: BOWLER_STUMPS_Z };
+    expect(throwCamera({ x: 20, y: 1.8, z: -30 }, keeperEnd)).toBe('main');
+    expect(throwCamera({ x: 20, y: 1.8, z: -30 }, bowlerEnd)).toBe('main');
+    expect(throwCamera({ x: 20, y: 1.8, z: 5 }, bowlerEnd)).toBe('reverse');
+    expect(throwCamera({ x: -30, y: 1.8, z: -9 }, bowlerEnd)).toBe('squarePlus');
+    expect(throwCamera({ x: 30, y: 1.8, z: 25 }, keeperEnd)).toBe('reverse');
+    expect(throwCamera({ x: 30, y: 1.8, z: 12 }, keeperEnd)).toBe('squareMinus');
+    const from = { x: 25, y: 1.8, z: -35 };
+    const thrown = (since: number, ball: { x: number; y: number; z: number }, previous: Shot['name'], previousCam?: string) =>
+      direct({ ...base, phase: 'struck', time: 6, contactTime: 3, ball, chaser: { x: 25, y: 0, z: -35 }, previous, previousCam, throwing: { from, target: keeperEnd, since } });
+    const start = thrown(0, { x: 25, y: 1.9, z: -35 }, 'chase', 'squareMinus');
+    expect(start.name).toBe('throw');
+    expect(start.cut).toBe(true);
+    expect(start.cam).toBe('main');
+    // Ball and stumps both in the frame mid-flight.
+    const mid = thrown(0.5, { x: 12, y: 3, z: -12 }, 'throw', 'main');
+    expect(mid.cut).toBe(false);
+    expect(mid.cam).toBe('main');
+    const span = (p: { x: number; y: number; z: number }) => {
+      const d = { x: p.x - mid.pos.x, y: p.y - mid.pos.y, z: p.z - mid.pos.z };
+      const l = { x: mid.look.x - mid.pos.x, y: mid.look.y - mid.pos.y, z: mid.look.z - mid.pos.z };
+      const cos = (d.x * l.x + d.y * l.y + d.z * l.z) / (Math.hypot(d.x, d.y, d.z) * Math.hypot(l.x, l.y, l.z));
+      return (Math.acos(Math.min(1, cos)) * 180) / Math.PI;
+    };
+    expect(span({ x: 12, y: 3, z: -12 })).toBeLessThan(mid.fov / 2);
+    expect(span(keeperEnd)).toBeLessThan(mid.fov / 2);
+    // Arrived: tight on the stumps.
+    const end = thrown(1.2, { x: 0.2, y: 0.6, z: STRIKER_STUMPS_Z + 0.3 }, 'throw', 'main');
+    expect(end.fov).toBeLessThan(mid.fov);
+  });
+
+  it('after a wicket, cuts to a long lens on the celebration and frames the huddle', () => {
+    const at = { x: 1, y: 0, z: 3 };
+    const s = direct({ ...base, phase: 'dead', time: 5, contactTime: 3, ball: { x: 20, y: 0, z: -30 }, previous: 'chase', celebrate: { at, span: 9 } });
+    expect(s.name).toBe('celebrate');
+    expect(s.cut).toBe(true);
+    expect(s.look.x).toBeCloseTo(at.x, 5);
+    expect(s.look.z).toBeCloseTo(at.z, 5);
+    // A long lens: the huddle about fills the frame.
+    const d = Math.hypot(s.pos.x - at.x, s.pos.y - 1.25, s.pos.z - at.z);
+    expect(2 * d * Math.tan((s.fov * Math.PI) / 360)).toBeCloseTo(9, 1);
+    expect(direct({ ...base, phase: 'dead', time: 5.1, contactTime: 3, previous: 'celebrate', celebrate: { at, span: 9 } }).cut).toBe(false);
   });
 });

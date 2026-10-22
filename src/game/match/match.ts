@@ -6,6 +6,8 @@ import { fieldingPhase, maxOutside, setField, type WagonShot } from '../ai/capta
 import { type BallRecord, type CoachNote, battingNotes, bowlingNotes } from '../ai/coach.ts';
 import { Commentator, type CommentaryLine } from '../ai/commentary.ts';
 import { SHOTS, type ShotAttempt } from '../batting/shots.ts';
+import { type BatterState, confidenceAfter, fatigueAfter, rested, startingConfidence } from '../batting/form.ts';
+import type { ContactResult } from '../batting/contact.ts';
 import { PITCHES, type PitchId } from '../data/pitches.ts';
 import type { Team } from '../data/teams.ts';
 import { chooseDelivery } from '../ai/bowlingAi.ts';
@@ -18,6 +20,7 @@ import { type Fielder, buildField, rebuildField } from '../fielding/plan.ts';
 import { DIFFICULTIES, type DifficultyId } from '../model/difficulty.ts';
 import { type Player, isSpinner } from '../model/player.ts';
 import { type BallOutcome, DeliveryCycle, type WicketKind } from '../session/deliveryCycle.ts';
+import { type Decision, type LbwTracking, REVIEWS_PER_INNINGS, REVIEW_WINDOW, type ReviewResult, review, reviewConfidence } from '../simulation/tracking.ts';
 
 /**
  * A limited-overs match: toss decided, two innings, a target, a result.
@@ -62,6 +65,8 @@ export interface BattingCard {
   readonly balls: number;
   readonly fours: number;
   readonly sixes: number;
+  /** Balls faced that scored nothing. */
+  readonly dots: number;
   readonly batted: boolean;
   readonly dismissal?: Dismissal;
 }
@@ -72,6 +77,12 @@ export interface BowlingCard {
   readonly runs: number;
   readonly wickets: number;
   readonly maidens: number;
+  /** Legal balls that cost nothing. */
+  readonly dots: number;
+  readonly wides: number;
+  readonly noBalls: number;
+  readonly fours: number;
+  readonly sixes: number;
 }
 
 export interface FallOfWicket {
@@ -94,6 +105,8 @@ export interface InningsState {
   readonly battingCards: readonly BattingCard[];
   readonly bowlingCards: readonly BowlingCard[];
   readonly fallOfWickets: readonly FallOfWicket[];
+  /** Runs and wickets in each over so far (the current over last). */
+  readonly overs: readonly { readonly runs: number; readonly wickets: number }[];
   /** Runs needed to win (second innings only). */
   readonly target?: number;
   readonly endReason?: 'allOut' | 'overs' | 'target';
@@ -128,10 +141,74 @@ export interface BowlingSetup {
  */
 export type AimStep = 'type' | 'target';
 
+/** The ball's outcome after a review: the decision as the third umpire left it, with a headline to match. */
+export function reviewedOutcome(o: BallOutcome, r: ReviewResult, by: string): BallOutcome {
+  const { wicket: _old, review: _r, ...rest } = o;
+  void _old;
+  void _r;
+  const why = r.umpiresCall ? "umpire's call" : r.overturned ? 'overturned' : 'the decision stands';
+  const kept = r.retained ? `${by} keep their review.` : `${by} lose a review.`;
+  if (r.decision === 'out') {
+    return {
+      ...rest,
+      wicket: { kind: 'lbw', batter: 'striker' },
+      headline: r.overturned ? 'OUT! Overturned on review' : 'OUT — the decision stands',
+      detail: `${r.overturned ? 'Ball tracking has it hitting the stumps.' : r.umpiresCall ? "Umpire's call: out stands." : 'Hitting the stumps.'} ${kept}`,
+      review: { by, overturned: r.overturned, umpiresCall: r.umpiresCall, why },
+    };
+  }
+  return {
+    ...rest,
+    headline: r.overturned ? 'NOT OUT! Overturned on review' : 'NOT OUT — the decision stands',
+    detail: `${r.overturned ? 'Ball tracking has it missing.' : r.umpiresCall ? "Umpire's call: not out stands." : 'Missing the stumps.'} ${kept}`,
+    review: { by, overturned: r.overturned, umpiresCall: r.umpiresCall, why },
+  };
+}
+
+/** The innings' runs and wickets by over, with a ball added to over `index`. */
+function addToOver(overs: InningsState['overs'], index: number, runs: number, wickets: number): InningsState['overs'] {
+  const next = overs.slice();
+  while (next.length <= index) next.push({ runs: 0, wickets: 0 });
+  const o = next[index] ?? { runs: 0, wickets: 0 };
+  next[index] = { runs: o.runs + runs, wickets: o.wickets + wickets };
+  return next;
+}
+
 /** Autoplay: off, the rest of the over, or the rest of the innings. */
 export type Autoplay = 'off' | 'over' | 'innings';
 
-export type MatchPhase = 'between' | 'review' | 'chooseBowler' | 'aiming' | 'delivery' | 'inningsBreak' | 'complete';
+/**
+ * 'appeal': an lbw decision the losing side may review (15 s); 'drs': the
+ * third umpire looking at the ball tracking.
+ */
+export type MatchPhase = 'between' | 'review' | 'chooseBowler' | 'aiming' | 'delivery' | 'appeal' | 'drs' | 'inningsBreak' | 'complete';
+
+/** An lbw decision open to review. */
+export interface PendingAppeal {
+  readonly outcome: BallOutcome;
+  readonly onField: Decision;
+  readonly tracking: LbwTracking;
+  /** The side that can review: the batting side if given out, the fielding side if not. */
+  readonly reviewer: SideId;
+  /** Seconds since the decision. */
+  waited: number;
+}
+
+/** A review in progress, and how it came out. */
+export interface DrsReview {
+  readonly appeal: PendingAppeal;
+  readonly result: ReviewResult;
+  /** Seconds into the third umpire's review (the graphic plays through). */
+  t: number;
+}
+
+/** How long the third umpire's review is shown, seconds, and when each verdict appears. */
+export const DRS_SHOW = 9.5;
+export const DRS_TIMES = { pitching: 2.6, impact: 3.6, wickets: 6.2, decision: 7.2 } as const;
+/** The tracking replay: the ball to the impact, then the projection to the stumps (seconds into the review). */
+export const DRS_PATH = { start: 0.6, impact: 3.4, stumps: 6.0 } as const;
+/** How long a computer side takes to decide whether to review, seconds. */
+const AI_REVIEW_THINK = 1.4;
 
 /**
  * The pause after a ball when a human is playing: the game waits for a key
@@ -201,6 +278,10 @@ export class Match {
   private ballsThisOver = 0;
   private runsThisOver = 0;
   private readonly fatigue = new Map<string, number>();
+  /** Each batter's confidence and tiredness this innings (see batting/form.ts). */
+  private readonly form = new Map<string, BatterState>();
+  /** Bowlers' current spells: overs in a row (every other over) and the last over they bowled. */
+  private readonly spells = new Map<string, { overs: number; last: number }>();
   private phaseTimer = 0;
   private ballNumber = 0;
   private readonly rng: Rng;
@@ -309,6 +390,75 @@ export class Match {
   /** Whether the computer is playing the current ball for the human. */
   get autoplaying(): boolean {
     return this.autoplayActive;
+  }
+
+  // --- Moments ---------------------------------------------------------------------------
+
+  /** A batter reached fifty or a hundred on the last ball (cleared when the next ball starts). */
+  milestone: { readonly batterId: string; readonly name: string; readonly runs: 50 | 100; readonly balls: number; readonly ball: number } | undefined;
+  /** The batter out on the last ball, walking off (until the next ball starts). */
+  departing: { readonly id: string; readonly ball: number } | undefined;
+
+  // --- Reviews (DRS) ---------------------------------------------------------------------
+
+  /** The lbw decision open to review, if any. */
+  appeal: PendingAppeal | undefined;
+  /** The review in progress, if any. */
+  drs: DrsReview | undefined;
+  /** Unsuccessful reviews each side has left this innings. */
+  reviewsLeft: Record<SideId, number> = { home: REVIEWS_PER_INNINGS, away: REVIEWS_PER_INNINGS };
+
+  /** Whether the human decides on this review (not the computer, not on autoplay). */
+  humanReviews(a: PendingAppeal): boolean {
+    const side = this.side(a.reviewer);
+    return side.controller === 'human' && !this.autoplayActive;
+  }
+
+  /** A ball is over: an lbw appeal the losing side can still review waits for them; anything else is scored. */
+  private ballDead(o: BallOutcome): void {
+    const a = o.appeal;
+    if (a) {
+      const reviewer: SideId = a.onField === 'out' ? this.current.batting : this.current.bowling;
+      if (this.reviewsLeft[reviewer] > 0) {
+        this.appeal = { outcome: o, onField: a.onField, tracking: a.tracking, reviewer, waited: 0 };
+        this.phase = 'appeal';
+        this.emit();
+        return;
+      }
+    }
+    this.record(o);
+  }
+
+  /** Take it upstairs: the third umpire reviews the decision. */
+  requestReview(): boolean {
+    const a = this.appeal;
+    if (this.phase !== 'appeal' || !a || this.paused) return false;
+    const result = review(a.onField, a.tracking);
+    if (!result.retained) this.reviewsLeft[a.reviewer] = Math.max(0, this.reviewsLeft[a.reviewer] - 1);
+    this.drs = { appeal: a, result, t: 0 };
+    this.appeal = undefined;
+    this.phase = 'drs';
+    this.emit();
+    return true;
+  }
+
+  /** Accept the umpire's decision (or let the review window run out). */
+  acceptDecision(): boolean {
+    const a = this.appeal;
+    if (this.phase !== 'appeal' || !a) return false;
+    this.appeal = undefined;
+    this.phase = 'delivery';
+    this.record(a.outcome);
+    return true;
+  }
+
+  /** The third umpire's decision is in: the ball is scored with it. */
+  private finishReview(): void {
+    const r = this.drs;
+    if (!r) return;
+    this.drs = undefined;
+    this.phase = 'delivery';
+    this.record(reviewedOutcome(r.appeal.outcome, r.result, this.side(r.appeal.reviewer).team.shortName));
   }
 
   /**
@@ -445,9 +595,30 @@ export class Match {
         const before = c.phase;
         const waiting = c.awaitingThrowSince !== undefined;
         c.step(dt);
-        if (before !== 'dead' && c.phase === 'dead' && c.outcome) this.record(c.outcome);
+        if (before !== 'dead' && c.phase === 'dead' && c.outcome) this.ballDead(c.outcome);
         else if (before !== c.phase || waiting !== (c.awaitingThrowSince !== undefined)) this.emit();
         if (c.finished) this.afterBall();
+        break;
+      }
+      case 'appeal': {
+        const a = this.appeal;
+        if (!a) break;
+        a.waited += dt;
+        if (this.humanReviews(a)) {
+          if (a.waited >= REVIEW_WINDOW) this.acceptDecision();
+        } else if (a.waited >= AI_REVIEW_THINK) {
+          // The computer side asks for a review if its players think it is worth it.
+          const sure = reviewConfidence(a.onField, a.tracking, this.rng.fork(`review-${this.ballNumber}`));
+          if (sure > 0.55) this.requestReview();
+          else this.acceptDecision();
+        }
+        break;
+      }
+      case 'drs': {
+        const r = this.drs;
+        if (!r) break;
+        r.t += dt;
+        if (r.t >= DRS_SHOW) this.finishReview();
         break;
       }
       case 'inningsBreak':
@@ -472,6 +643,12 @@ export class Match {
   }
 
   // --- Human input -------------------------------------------------------------------
+
+  /** Changes the direction of the shot just played, within a moment of the key press. */
+  reaimShot(shot: ShotAttempt): boolean {
+    if (!this.humanBatting || this.paused) return false;
+    return this.cycle?.reaimShot(shot) ?? false;
+  }
 
   playShot(shot: ShotAttempt): boolean {
     if (!this.humanBatting || this.paused) return false;
@@ -642,6 +819,11 @@ export class Match {
       this.afterBall();
       return true;
     }
+    // Skip the rest of the review graphic.
+    if (this.phase === 'drs' && this.drs && this.drs.t > 1) {
+      this.finishReview();
+      return true;
+    }
     return false;
   }
 
@@ -680,9 +862,10 @@ export class Match {
       noBalls: 0,
       fours: 0,
       sixes: 0,
-      battingCards: xi.map((player, i) => ({ player, runs: 0, balls: 0, fours: 0, sixes: 0, batted: i < 2 })),
+      battingCards: xi.map((player, i) => ({ player, runs: 0, balls: 0, fours: 0, sixes: 0, dots: 0, batted: i < 2 })),
       bowlingCards: [],
       fallOfWickets: [],
+      overs: [],
       ...(target !== undefined ? { target } : {}),
     });
     this.strikerIndex = 0;
@@ -692,9 +875,15 @@ export class Match {
     this.runsThisOver = 0;
     this.lastOverBowlerId = '';
     this.fatigue.clear();
+    this.form.clear();
+    this.spells.clear();
+    xi.slice(0, 2).forEach((p, i) => this.form.set(p.id, { confidence: startingConfidence(p, i), fatigue: 0 }));
     this.recent = [];
     this.fieldPreset = 'auto';
     this.bowlerId = this.suggestedBowler().id;
+    this.reviewsLeft = { home: REVIEWS_PER_INNINGS, away: REVIEWS_PER_INNINGS };
+    this.appeal = undefined;
+    this.drs = undefined;
   }
 
   private enterBetween(): void {
@@ -739,6 +928,8 @@ export class Match {
       const bowled = (this.card(bowler)?.balls ?? 0) > 0;
       if (!bowled) this.say(this.commentator.newBowler(bowler.name, this.current.balls === 0));
     }
+    this.milestone = undefined;
+    this.departing = undefined;
     this.cycle = new DeliveryCycle({
       bowler,
       striker: this.striker,
@@ -750,6 +941,11 @@ export class Match {
       rng: this.rng.fork(`ball-${this.ballNumber}`),
       manualRunning: this.humanBatting,
       humanFielding: this.humanBowling,
+      form: {
+        confidence: this.formOf(this.striker).confidence,
+        strikerFatigue: this.formOf(this.striker).fatigue,
+        nonStrikerFatigue: this.formOf(this.nonStriker).fatigue,
+      },
       ...(releaseQuality !== undefined ? { releaseQuality } : {}),
       ...(!this.humanBatting ? { battingAi: { difficulty: DIFFICULTIES[this.config.difficulty], intent: this.battingIntent() } } : {}),
     });
@@ -795,6 +991,7 @@ export class Match {
           balls: next.balls + (o.wide ? 0 : 1),
           fours: next.fours + (o.boundary === 4 ? 1 : 0),
           sixes: next.sixes + (o.boundary === 6 ? 1 : 0),
+          dots: next.dots + (!o.wide && o.runs === 0 ? 1 : 0),
         };
       }
       if (outPlayer && c.player.id === outPlayer.id && o.wicket) {
@@ -811,9 +1008,14 @@ export class Match {
       return next;
     });
     const existing = inn.bowlingCards.find((c) => c.player.id === bowler.id);
-    const card: BowlingCard = existing ?? { player: bowler, balls: 0, runs: 0, wickets: 0, maidens: 0 };
+    const card: BowlingCard = existing ?? { player: bowler, balls: 0, runs: 0, wickets: 0, maidens: 0, dots: 0, wides: 0, noBalls: 0, fours: 0, sixes: 0 };
     const updatedCard: BowlingCard = {
       ...card,
+      dots: card.dots + (legal && runsTotal === 0 ? 1 : 0),
+      wides: card.wides + (o.wide ? 1 : 0),
+      noBalls: card.noBalls + (o.noBall ? 1 : 0),
+      fours: card.fours + (o.boundary === 4 ? 1 : 0),
+      sixes: card.sixes + (o.boundary === 6 ? 1 : 0),
       balls: card.balls + (legal ? 1 : 0),
       runs: card.runs + runsTotal,
       wickets: card.wickets + (o.wicket && o.wicket.kind !== 'runOut' ? 1 : 0),
@@ -832,18 +1034,72 @@ export class Match {
       battingCards,
       bowlingCards,
       fallOfWickets: outPlayer ? [...inn.fallOfWickets, { wicket: wickets, runs, balls, batter: outPlayer.name }] : inn.fallOfWickets,
+      overs: addToOver(inn.overs, Math.floor(inn.balls / 6), runsTotal, o.wicket ? 1 : 0),
     };
+    // A fifty or a hundred on this ball.
+    const before = inn.battingCards.find((c) => c.player.id === striker.id)?.runs ?? 0;
+    const after = before + o.runs;
+    const reached = [100, 50].find((n) => before < n && after >= n);
+    this.milestone = reached
+      ? { batterId: striker.id, name: striker.name, runs: reached as 50 | 100, balls: (inn.battingCards.find((c) => c.player.id === striker.id)?.balls ?? 0) + (o.wide ? 0 : 1), ball: this.history.length + 1 }
+      : undefined;
+    // A fifty or hundred: a moment longer before the next ball, to raise the bat.
+    if (this.milestone) this.cycle?.holdDead(2);
+    this.departing = outPlayer ? { id: outPlayer.id, ball: this.history.length + 1 } : undefined;
     this.history.push(o);
     this.strikerAt.push(striker.id);
     this.lastOutcome = o;
     const def = this.cycle?.delivery?.type;
-    if (def) this.fatigue.set(bowler.id, fatigueAfterBall(this.bowlerFatigue, bowler.bowling.stamina, def));
+    const spell = this.spells.get(bowler.id);
+    const overIndex = Math.floor(inn.balls / 6);
+    const spellOvers = spell && spell.last === overIndex - 2 ? spell.overs + 1 : spell && spell.last === overIndex ? spell.overs : 1;
+    if (def) this.fatigue.set(bowler.id, fatigueAfterBall(this.bowlerFatigue, bowler.bowling.stamina, def, this.cycle?.plan.effort ?? 0.75, spellOvers));
+    this.updateForm(o, striker, this.cycle?.play?.contact);
     if (legal) this.ballsThisOver += 1;
     this.runsThisOver += runsTotal;
     const mark = o.wicket ? 'W' : o.wide ? `${o.extras}wd` : o.noBall ? `${o.runs + o.extras}nb` : o.runs === 0 ? '•' : String(o.runs);
     this.recent = [...this.recent, mark].slice(-8);
     this.learnAndDescribe(o, striker, bowler, updatedCard, legal);
     this.emit();
+  }
+
+  /** A batter's confidence and tiredness (created on first use, for safety). */
+  formOf(p: Player): BatterState {
+    let f = this.form.get(p.id);
+    if (!f) {
+      const i = this.battingSide.xi.findIndex((x) => x.id === p.id);
+      f = { confidence: startingConfidence(p, Math.max(0, i)), fatigue: 0 };
+      this.form.set(p.id, f);
+    }
+    return f;
+  }
+
+  /** How many overs in a row (from one end) the bowler has bowled in his current spell. */
+  spellOf(p: Player): number {
+    const s = this.spells.get(p.id);
+    const now = Math.floor(this.current.balls / 6);
+    return s && now - s.last <= 2 ? s.overs : 0;
+  }
+
+  /** After a ball: the striker's confidence, and both batters' tiredness from the running. */
+  private updateForm(o: BallOutcome, striker: Player, contact: ContactResult | undefined): void {
+    const ran = o.boundary ? 0 : o.runs;
+    const total = this.config.overs * 6;
+    const s = this.formOf(striker);
+    const card = this.current.battingCards.find((c) => c.player.id === striker.id);
+    s.confidence = confidenceAfter(s.confidence, {
+      contact: contact === undefined ? undefined : contact.kind === 'miss' ? 'miss' : contact.kind === 'edge' ? 'edge' : contact.kind === 'leave' ? 'leave' : 'clean',
+      timing: contact?.timing,
+      boundary: o.boundary,
+      ranRuns: ran,
+    });
+    s.fatigue = fatigueAfter(s.fatigue, ran, card?.balls ?? 0, total, striker.batting.footwork);
+    const partner = this.nonStriker;
+    if (partner.id !== striker.id) {
+      const n = this.formOf(partner);
+      n.fatigue = fatigueAfter(n.fatigue, ran, 0, total, partner.batting.footwork);
+    }
+    if (o.boundary) for (const f of this.form.values()) f.fatigue = rested(f.fatigue, 0.01);
   }
 
   /** Feeds the ball to the coach's log and the learning attack, and commentates it. */
@@ -903,6 +1159,8 @@ export class Match {
         wicket: o.wicket && outName ? { kind: o.wicket.kind, fielder: o.wicket.fielder, out: outName } : undefined,
         notOutLbw: pad && pad.type !== 'pad' ? undefined : pad && !pad.lbw.out && !o.wicket && o.runs === 0 ? pad.lbw.reason : undefined,
         padded: pad !== undefined,
+        milestone: this.milestone?.batterId === striker.id ? this.milestone.runs : undefined,
+        reviewed: o.review ? { by: o.review.by, out: o.wicket !== undefined, overturned: o.review.overturned, umpiresCall: o.review.umpiresCall } : undefined,
         batterRuns: card(striker)?.runs ?? 0,
         batterBalls: card(striker)?.balls ?? 0,
         outBatterRuns: outCard?.runs,
@@ -1010,6 +1268,8 @@ export class Match {
     const outIsStriker = (w.batter === 'striker') === (o.runs % 2 === 0);
     const incoming = this.nextIndex;
     this.nextIndex += 1;
+    const newcomer = xi[incoming];
+    if (newcomer) this.form.set(newcomer.id, { confidence: startingConfidence(newcomer, incoming), fatigue: 0 });
     this.incoming = xi[incoming]?.name;
     const inn = this.current;
     this.innings[this.innings.length - 1] = {
@@ -1081,6 +1341,12 @@ export class Match {
     this.runsThisOver = 0;
     this.swapStrike();
     this.lastOverBowlerId = this.bowlerId;
+    // The bowler's spell: another over in a row from his end, or the start of a new one.
+    const overIndex = Math.floor(inn.balls / 6) - 1;
+    const spell = this.spells.get(this.bowlerId);
+    this.spells.set(this.bowlerId, { overs: spell && spell.last === overIndex - 2 ? spell.overs + 1 : 1, last: overIndex });
+    // The batters get their breath back while the field changes over.
+    for (const f of this.form.values()) f.fatigue = rested(f.fatigue, 0.015);
     for (const p of this.bowlingSide.xi) {
       if (p.id !== this.bowlerId) this.fatigue.set(p.id, fatigueAfterRest(this.fatigue.get(p.id) ?? 0));
     }

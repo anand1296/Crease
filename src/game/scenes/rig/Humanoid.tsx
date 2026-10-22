@@ -61,6 +61,11 @@ export interface Pose {
   grip?: number | undefined;
   /** Seconds to cross-fade into this pose from a different source (default 0.25). */
   fade?: number | undefined;
+  /**
+   * With a clip: this arm (or both) follows the procedural pose instead of
+   * the clip — polishing the ball while walking, pointing while standing.
+   */
+  armLayer?: 'L' | 'R' | 'both' | undefined;
 }
 
 export type ClipName = 'sprint' | 'run' | 'jog' | 'walk' | 'idle' | 'breathe' | 'cheer' | 'cheer2' | 'clap' | 'crouch';

@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { TEAMS, type Team } from '../game/data/teams.ts';
 import { PITCHES, type PitchId } from '../game/data/pitches.ts';
 import { DIFFICULTIES, type DifficultyId } from '../game/model/difficulty.ts';
 import type { GameSpeed } from '../game/match/match.ts';
-import { checkXi } from '../game/match/squad.ts';
+import { type XiDrop as Drop, applyDrop, checkXi } from '../game/match/squad.ts';
 import type { Player } from '../game/model/player.ts';
 import { type BatFirst, findTeam, styleName, useGame } from '../state/game.ts';
 
@@ -195,33 +195,120 @@ function Rating({ value }: { value: number }) {
   );
 }
 
+type Drag = { id: string; from: 'xi' | 'bench'; x: number; y: number; started: boolean; ox: number; oy: number };
+
+
+/** The drop target under the pointer: a batting-order slot (or the end of the list), or the bench. */
+function dropAt(x: number, y: number): Drop {
+  const el = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-drop]');
+  if (!el) return undefined;
+  if (el.dataset.drop === 'bench') return { zone: 'bench' };
+  const index = Number(el.dataset.index ?? 'NaN');
+  return Number.isFinite(index) ? { zone: 'xi', index } : undefined;
+}
+
 export function SquadPicker() {
   const setup = useGame((s) => s.setup);
   const update = useGame((s) => s.updateSetup);
   const goTo = useGame((s) => s.goTo);
   const [side, setSide] = useState<'user' | 'opponent'>('user');
+  const [drag, setDrag] = useState<Drag | undefined>(undefined);
+  const [hover, setHover] = useState<Drop>(undefined);
   const team = findTeam(side === 'user' ? setup.userTeamId : setup.opponentId);
   const xiIds = side === 'user' ? setup.userXi : setup.opponentXi;
   const xi = xiIds.map((id) => team.players.find((p) => p.id === id)).filter((p): p is Player => p !== undefined);
+  const bench = team.players.filter((p) => !xiIds.includes(p.id));
   const check = checkXi(team, xi);
-  const setXi = (ids: string[]) => update(side === 'user' ? { userXi: ids } : { opponentXi: ids });
-  const toggle = (p: Player) => {
-    if (xiIds.includes(p.id)) setXi(xiIds.filter((id) => id !== p.id));
-    else if (xiIds.length < 11) setXi([...xiIds, p.id]);
-  };
+  const xiIdsRef = useRef(xiIds);
+  xiIdsRef.current = xiIds;
+  const setXi = useCallback((ids: string[]) => update(side === 'user' ? { userXi: ids } : { opponentXi: ids }), [update, side]);
   const move = (i: number, d: -1 | 1) => {
-    const j = i + d;
-    if (j < 0 || j >= xiIds.length) return;
-    const next = xiIds.slice();
-    const a = next[i];
-    const b = next[j];
-    if (a === undefined || b === undefined) return;
-    next[i] = b;
-    next[j] = a;
-    setXi(next);
+    const p = xiIds[i];
+    if (p !== undefined && i + d >= 0 && i + d < xiIds.length) setXi(applyDrop(xiIds, p, 'xi', { zone: 'xi', index: d > 0 ? i + 2 : i - 1 }));
   };
+
+  // Dragging with the pointer (mouse, pen or touch): a card follows it; the slot under it lights up.
+  const begin = (e: React.PointerEvent, id: string, from: 'xi' | 'bench') => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return;
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const d = { id, from, x: e.clientX, y: e.clientY, started: false, ox: e.clientX - r.left, oy: e.clientY - r.top };
+    live.current = d;
+    setDrag(d);
+  };
+  // The live drag lives in a ref, so a release straight after a move (a quick flick) still sees it.
+  const live = useRef<Drag | undefined>(undefined);
+  live.current = drag;
+  const dragging = drag !== undefined;
+  useEffect(() => {
+    if (!dragging) return;
+    const moveTo = (e: PointerEvent) => {
+      const d = live.current;
+      if (!d) return;
+      const started = d.started || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4;
+      const next = { ...d, x: e.clientX, y: e.clientY, started };
+      live.current = next;
+      setDrag(next);
+      if (started) setHover(dropAt(e.clientX, e.clientY));
+    };
+    const end = (e: PointerEvent) => {
+      const d = live.current;
+      live.current = undefined;
+      if (d && (d.started || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4)) setXi(applyDrop(xiIdsRef.current, d.id, d.from, dropAt(e.clientX, e.clientY)));
+      setDrag(undefined);
+      setHover(undefined);
+    };
+    const cancel = () => {
+      live.current = undefined;
+      setDrag(undefined);
+      setHover(undefined);
+    };
+    window.addEventListener('pointermove', moveTo);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', cancel);
+    return () => {
+      window.removeEventListener('pointermove', moveTo);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', cancel);
+    };
+  }, [dragging, setXi]);
+
+  const ratings = (p: Player) => {
+    const bat = Math.round((p.batting.technique + p.batting.timing + p.batting.power) / 3);
+    const bowl =
+      p.bowlingStyle === 'none' ? 0 : Math.round((p.bowling.accuracy + (p.bowlingStyle === 'offSpin' || p.bowlingStyle === 'legSpin' ? p.bowling.spin : p.bowling.pace)) / 2);
+    const fld = Math.round((p.fielding.fielding + p.fielding.catching) / 2);
+    return (
+      <span className="ratings">
+        <span title={`Batting ${bat}`}>
+          <small>Bat</small> <Rating value={bat} />
+        </span>
+        <span title={bowl ? `Bowling ${bowl}` : 'Does not bowl'}>
+          <small>Bowl</small> {bowl ? <Rating value={bowl} /> : <span className="dim rating-none">—</span>}
+        </span>
+        <span title={`Fielding ${fld}`}>
+          <small>Field</small> <Rating value={fld} />
+        </span>
+      </span>
+    );
+  };
+  const who = (p: Player) => (
+    <span className="who">
+      <span className="who-name">
+        {p.name}
+        {team.captainId === p.id ? <span className="tag">c</span> : null}
+        {team.keeperIds.includes(p.id) ? <span className="tag">wk</span> : null}
+      </span>
+      <span className="dim small">
+        {p.battingHand === 'left' ? 'LHB' : 'RHB'}
+        {p.bowlingStyle !== 'none' ? `, ${styleName(p)}` : ''}
+      </span>
+    </span>
+  );
+  const dragged = drag?.started ? team.players.find((p) => p.id === drag.id) : undefined;
+  const hoverIndex = hover?.zone === 'xi' ? hover.index : -1;
+
   return (
-    <div className="menu-shell">
+    <div className={`menu-shell${dragged ? ' dragging' : ''}`}>
       <section className="board wide" aria-label="Choose playing XI" data-testid="squad">
         <header className="board-head">
           <h2>Playing XI</h2>
@@ -234,76 +321,43 @@ export function SquadPicker() {
             </button>
           </div>
         </header>
+        <p className="dim small squad-hint">Drag players to set the batting order, bring someone in from the bench, or drop him back on it.</p>
 
         <div className="squad-grid">
           <div>
-            <h3>Squad · {team.players.length} players</h3>
-            <table className="squad">
-              <thead>
-                <tr>
-                  <th scope="col">Pick</th>
-                  <th scope="col">Player</th>
-                  <th scope="col">Bowling</th>
-                  <th scope="col">Batting</th>
-                  <th scope="col">Bowling skill</th>
-                  <th scope="col">Fielding</th>
-                </tr>
-              </thead>
-              <tbody>
-                {team.players.map((p) => {
-                  const picked = xiIds.includes(p.id);
-                  const bat = Math.round((p.batting.technique + p.batting.timing + p.batting.power) / 3);
-                  const bowl =
-                    p.bowlingStyle === 'none'
-                      ? 0
-                      : Math.round((p.bowling.accuracy + (p.bowlingStyle === 'offSpin' || p.bowlingStyle === 'legSpin' ? p.bowling.spin : p.bowling.pace)) / 2);
-                  const fld = Math.round((p.fielding.fielding + p.fielding.catching) / 2);
-                  return (
-                    <tr key={p.id} className={picked ? 'picked' : ''}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={picked}
-                          disabled={!picked && xiIds.length >= 11}
-                          onChange={() => toggle(p)}
-                          aria-label={`Pick ${p.name}`}
-                        />
-                      </td>
-                      <td>
-                        {p.name}
-                        {team.captainId === p.id ? <span className="tag">c</span> : null}
-                        {team.keeperIds.includes(p.id) ? <span className="tag">wk</span> : null}
-                        <span className="hand">{p.battingHand === 'left' ? 'LHB' : 'RHB'}</span>
-                      </td>
-                      <td className="dim">{styleName(p)}</td>
-                      <td>
-                        <Rating value={bat} />
-                      </td>
-                      <td>{bowl ? <Rating value={bowl} /> : <span className="dim">—</span>}</td>
-                      <td>
-                        <Rating value={fld} />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div>
-            <h3>Batting order · {xi.length}/11</h3>
-            <ol className="order">
+            <h3>Batting order, {xi.length} of 11</h3>
+            <ol className="order" data-testid="xi">
               {xi.map((p, i) => (
-                <li key={p.id}>
+                <li
+                  key={p.id}
+                  className={`${hoverIndex === i ? 'drop-before' : ''}${drag?.started && drag.id === p.id ? ' lifted' : ''}`}
+                  data-drop="xi"
+                  data-index={i}
+                  data-testid="xi-row"
+                  onPointerDown={(e) => begin(e, p.id, 'xi')}
+                >
+                  <span className="grip" aria-hidden="true" />
                   <span className="pos">{i + 1}</span>
-                  <span className="who">{p.name}</span>
-                  <button type="button" className="icon" aria-label={`Move ${p.name} up`} onClick={() => move(i, -1)} disabled={i === 0}>
-                    ↑
-                  </button>
-                  <button type="button" className="icon" aria-label={`Move ${p.name} down`} onClick={() => move(i, 1)} disabled={i === xi.length - 1}>
-                    ↓
-                  </button>
+                  {who(p)}
+                  {ratings(p)}
+                  <span className="row-actions">
+                    <button type="button" className="icon" aria-label={`Move ${p.name} up`} onClick={() => move(i, -1)} disabled={i === 0}>
+                      ↑
+                    </button>
+                    <button type="button" className="icon" aria-label={`Move ${p.name} down`} onClick={() => move(i, 1)} disabled={i === xi.length - 1}>
+                      ↓
+                    </button>
+                    <button type="button" className="icon" aria-label={`Leave out ${p.name}`} onClick={() => setXi(xiIds.filter((id) => id !== p.id))}>
+                      ×
+                    </button>
+                  </span>
                 </li>
               ))}
+              {xi.length < 11 ? (
+                <li className={`slot-empty${hoverIndex === xi.length ? ' drop-before' : ''}`} data-drop="xi" data-index={xi.length} data-testid="xi-empty">
+                  Drop a player here ({11 - xi.length} to pick)
+                </li>
+              ) : null}
             </ol>
             {check.errors.map((e) => (
               <p key={e} className="error">
@@ -316,6 +370,23 @@ export function SquadPicker() {
               </p>
             ))}
           </div>
+          <div className={`bench${hover?.zone === 'bench' ? ' drop-on' : ''}`} data-drop="bench" data-testid="bench">
+            <h3>Bench, {bench.length}</h3>
+            <ul className="order">
+              {bench.map((p) => (
+                <li key={p.id} data-testid="bench-row" className={drag?.started && drag.id === p.id ? 'lifted' : ''} onPointerDown={(e) => begin(e, p.id, 'bench')}>
+                  <span className="grip" aria-hidden="true" />
+                  {who(p)}
+                  {ratings(p)}
+                  <span className="row-actions">
+                    <button type="button" className="icon" aria-label={`Pick ${p.name}`} onClick={() => setXi([...xiIds, p.id])} disabled={xiIds.length >= 11}>
+                      +
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
 
         <footer className="board-foot">
@@ -327,6 +398,11 @@ export function SquadPicker() {
           </button>
         </footer>
       </section>
+      {dragged && drag ? (
+        <div className="drag-card" style={{ left: drag.x - drag.ox, top: drag.y - drag.oy }} aria-hidden="true">
+          {dragged.name}
+        </div>
+      ) : null}
     </div>
   );
 }

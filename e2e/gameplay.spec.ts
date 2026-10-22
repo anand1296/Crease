@@ -53,14 +53,21 @@ test.describe('gameplay', () => {
     await page.getByRole('button', { name: '2', exact: true }).click();
     await page.getByRole('button', { name: 'We bat' }).click();
 
-    // Squad: swap one player in and out, keep 11.
+    // Squad: drag the No. 11 to the bench, drag a bench player into the order, reorder by dragging.
     await page.getByTestId('choose-xi').click();
     await expect(page.getByTestId('squad')).toBeVisible();
-    const boxes = page.locator('[data-testid="squad"] input[type="checkbox"]');
-    await expect(boxes).toHaveCount(16);
-    await boxes.nth(10).uncheck();
+    const rows = page.getByTestId('xi-row');
+    await expect(rows).toHaveCount(11);
+    await rows.nth(10).dragTo(page.getByTestId('bench'));
+    await expect(rows).toHaveCount(10);
     await expect(page.getByTestId('squad-done')).toBeDisabled();
-    await boxes.nth(12).check();
+    const incoming = (await page.getByTestId('bench-row').first().locator('.who-name').textContent()) ?? '';
+    await page.getByTestId('bench-row').first().dragTo(page.getByTestId('xi-empty'));
+    await expect(rows).toHaveCount(11);
+    await expect(rows.nth(10)).toContainText(incoming);
+    const opener = (await rows.nth(0).locator('.who-name').textContent()) ?? '';
+    await rows.nth(0).dragTo(rows.nth(3));
+    await expect(rows.nth(2)).toContainText(opener);
     await expect(page.getByTestId('squad-done')).toBeEnabled();
     await page.getByTestId('squad-done').click();
 
@@ -122,12 +129,43 @@ test.describe('gameplay', () => {
     // Pause freezes the simulation.
     await page.keyboard.press('KeyP');
     await expect(page.getByTestId('pause')).toBeVisible();
+    // The scorecard and match statistics are a tab away.
+    await page.getByTestId('pause-scorecard').click();
+    await expect(page.getByTestId('pause-scorecards')).toContainText('SR');
+    await page.getByTestId('pause-stats').click();
+    await expect(page.getByTestId('match-stats')).toContainText('Run rate');
+    await page.getByTestId('pause-menu').click();
     const frozen = await page.evaluate(() => window.__crease?.simSteps?.() ?? 0);
     await page.waitForTimeout(400);
     expect(await page.evaluate(() => window.__crease?.simSteps?.() ?? 0)).toBe(frozen);
     await page.getByRole('button', { name: 'Quit to main menu' }).click();
     await expect(page.getByTestId('menu-play')).toBeVisible();
 
+    expect(errors).toEqual([]);
+  });
+
+  test('lbw: given out, the batter reviews it, and the third umpire decides with ball tracking', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+    // A fixed seed: leaving the first ball gets the batter hit on the pad in front.
+    await page.goto('/?seed=drs2');
+    await expect(page.getByTestId('app')).toHaveAttribute('data-status', 'ready', { timeout: 60_000 });
+    await page.getByTestId('menu-play').click();
+    await page.getByRole('button', { name: '2', exact: true }).click();
+    await page.getByRole('button', { name: 'We bat' }).click();
+    await page.getByTestId('start-match').click();
+    await takeTheField(page);
+    await page.keyboard.press('Enter');
+    await expect.poll(() => page.evaluate(() => window.__crease?.ballPhase?.()), { timeout: 90_000 }).toBe('inFlight');
+    await page.keyboard.press('KeyA');
+    await expect(page.getByTestId('appeal')).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByTestId('appeal')).toContainText('2 reviews left');
+    await page.keyboard.press('KeyT');
+    await expect(page.getByTestId('drs')).toBeVisible();
+    await page.evaluate(() => window.__crease?.setSpeed?.(3));
+    await expect(page.getByTestId('drs-decision')).toBeVisible({ timeout: 120_000 });
+    await expect(page.getByTestId('drs')).toBeHidden({ timeout: 120_000 });
+    await expect(page.getByTestId('banner')).toContainText(/OUT|NOT OUT/);
     expect(errors).toEqual([]);
   });
 

@@ -4,6 +4,7 @@ import { BOWLER_STUMPS_Z, STRIKER_STUMPS_Z } from '../data/field.ts';
 import { type PitchPreset, groundFor } from '../data/pitches.ts';
 import { type BattingAiOptions, decideStroke, deepGaps } from '../ai/battingAi.ts';
 import type { ContactResult } from '../batting/contact.ts';
+import { powerScale, timingScale } from '../batting/form.ts';
 import { SHOTS, type ShotAttempt } from '../batting/shots.ts';
 import { type DeliveryPlan, type ExecutedDelivery, executeDelivery } from '../bowling/execute.ts';
 import { runUpFor } from '../bowling/runUp.ts';
@@ -11,6 +12,7 @@ import { type Fielder, type FieldingPlan, RUN, fielderReaction, fielderSpeed, pl
 import { type Player, offSideSign } from '../model/player.ts';
 import type { GroundModel } from '../physics/ball.ts';
 import { type BallEvent, BallInPlay } from '../simulation/ballInPlay.ts';
+import type { Decision, LbwTracking } from '../simulation/tracking.ts';
 
 /**
  * One ball, end to end: run-up → release → flight (stroke) → struck ball and
@@ -43,6 +45,16 @@ export interface BallOutcome {
   /** Timing of the stroke in milliseconds (positive = late), if a stroke was played. */
   readonly timingMs?: number;
   readonly delivery: { readonly name: string; readonly speedKph: number; readonly line: number; readonly length?: number };
+  /** An lbw appeal: the on-field decision and the ball tracking, for a review. */
+  readonly appeal?: { readonly onField: Decision; readonly tracking: LbwTracking };
+  /** Set when the decision was reviewed: by whom (team short name) and how it came out. */
+  readonly review?: { readonly by: string; readonly overturned: boolean; readonly umpiresCall: boolean; readonly why: string };
+}
+
+export interface BatterForm {
+  readonly confidence: number;
+  readonly strikerFatigue: number;
+  readonly nonStrikerFatigue: number;
 }
 
 export interface CycleOptions {
@@ -62,6 +74,8 @@ export interface CycleOptions {
   readonly manualRunning?: boolean;
   /** The human is fielding: after a pick-up with the batters running, they choose where to throw it and how hard. */
   readonly humanFielding?: boolean;
+  /** The batters' state: the striker's confidence (0–1), and how tired each is (0 fresh – 1 spent). */
+  readonly form?: BatterForm;
 }
 
 /** Which end a throw goes to: the keeper (striker's end) or the bowler. */
@@ -175,8 +189,21 @@ export class DeliveryCycle {
     this.fielderPos = opts.field.map((f) => ({ ...f.start }));
   }
 
+  /** How long the ball stays dead before the next: longer after a wicket, or a fifty or hundred, to celebrate. */
+  private deadHold = DEAD_SECONDS;
+
+  /** Seconds since the ball became dead (undefined while it is live). */
+  get deadFor(): number | undefined {
+    return this.phase === 'dead' && this.deadAt !== undefined ? this.time - this.deadAt : undefined;
+  }
+
+  /** Keep the ball dead a little longer (a milestone to celebrate). */
+  holdDead(extra: number): void {
+    this.deadHold = Math.max(this.deadHold, DEAD_SECONDS + extra);
+  }
+
   get finished(): boolean {
-    return this.phase === 'dead' && this.deadAt !== undefined && this.time - this.deadAt >= DEAD_SECONDS;
+    return this.phase === 'dead' && this.deadAt !== undefined && this.time - this.deadAt >= this.deadHold;
   }
 
   /** Seconds since release (negative during the run-up). */
@@ -221,6 +248,22 @@ export class DeliveryCycle {
     return ok;
   }
 
+  /** How slowly the batters run: the more tired of the two sets the pace (1 = fresh). */
+  get runPace(): number {
+    return 1 + 0.14 * Math.max(this.opts.form?.strikerFatigue ?? 0, this.opts.form?.nonStrikerFatigue ?? 0);
+  }
+
+  /** Seconds for run `i` at the batters' pace. */
+  private runLen(i: number): number {
+    return runDuration(i) * this.runPace;
+  }
+
+  /** Re-aims the stroke just played (arrows pressed a moment after the shot key). */
+  reaimShot(shot: ShotAttempt): boolean {
+    if (this.phase !== 'inFlight' || !this.play) return false;
+    return this.play.reaim(shot);
+  }
+
   step(dt: number): void {
     this.time += dt;
     switch (this.phase) {
@@ -252,7 +295,14 @@ export class DeliveryCycle {
       rng: this.rng.fork('delivery'),
     });
     this.delivery = delivery;
-    this.play = new BallInPlay({ delivery, striker: o.striker, ground: this.ground, rng: this.rng.fork('contact') });
+    const form = o.form ? { confidence: o.form.confidence, fatigue: o.form.strikerFatigue } : undefined;
+    this.play = new BallInPlay({
+      delivery,
+      striker: o.striker,
+      ground: this.ground,
+      rng: this.rng.fork('contact'),
+      ...(form ? { timingScale: timingScale(form), powerScale: powerScale(form) } : {}),
+    });
     this.phase = 'inFlight';
     if (o.battingAi) {
       // The batter reads the field: where are the gaps in the deep?
@@ -302,13 +352,13 @@ export class DeliveryCycle {
         this.phase = 'struck';
         this.contactTime = this.time;
         this.contact = this.time;
-        this.fieldingPlan = planFielding(play.ball, this.opts.field, this.rng.fork('fielding'), this.ground);
+        this.fieldingPlan = planFielding(play.ball, this.opts.field, this.rng.fork('fielding'), this.ground, this.runPace);
         if (!this.opts.manualRunning && (this.fieldingPlan.kind === 'fielded' || this.fieldingPlan.kind === 'dropped')) {
           // Computer batters take exactly the runs that are safe.
           let start = this.time + RUN.start;
           for (let i = 0; i < this.fieldingPlan.runs; i++) {
             this.runStarts.push(start);
-            start += runDuration(i);
+            start += this.runLen(i);
           }
         }
         break;
@@ -318,11 +368,17 @@ export class DeliveryCycle {
         break;
       case 'pad':
       case 'body':
-        if (ev.lbw.out) {
-          this.finish({ wicket: { kind: 'lbw', batter: 'striker' }, headline: 'LBW!', detail: 'Plumb in front — the finger goes up.' });
-        } else {
-          const why = ev.lbw.reason === 'out' ? '' : ` — ${ev.lbw.reason}.`;
-          this.finish({ headline: ev.type === 'pad' ? 'Appeal… not out' : 'Hit on the body', detail: `Not out${why}` });
+        {
+          const t = ev.lbw.tracking;
+          // Worth an appeal (and so a review): given, or close enough that the fielders go up.
+          const close = ev.lbw.out || (t.pitching !== 'outsideLeg' && t.impactZone !== 'outsideLeg' && Math.abs(t.atStumps.x) < 0.27 && t.atStumps.y < 0.95);
+          const appeal = close ? { appeal: { onField: ev.lbw.out ? ('out' as const) : ('notOut' as const), tracking: t } } : {};
+          if (ev.lbw.out) {
+            this.finish({ wicket: { kind: 'lbw', batter: 'striker' }, headline: 'LBW!', detail: 'Given out lbw — the finger goes up.', ...appeal });
+          } else {
+            const why = ev.lbw.reason === 'out' ? '' : ` — ${ev.lbw.reason}.`;
+            this.finish({ headline: close ? 'Appeal… not out' : ev.type === 'pad' ? 'Off the pad' : 'Hit on the body', detail: `Not out${why}`, ...appeal });
+          }
         }
         break;
       case 'passedBatter': {
@@ -459,7 +515,7 @@ export class DeliveryCycle {
       this.runStarts.push(Math.max(this.time, (this.contactTime ?? this.time) + 0.1) + 0.15);
       return true;
     }
-    const finishLast = (this.runStarts[n - 1] ?? this.time) + runDuration(n - 1);
+    const finishLast = (this.runStarts[n - 1] ?? this.time) + this.runLen(n - 1);
     // Called before the batters reach the other end: they turn and go. Afterwards: from standing.
     this.runStarts.push(this.time < finishLast ? finishLast : this.time + 0.2);
     return true;
@@ -470,9 +526,9 @@ export class DeliveryCycle {
     let completed = 0;
     let current: number | undefined;
     this.runStarts.forEach((start, i) => {
-      const end = start + runDuration(i);
+      const end = start + this.runLen(i);
       if (t >= end) completed = i + 1;
-      else if (t >= start) current = (t - start) / runDuration(i);
+      else if (t >= start) current = (t - start) / this.runLen(i);
     });
     return { completed, current };
   }
@@ -489,7 +545,7 @@ export class DeliveryCycle {
     let completed = 0;
     let shortRun: number | undefined;
     attempted.forEach((start, i) => {
-      const end = start + runDuration(i);
+      const end = start + this.runLen(i);
       if (end <= back + 0.05) completed = i + 1;
       else if (shortRun === undefined) shortRun = i;
     });
@@ -520,6 +576,7 @@ export class DeliveryCycle {
     headline: string;
     detail: string;
     wide?: boolean;
+    appeal?: { onField: Decision; tracking: LbwTracking };
   }): void {
     const d = this.delivery;
     const play = this.play;
@@ -543,6 +600,7 @@ export class DeliveryCycle {
       ...(shot ? { shot } : {}),
       ...(contact ? { contact } : {}),
       ...(timingMs !== undefined ? { timingMs } : {}),
+      ...(r.appeal && !noBall ? { appeal: r.appeal } : {}),
       delivery: {
         name: d.type.name,
         speedKph: d.releaseSpeedKph,
@@ -552,6 +610,8 @@ export class DeliveryCycle {
     };
     this.phase = 'dead';
     this.deadAt = this.time;
+    // A wicket that stands (not an lbw still to be decided): time for the fielders to get together.
+    if (this.outcome?.wicket && !this.outcome.appeal) this.holdDead(1.8);
   }
 
   /** Fielders: the one going for the ball runs to the interception point; the rest drift towards the ball. */

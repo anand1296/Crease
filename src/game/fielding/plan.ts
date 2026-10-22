@@ -112,7 +112,8 @@ const MIN_CATCH_HEIGHT = 0.08;
 
 /** Batters' running: call and start, then each run of ~17.7 m between creases. */
 export const RUN = { start: 0.35, first: 2.95, subsequent: 3.0 } as const;
-export const runTime = (n: number): number => (n <= 0 ? 0 : RUN.start + RUN.first + (n - 1) * RUN.subsequent);
+/** Time to complete `n` runs; `pace` > 1 for tired batters (1.1 = 10% slower). */
+export const runTime = (n: number, pace = 1): number => (n <= 0 ? 0 : RUN.start + (RUN.first + (n - 1) * RUN.subsequent) * pace);
 /** Batters only take a run if they would make their ground with this much to spare. */
 const SAFETY_MARGIN = 0.3;
 
@@ -280,6 +281,8 @@ export function planFielding(
   field: readonly Fielder[],
   rng: Rng,
   ground?: GroundModel,
+  /** How slowly the batters run (1 fresh; more when tired). */
+  runPace = 1,
 ): FieldingPlan {
   const { samples, boundaryT, six } = projectPath(struckBall, ground);
   let path = samples;
@@ -309,7 +312,7 @@ export function planFielding(
       const returnT = s.t + delay + 1.1 + throwTime(f, pos);
       return {
         kind: 'dropped', fielder: reach.fielder, interceptT: s.t, interceptPos: { ...pos, y: FIELD.ballRadius },
-        runs: safeRuns(returnT), returnT, difficulty,
+        runs: safeRuns(returnT, runPace), returnT, difficulty,
       };
     }
     // Ground fielding: a clean stop is harder off a quick ball or a dive.
@@ -319,7 +322,7 @@ export function planFielding(
       // Gathering a moving ball and setting to throw; longer after a dive.
       const pickup = 0.55 + (reach.dive ? 0.9 : 0) + delay;
       const returnT = s.t + pickup + throwTime(f, pos);
-      return { kind: 'fielded', fielder: reach.fielder, interceptT: s.t, interceptPos: pos, runs: safeRuns(returnT), returnT, difficulty };
+      return { kind: 'fielded', fielder: reach.fielder, interceptT: s.t, interceptPos: pos, runs: safeRuns(returnT, runPace), returnT, difficulty };
     }
     // Fumble: the ball slows and runs on; others may still get to it.
     delay += 0.8;
@@ -334,7 +337,7 @@ export function planFielding(
   }
   // Nobody could get there and it stopped in the field (very rare): the nearest fielder walks to it.
   const restT = end?.t ?? 0;
-  return { kind: 'fielded', interceptT: restT + 4, interceptPos: end ? vec3(end.x, end.y, end.z) : vec3(), runs: safeRuns(restT + 6), difficulty: 0 };
+  return { kind: 'fielded', interceptT: restT + 4, interceptPos: end ? vec3(end.x, end.y, end.z) : vec3(), runs: safeRuns(restT + 6, runPace), difficulty: 0 };
 }
 
 /** Time for the return throw to reach the nearer set of stumps. */
@@ -346,9 +349,9 @@ function throwTime(f: Fielder, pos: Readonly<Vec3>): number {
   return 0.35 + d / speed;
 }
 
-export function safeRuns(returnT: number): number {
+export function safeRuns(returnT: number, pace = 1): number {
   let n = 0;
-  while (n < 4 && runTime(n + 1) + SAFETY_MARGIN <= returnT) n++;
+  while (n < 4 && runTime(n + 1, pace) + SAFETY_MARGIN <= returnT) n++;
   return n;
 }
 

@@ -1,11 +1,14 @@
 import { useEffect } from 'react';
 import { sound } from '../audio/sound.ts';
 import { useGame } from '../../state/game.ts';
-import { shotFromInput } from './battingControls.ts';
+import { type BatAction, shotFromInput } from './battingControls.ts';
 import type { GameAction } from './keyboard.ts';
 import { keyboard } from './keyboardInstance.ts';
 
 export { keyboard };
+
+/** The stroke key last pressed (for re-aiming with arrows pressed just after it). */
+let lastStroke: BatAction | undefined;
 
 const PICKS: readonly GameAction[] = ['pick1', 'pick2', 'pick3', 'pick4', 'pick5', 'pick6', 'pick7', 'pick8', 'pick9'];
 
@@ -51,6 +54,19 @@ export function useGameControls(): void {
         else m.startAutoplay(action === 'autoOver' ? 'over' : 'innings');
         return;
       }
+      // An lbw decision: T to review it, Enter to accept it.
+      if (m.phase === 'appeal') {
+        if (m.appeal && m.humanReviews(m.appeal)) {
+          if (action === 'review') m.requestReview();
+          else if (action === 'confirm') m.acceptDecision();
+        }
+        return;
+      }
+      // The third umpire's review: Enter skips to the decision.
+      if (m.phase === 'drs') {
+        if (action === 'confirm' || action === 'bowl') m.next();
+        return;
+      }
       // Between balls the game waits for the player: Enter or Space moves on.
       if (m.phase === 'review') {
         if (action === 'confirm' || action === 'bowl' || action === 'run') m.next();
@@ -82,7 +98,12 @@ export function useGameControls(): void {
         }
         if (action === 'shotFront' || action === 'shotBack' || action === 'shotFeet' || action === 'leave') {
           const kind = action === 'shotFront' ? 'front' : action === 'shotBack' ? 'back' : action === 'shotFeet' ? 'feet' : 'leave';
-          m.playShot(shotFromInput(kind, keyboard.direction(), keyboard.isHeld('lofted'), m.striker.battingHand));
+          if (m.playShot(shotFromInput(kind, keyboard.direction(), keyboard.isHeld('lofted'), m.striker.battingHand))) lastStroke = kind;
+          return;
+        }
+        // An arrow (or Shift) a moment after the shot key still aims it: keys pressed "together" are never quite.
+        if (lastStroke && lastStroke !== 'leave' && (action === 'left' || action === 'right' || action === 'up' || action === 'down' || action === 'lofted')) {
+          m.reaimShot(shotFromInput(lastStroke, keyboard.direction(), keyboard.isHeld('lofted'), m.striker.battingHand));
         }
         return;
       }

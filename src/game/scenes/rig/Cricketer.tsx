@@ -62,6 +62,7 @@ export const Cricketer = forwardRef<HumanoidHandle, CricketerProps>(function Cri
     prepareTextures(body, bodyN, head, headN, mask);
     // glTF splits a multi-material mesh into one skinned mesh per material.
     const meshes: SkinnedMesh[] = [];
+    const headMeshes: SkinnedMesh[] = [];
     model.traverse((o) => {
       if (o instanceof SkinnedMesh) meshes.push(o);
     });
@@ -72,12 +73,16 @@ export const Cricketer = forwardRef<HumanoidHandle, CricketerProps>(function Cri
     for (const mesh of meshes) {
       const names = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]).map((m: Material) => m.name);
       mesh.material = names.includes('head') ? headMat : names.includes('hair') ? hairMat : kitMat;
+      if (names.includes('head') || names.includes('hair')) headMeshes.push(mesh);
       mesh.castShadow = true;
       mesh.frustumCulled = false;
     }
     model.updateMatrixWorld(true);
     addProps(model, kit);
-    return { model, rig: new AvatarRig(model, clips), headwear: model.getObjectByName('headwear') };
+    // Hair (and the top of the head) tucked under the cap, helmet or hat; the original is kept for when it comes off.
+    const fitted = headMeshes.map((mesh) => ({ mesh, bare: mesh.geometry, covered: fitUnderHeadwear(model, mesh, kit, hairMat !== headMat && mesh.material === hairMat) }));
+    for (const f of fitted) f.mesh.geometry = f.covered;
+    return { model, rig: new AvatarRig(model, clips), headwear: model.getObjectByName('headwear'), fitted };
   }, [gltf, textures, clips, kit, tone]);
 
   const frames = useMemo(newRigFrames, []);
@@ -107,7 +112,9 @@ export const Cricketer = forwardRef<HumanoidHandle, CricketerProps>(function Cri
         return r.localToWorld(out);
       },
       headwear(visible: boolean) {
-        if (built.headwear && built.headwear.visible !== visible) built.headwear.visible = visible;
+        if (!built.headwear || built.headwear.visible === visible) return;
+        built.headwear.visible = visible;
+        for (const f of built.fitted) f.mesh.geometry = visible ? f.covered : f.bare;
       },
     }),
     [built, frames],
@@ -254,6 +261,82 @@ function darken(hex: string, k: number): string {
 }
 
 /** Parents `obj` to `bone` so that, in the bind pose, it sits at `pos`/`quat` in model space. */
+/**
+ * The space each kind of headwear occupies on the head, in the model's own
+ * units (cm, bind pose): an ellipsoid (cap, helmet) or a cylinder (hat),
+ * above a cut-off height. Matches the props built in addProps.
+ */
+function headwearVolume(model: Object3D, kit: Kit): { centre: Vector3; radii: Vector3; above: number; shape: 'ellipsoid' | 'cylinder' } {
+  const head = bonePos(model, 'Bip01_Head');
+  if (kit.headwear === 'helmet') {
+    const centre = new Vector3(head.x, head.y + 11, head.z + 0.5);
+    const radii = new Vector3(12.2, 12.2 * 0.98, 12.2 * 1.12);
+    return { centre, radii, above: centre.y - radii.y * 0.3, shape: 'ellipsoid' };
+  }
+  if (kit.headwear === 'cap') {
+    const centre = new Vector3(head.x, head.y + 12.4, head.z + 0.4);
+    return { centre, radii: new Vector3(10.8, 10.8 * 0.85, 10.8 * 1.08), above: centre.y - 0.6, shape: 'ellipsoid' };
+  }
+  const centre = new Vector3(head.x, head.y + 13.5, head.z + 0.5);
+  return { centre, radii: new Vector3(9.5, 8, 9.5), above: centre.y - 0.4, shape: 'cylinder' };
+}
+
+/**
+ * A copy of a head or hair mesh with every vertex that would show through
+ * the headwear pulled just inside it (along the line from its centre), so
+ * the hair is under the cap rather than poking out of its crown. Vertices
+ * already inside, and those below the headwear's rim, are untouched.
+ */
+function fitUnderHeadwear(model: Object3D, mesh: SkinnedMesh, kit: Kit, hair = false): SkinnedMesh['geometry'] {
+  const geometry = mesh.geometry.clone();
+  const pos = geometry.getAttribute('position');
+  const { centre, radii, above, shape } = headwearVolume(model, kit);
+  const toModel = mesh.matrixWorld;
+  const toMesh = new Matrix4().copy(toModel).invert();
+  const v = new Vector3();
+  const inside = 0.93;
+  let moved = 0;
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).applyMatrix4(toModel);
+    if (v.y < above) {
+      // Long hair (locks, a bun) below the rim would stick out sideways from under it: let it hang
+      // straight down, inside the headwear's footprint, as it does under a real cap or helmet.
+      if (!hair) continue;
+      const dx = v.x - centre.x;
+      const dz = v.z - centre.z;
+      const r = Math.hypot(dx / radii.x, dz / radii.z);
+      const limit = 0.97;
+      if (r <= limit) continue;
+      const f = limit / r;
+      v.set(centre.x + dx * f, v.y, centre.z + dz * f);
+      v.applyMatrix4(toMesh);
+      pos.setXYZ(i, v.x, v.y, v.z);
+      moved++;
+      continue;
+    }
+    const d = v.clone().sub(centre);
+    if (shape === 'ellipsoid') {
+      const k = Math.hypot(d.x / radii.x, Math.max(0, d.y) / radii.y, d.z / radii.z);
+      if (k <= inside) continue;
+      // Below the centre only the sides matter (the rim); above it, the whole dome.
+      const f = inside / k;
+      v.set(centre.x + d.x * f, d.y > 0 ? centre.y + d.y * f : v.y, centre.z + d.z * f);
+    } else {
+      const r = Math.hypot(d.x / radii.x, d.z / radii.z);
+      const top = radii.y * inside;
+      if (r <= inside && d.y <= top) continue;
+      const f = r > inside ? inside / r : 1;
+      v.set(centre.x + d.x * f, Math.min(v.y, centre.y + top), centre.z + d.z * f);
+    }
+    v.applyMatrix4(toMesh);
+    pos.setXYZ(i, v.x, v.y, v.z);
+    moved++;
+  }
+  // The original normals are kept: recomputing them would crease the UV seams.
+  if (moved > 0) pos.needsUpdate = true;
+  return geometry;
+}
+
 function attach(model: Object3D, boneName: string, obj: Object3D, pos: Vector3, quat = new Quaternion()): void {
   const bone = model.getObjectByName(boneName);
   if (!bone) return;

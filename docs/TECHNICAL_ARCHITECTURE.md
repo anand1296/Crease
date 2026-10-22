@@ -4,11 +4,11 @@
 
 | | |
 | --- | --- |
-| Version | 0.10.0 (October 2026) |
+| Version | 0.11.0 (October 2026) |
 | Repository | https://github.com/anand1296/Crease |
 | Hosting | Vercel (static site, Git-integrated: every push to `main` deploys; pull requests get previews) |
 | Stack | TypeScript (strict) · React 19 · Three.js r180 via React Three Fiber 9 · Vite 7 · Zustand 5 · Vitest 3 · Playwright |
-| Size | ≈15,100 lines of application TypeScript, ≈2,100 lines of unit and simulation tests (158 tests), 4 browser tests |
+| Size | ≈16,900 lines of application TypeScript, ≈2,300 lines of unit and simulation tests (172 tests), 5 browser tests |
 | Backend | None. Everything — physics, AI, commentary, audio — runs in the player's browser |
 
 Companion documents: [README](../README.md) (running and playing), [GAME_DESIGN](../GAME_DESIGN.md) (rules and the simulation's numbers), [ARCHITECTURE](../ARCHITECTURE.md) (module summary), [CHANGELOG](../CHANGELOG.md), [batting report](batting-report.md).
@@ -63,6 +63,7 @@ Crease was built in vertical slices, each of which was playable, tested, documen
 | 0.6.0 | 22 Oct 2026 | Game AI: learning bowling attack, AI captain with fielding restrictions, field-aware T20 batting, spoken commentary, coach |
 | 0.7.0–0.9.0 | 22 Oct 2026 | Match flow and replays; smoothness (shader warm-up, adaptive quality); bowling overhaul (three-step bowling, real actions, field presets); Cricket 07 batting, fielding throws, broadcast cameras |
 | 0.10.0 | 23 Oct 2026 | Run-up framed on the bowler, autoplay (over or innings), the toss in 3D |
+| 0.11.0 | 23 Oct 2026 | Shots all round the ground, drag-and-drop XI, pause scorecard and stats, confidence and stamina, lbw ball tracking and DRS, throw camera, between-ball moments and celebrations |
 
 ### Working method
 

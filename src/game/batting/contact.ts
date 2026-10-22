@@ -40,6 +40,9 @@ export interface ContactInput {
    */
   readonly lineError?: number;
   readonly heightError?: number;
+  /** The batter's form: multiplies the timing window (confidence, tiredness) and the bat speed (tiredness). */
+  readonly timingScale?: number;
+  readonly powerScale?: number;
   readonly rng: Rng;
 }
 
@@ -235,7 +238,7 @@ export function resolveContact(input: ContactInput): ContactResult {
   const dHeight = Math.min(outside(height, def.idealHeight.min, def.idealHeight.max), 0) - yorkedBy * 1.3 +
     Math.max(outside(height, def.idealHeight.min, def.idealHeight.max), 0);
   const reach = Math.hypot(dLine / lineTol, dHeight / heightTol);
-  const timing = (input.timingError * ballSpeed) / (def.timingTolerance * (0.7 + 0.6 * (timingSkill / 100)));
+  const timing = (input.timingError * ballSpeed) / (def.timingTolerance * (0.7 + 0.6 * (timingSkill / 100)) * (input.timingScale ?? 1));
   const quality = Math.exp(-0.5 * (timing * timing + reach * reach));
   // Spread of execution error: wider for poorer technique and poorer contact.
   const control = 1.35 - 0.6 * (technique / 100);
@@ -253,7 +256,7 @@ export function resolveContact(input: ContactInput): ContactResult {
     return noContact('miss', u, def, quality, timing, input.timingError, reach, across, aimDeg);
   }
 
-  const power = 0.75 + 0.55 * (bat.power / 100);
+  const power = (0.75 + 0.55 * (bat.power / 100)) * (input.powerScale ?? 1);
   const intendedElev =
     def.elevation +
     def.riseWithHeightDeg * Math.max(0, height - def.idealHeight.max) -

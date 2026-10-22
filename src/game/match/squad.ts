@@ -33,3 +33,26 @@ export function checkXi(team: Team, xi: readonly Player[]): XiCheck {
   if (!xi.some((p) => isSpinner(p.bowlingStyle))) warnings.push('No spinner in the side.');
   return { ok: errors.length === 0, errors, warnings };
 }
+
+/** Where a dragged player is dropped: before a place in the batting order (or at its end), or on the bench. */
+export type XiDrop = { zone: 'xi'; index: number } | { zone: 'bench' } | undefined;
+
+/** What a drop does to the XI (ids in batting order). */
+export function applyDrop(xi: readonly string[], id: string, from: 'xi' | 'bench', drop: XiDrop): string[] {
+  const next = xi.slice();
+  if (!drop) return next;
+  if (drop.zone === 'bench') return from === 'xi' ? next.filter((x) => x !== id) : next;
+  const to = Math.max(0, Math.min(drop.index, next.length));
+  if (from === 'xi') {
+    const i = next.indexOf(id);
+    if (i < 0) return next;
+    next.splice(i, 1);
+    next.splice(i < to ? to - 1 : to, 0, id);
+    return next;
+  }
+  // From the bench: in at that place, or (with eleven already) in place of the player there.
+  if (next.length < 11) next.splice(to, 0, id);
+  else if (to < next.length) next[to] = id;
+  return next;
+}
+

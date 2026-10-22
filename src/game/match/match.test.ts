@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { TEAMS } from '../data/teams.ts';
 import { type MatchConfig, Match, maxOversPerBowler } from './match.ts';
-import { checkXi, defaultXi, keeperFor } from './squad.ts';
+import { applyDrop, checkXi, defaultXi, keeperFor } from './squad.ts';
 import type { Team } from '../data/teams.ts';
 
 const team = (i: number): Team => {
@@ -351,5 +351,18 @@ describe('Human bowling: delivery, landing marker, run-up', () => {
     const ids = m.field.map((f) => f.position.id);
     expect(ids).toContain('slip2');
     expect(ids).toContain('thirdman');
+  });
+});
+
+describe('squad drag and drop', () => {
+  const xi = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k'];
+  it('reorders, swaps a bench player in, and drops a player to the bench', () => {
+    expect(applyDrop(xi, 'a', 'xi', { zone: 'xi', index: 3 }).slice(0, 4)).toEqual(['b', 'c', 'a', 'd']);
+    expect(applyDrop(xi, 'd', 'xi', { zone: 'xi', index: 0 }).slice(0, 4)).toEqual(['d', 'a', 'b', 'c']);
+    expect(applyDrop(xi, 'z', 'bench', { zone: 'xi', index: 2 })).toEqual(['a', 'b', 'z', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k']);
+    const ten = applyDrop(xi, 'k', 'xi', { zone: 'bench' });
+    expect(ten).toHaveLength(10);
+    expect(applyDrop(ten, 'z', 'bench', { zone: 'xi', index: 10 })).toEqual([...xi.slice(0, 10), 'z']);
+    expect(applyDrop(xi, 'z', 'bench', undefined)).toEqual(xi);
   });
 });
