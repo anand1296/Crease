@@ -10,6 +10,7 @@ import {
   type Material,
   Matrix4,
   Mesh,
+  MeshPhysicalMaterial,
   MeshStandardMaterial,
   NoColorSpace,
   type Object3D,
@@ -39,7 +40,12 @@ export interface CricketerProps {
   readonly avatar: AvatarId;
   /** Skin and hair tone multiplier, 0 (as modelled) … 1 (much darker). */
   readonly tone: number;
+  /** Facial hair. */
+  readonly grooming?: Grooming;
 }
+
+/** Facial hair, drawn on the face: none, a few days' stubble, a moustache, or a full beard. */
+export type Grooming = 'clean' | 'stubble' | 'moustache' | 'beard';
 
 export function preloadCricketers(): void {
   for (const id of AVATARS) {
@@ -49,7 +55,7 @@ export function preloadCricketers(): void {
   void loadClips();
 }
 
-export const Cricketer = forwardRef<HumanoidHandle, CricketerProps>(function Cricketer({ kit, avatar, tone }, ref) {
+export const Cricketer = forwardRef<HumanoidHandle, CricketerProps>(function Cricketer({ kit, avatar, tone, grooming = 'clean' }, ref) {
   const gltf = useLoader(GLTFLoader, avatarUrl(avatar));
   const textures = useLoader(TextureLoader, textureUrls(avatar));
   const clips = use(loadClips());
@@ -68,7 +74,7 @@ export const Cricketer = forwardRef<HumanoidHandle, CricketerProps>(function Cri
     });
     if (meshes.length === 0) throw new Error('Player model has no skinned mesh');
     const kitMat = kitMaterial(body, bodyN, mask, kit, tone);
-    const headMat = headMaterial(head, headN, tone);
+    const headMat = headMaterial(head, headN, tone, grooming);
     const hairMat = hair ? hairMaterial(hair, tone) : headMat;
     for (const mesh of meshes) {
       const names = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]).map((m: Material) => m.name);
@@ -78,12 +84,14 @@ export const Cricketer = forwardRef<HumanoidHandle, CricketerProps>(function Cri
       mesh.frustumCulled = false;
     }
     model.updateMatrixWorld(true);
+    const faceMesh = meshes.find((m) => m.material === headMat);
+    if (faceMesh) placeFacialHair(headMat, faceMesh);
     addProps(model, kit);
     // Hair (and the top of the head) tucked under the cap, helmet or hat; the original is kept for when it comes off.
     const fitted = headMeshes.map((mesh) => ({ mesh, bare: mesh.geometry, covered: fitUnderHeadwear(model, mesh, kit, hairMat !== headMat && mesh.material === hairMat) }));
     for (const f of fitted) f.mesh.geometry = f.covered;
     return { model, rig: new AvatarRig(model, clips), headwear: model.getObjectByName('headwear'), fitted };
-  }, [gltf, textures, clips, kit, tone]);
+  }, [gltf, textures, clips, kit, tone, grooming]);
 
   const frames = useMemo(newRigFrames, []);
   const handle = useMemo<HumanoidHandle>(
@@ -155,6 +163,8 @@ function toneColor(tone: number): Color {
 
 function kitMaterial(map: Texture, normalMap: Texture, mask: Texture, kit: Kit, tone: number): MeshStandardMaterial {
   const m = new MeshStandardMaterial({ map, normalMap, roughness: 0.62, metalness: 0 });
+  // A touch more relief from the normal map: arms, folds in the shirt.
+  m.normalScale.set(1.25, 1.25);
   const gloves = kit.gloves === 'batting' ? '#f3f1ea' : kit.gloves === 'keeping' ? '#e6dcc3' : '#000000';
   const uniforms = {
     kitMap: { value: mask },
@@ -215,17 +225,109 @@ function hairMaterial(map: Texture, tone: number): MeshStandardMaterial {
   return m;
 }
 
-function headMaterial(map: Texture, normalMap: Texture, tone: number): MeshStandardMaterial {
-  const m = new MeshStandardMaterial({ map, normalMap, roughness: 0.55, metalness: 0 });
-  const tint = { value: toneColor(tone) };
-  m.onBeforeCompile = (shader) => {
-    shader.uniforms.skinTint = tint;
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform vec3 skinTint;')
-      .replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb *= skinTint;');
+const GROOMING: Record<Grooming, { beard: number; moustache: number; stubble: number }> = {
+  clean: { beard: 0, moustache: 0, stubble: 0 },
+  stubble: { beard: 0.32, moustache: 0.3, stubble: 1 },
+  moustache: { beard: 0.12, moustache: 0.85, stubble: 0.6 },
+  beard: { beard: 0.8, moustache: 0.8, stubble: 0.5 },
+};
+
+/**
+ * Skin: a little sheen (skin is not matt), the model's normal map a touch
+ * stronger for definition in the face, and facial hair drawn on in the
+ * shader from the face's own shape — measured from the nose tip, so it fits
+ * every model without touching its textures.
+ */
+function headMaterial(map: Texture, normalMap: Texture, tone: number, grooming: Grooming): MeshPhysicalMaterial {
+  const m = new MeshPhysicalMaterial({ map, normalMap, roughness: 0.52, metalness: 0, sheen: 0.35, sheenRoughness: 0.6, sheenColor: new Color('#e8b8a0') });
+  m.normalScale.set(1.35, 1.35);
+  const g = GROOMING[grooming];
+  const uniforms = {
+    skinTint: { value: toneColor(tone) },
+    nose: { value: new Vector3() },
+    upDir: { value: new Vector3(0, 1, 0) },
+    fwdDir: { value: new Vector3(0, 0, 1) },
+    sideDir: { value: new Vector3(1, 0, 0) },
+    // Mesh units per centimetre.
+    unit: { value: 1 },
+    beard: { value: new Vector3(g.beard, g.moustache, g.stubble) },
   };
-  m.customProgramCacheKey = () => 'crease-head-v1';
+  m.userData.face = uniforms;
+  m.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vBind;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBind = position;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+uniform vec3 skinTint;
+uniform vec3 nose;
+uniform vec3 upDir;
+uniform vec3 fwdDir;
+uniform vec3 sideDir;
+uniform float unit;
+uniform vec3 beard;
+varying vec3 vBind;
+float hairHash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }`,
+      )
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+diffuseColor.rgb *= skinTint;
+{
+  // Centimetres from the tip of the nose: up, forward (out of the face), and across.
+  vec3 d = (vBind - nose) / unit;
+  float up = dot(d, upDir);
+  float fwd = dot(d, fwdDir);
+  float x = abs(dot(d, sideDir));
+  // The jaw and chin: below the nose, on the front and sides of the face, thinning towards the ears.
+  float jaw = smoothstep(-11.0, -8.0, up) * (1.0 - smoothstep(-2.6, -1.2, up)) * smoothstep(-13.0, -9.0, fwd) * (1.0 - smoothstep(7.0, 8.6, x));
+  // Cheeks above the jaw line, lighter.
+  float cheek = smoothstep(-5.5, -3.5, up) * (1.0 - smoothstep(-1.0, 1.0, up)) * smoothstep(3.0, 5.0, x) * (1.0 - smoothstep(7.0, 8.4, x)) * smoothstep(-11.0, -8.0, fwd);
+  // The upper lip.
+  float lip = smoothstep(-3.0, -2.4, up) * (1.0 - smoothstep(-1.3, -0.7, up)) * (1.0 - smoothstep(2.6, 3.6, x)) * smoothstep(-3.0, -1.5, fwd);
+  // Keep the lips themselves clear.
+  float mouth = smoothstep(-4.2, -3.6, up) * (1.0 - smoothstep(-3.0, -2.6, up)) * (1.0 - smoothstep(2.0, 2.8, x)) * smoothstep(-2.6, -1.2, fwd);
+  float grain = 0.55 + 0.45 * hairHash(floor(vBind / unit * 6.0));
+  float amount = max(beard.x * max(jaw, cheek * 0.6), beard.y * lip) * (1.0 - mouth);
+  amount *= mix(1.0, grain, beard.z);
+  vec3 hairColour = vec3(0.075, 0.055, 0.045) * skinTint;
+  diffuseColor.rgb = mix(diffuseColor.rgb, hairColour, clamp(amount, 0.0, 0.92));
+}`,
+      );
+  };
+  m.customProgramCacheKey = () => 'crease-head-v2';
   return m;
+}
+
+/** Measures the face of this model (its nose tip, in the head mesh's own space) for the facial-hair shader. */
+function placeFacialHair(material: MeshPhysicalMaterial, mesh: SkinnedMesh): void {
+  const u = material.userData.face as { nose: { value: Vector3 }; upDir: { value: Vector3 }; fwdDir: { value: Vector3 }; sideDir: { value: Vector3 }; unit: { value: number } } | undefined;
+  if (!u) return;
+  const pos = mesh.geometry.getAttribute('position');
+  const toModel = mesh.matrixWorld;
+  const toMesh = new Matrix4().copy(toModel).invert();
+  const v = new Vector3();
+  let best = -Infinity;
+  const tip = new Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).applyMatrix4(toModel);
+    if (v.z > best) {
+      best = v.z;
+      tip.copy(v);
+    }
+  }
+  const origin = tip.clone().applyMatrix4(toMesh);
+  const axis = (dx: number, dy: number, dz: number) => tip.clone().add(new Vector3(dx, dy, dz)).applyMatrix4(toMesh).sub(origin);
+  // Model space is centimetres; the mesh may be scaled.
+  const up = axis(0, 1, 0);
+  u.unit.value = up.length();
+  u.nose.value.copy(origin);
+  u.upDir.value.copy(up.normalize());
+  u.fwdDir.value.copy(axis(0, 0, 1).normalize());
+  u.sideDir.value.copy(axis(1, 0, 0).normalize());
 }
 
 // --- Equipment ------------------------------------------------------------------------------
@@ -234,7 +336,15 @@ function headMaterial(map: Texture, normalMap: Texture, tone: number): MeshStand
 const geo = {
   helmet: new SphereGeometry(12.2, 24, 14, 0, Math.PI * 2, 0, Math.PI * 0.6),
   peak: new BoxGeometry(17, 0.8, 7),
-  bar: new TorusGeometry(10.5, 0.45, 5, 18, Math.PI * 0.9),
+  // The helmet: shell skirt down over the ears and the back of the neck, a sloping peak, a steel grille.
+  skirt: new CylinderGeometry(12.0, 11.3, 10, 22, 1, true, (50 * Math.PI) / 180, (260 * Math.PI) / 180),
+  visor: new CylinderGeometry(12.5, 17.2, 3.2, 20, 1, true, (-58 * Math.PI) / 180, (116 * Math.PI) / 180),
+  grilleTop: new TorusGeometry(13.4, 0.42, 6, 26, (124 * Math.PI) / 180),
+  grilleMid: new TorusGeometry(12.6, 0.42, 6, 26, (112 * Math.PI) / 180),
+  grilleChin: new TorusGeometry(9.8, 0.42, 6, 20, (84 * Math.PI) / 180),
+  rod: new CylinderGeometry(0.38, 0.38, 1, 6),
+  badge: new BoxGeometry(4.2, 3.4, 0.7),
+  stem: new CapsuleGeometry(1.2, 3.2, 3, 8),
   cap: new SphereGeometry(10.8, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.5),
   brim: new BoxGeometry(16, 0.6, 8),
   hatCrown: new CylinderGeometry(9.5, 10.5, 8, 18),
@@ -246,6 +356,17 @@ const geo = {
 };
 
 const matCache = new Map<string, MeshStandardMaterial>();
+
+/** A double-sided material (open shells: the helmet's skirt and peak). */
+function sided(color: string, roughness: number): MeshStandardMaterial {
+  const key = `${color}/${roughness}/double`;
+  let m = matCache.get(key);
+  if (!m) {
+    m = new MeshStandardMaterial({ color, roughness, metalness: 0.08, side: DoubleSide });
+    matCache.set(key, m);
+  }
+  return m;
+}
 function mat(color: string, roughness = 0.7, metalness = 0): MeshStandardMaterial {
   const key = `${color}/${roughness}/${metalness}`;
   let m = matCache.get(key);
@@ -363,18 +484,60 @@ function addProps(model: Object3D, kit: Kit): void {
   const head = bonePos(model, 'Bip01_Head');
   if (kit.headwear === 'helmet') {
     const g = new Group();
-    const shell = mat(darken(kit.shirt, 0.55), 0.35, 0.15);
+    // A deep shade of the team colour, glossy like a painted shell.
+    const shellColor = darken(kit.shirt, 0.36);
+    const shell = mat(shellColor, 0.28, 0.1);
+    const shellInside = sided(shellColor, 0.6);
     const helmet = part(geo.helmet, shell, 0, 0, 0);
     helmet.scale.set(1, 0.98, 1.12);
     g.add(helmet);
-    g.add(part(geo.peak, shell, 0, 1.2, 12.5, 0.28));
-    const grille = mat('#8f969e', 0.35, 0.8);
-    for (const [y, s] of [[-5.5, 1], [-9.5, 0.92], [-13, 0.8]] as const) {
-      const bar = part(geo.bar, grille, 0, y, 2.5, Math.PI / 2, 0, Math.PI * 0.05);
-      bar.scale.set(s, s, 1);
-      bar.rotation.set(Math.PI / 2, 0, Math.PI * 1.05);
-      g.add(bar);
+    // Down over the ears and the back of the head; open at the face.
+    const skirt = part(geo.skirt, shellInside, 0, -4.6, 0);
+    skirt.scale.set(1, 1, 1.12);
+    g.add(skirt);
+    // The peak slopes down over the eyes.
+    const visor = part(geo.visor, shellInside, 0, 0.2, 0);
+    visor.scale.set(1, 1, 1.12);
+    g.add(visor);
+    // A small crest on the front.
+    g.add(part(geo.badge, mat(kit.trim, 0.5), 0, 6.2, 13.4, -0.42));
+    // The grille: two crossbars round the face, a chin bar, and uprights tying them together.
+    const steel = mat('#aeb4ba', 0.3, 0.55);
+    const ring = (geometry: TorusGeometry, y: number, arc: number) => {
+      const holder = new Group();
+      const bar = part(geometry, steel);
+      bar.rotation.x = Math.PI / 2;
+      holder.add(bar);
+      // Centre the arc on the front (+z).
+      holder.rotation.y = arc / 2 - Math.PI / 2;
+      holder.position.y = y;
+      holder.scale.set(1, 1, 1.08);
+      g.add(holder);
+    };
+    ring(geo.grilleTop, -4.8, (124 * Math.PI) / 180);
+    ring(geo.grilleMid, -10.6, (112 * Math.PI) / 180);
+    ring(geo.grilleChin, -15.2, (84 * Math.PI) / 180);
+    const onRing = (r: number, deg: number, y: number) => new Vector3(r * Math.sin((deg * Math.PI) / 180), y, r * Math.cos((deg * Math.PI) / 180) * 1.08);
+    const rod = (from: Vector3, to: Vector3) => {
+      const m = part(geo.rod, steel);
+      m.position.copy(from).add(to).multiplyScalar(0.5);
+      m.scale.set(1, from.distanceTo(to), 1);
+      m.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), to.clone().sub(from).normalize());
+      g.add(m);
+    };
+    for (const deg of [-24, 0, 24]) {
+      rod(onRing(13.4, deg, -4.8), onRing(12.6, deg, -10.6));
+      rod(onRing(12.6, deg, -10.6), onRing(9.8, deg * 0.8, -15.2));
     }
+    // The grille is bolted to the shell at the sides.
+    for (const sgn of [-1, 1]) {
+      rod(onRing(13.4, 62 * sgn, -4.8), onRing(11.9, 68 * sgn, -8.6));
+      rod(onRing(12.6, 56 * sgn, -10.6), onRing(11.6, 66 * sgn, -9.4));
+      rod(onRing(9.8, 42 * sgn, -15.2), onRing(11.4, 64 * sgn, -9.8));
+    }
+    // Stem guard at the back of the neck.
+    const stem = mat('#1d1f23', 0.8);
+    for (const sgn of [-1, 1]) g.add(part(geo.stem, stem, sgn * 2.6, -15.6, -9.2, -0.35, 0, 0));
     attach(model, 'Bip01_Head', g, new Vector3(head.x, head.y + 11, head.z + 0.5));
   } else if (kit.headwear === 'cap') {
     const g = new Group();

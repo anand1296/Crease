@@ -14,31 +14,45 @@ import {
 } from 'three';
 import { useGame } from '../../state/game.ts';
 import { FIELD } from '../data/field.ts';
+import { type Tier, type Venue, VENUES, standsOuterRadius } from '../data/venues.ts';
+import { WEATHER } from '../data/weather.ts';
 import { Rng } from '../core/rng.ts';
+import { Landmarks } from './Landmarks.tsx';
 
 /**
- * The stadium around the field, all procedural: sky dome, tiered stands
- * with an instanced crowd (one draw call), roof, sponsor boards (fictional
- * brands) and floodlights, plus a big screen showing the live score.
+ * The stadium around the field, all procedural, drawn from the venue's
+ * description (data/venues.ts): tiered stands with an instanced crowd (one
+ * draw call), the roof, the lights, the ground's landmarks, sponsor boards
+ * (fictional brands) and a big screen showing the live score.
  */
-const STAND_R = 80;
-const LOWER_ROWS = 14;
-const UPPER_R = 96;
-const UPPER_Y = 12;
-const UPPER_ROWS = 10;
 const ROW_DEPTH = 0.9;
 const ROW_RISE = 0.55;
 /** Angular gaps behind each sight screen (radians either side of the pitch line). */
 const SCREEN_GAP = 0.2;
 
+/** The venue on show: the match's, or the one being chosen in the setup. */
+export function useVenue(): Venue {
+  const id = useGame((s) => s.match?.config.venue ?? s.setup.venue);
+  return VENUES[id] ?? VENUES.crease;
+}
+
+/** Whether it is a night game (lights on). */
+export function useNight(): boolean {
+  const id = useGame((s) => s.match?.config.weather ?? s.setup.weather);
+  return WEATHER[id]?.look.night ?? false;
+}
+
 export function Stadium({ crowd }: { crowd: boolean }) {
+  const venue = useVenue();
+  const night = useNight();
   return (
-    <group>
-      <Stands />
-      {crowd ? <Crowd /> : null}
+    <group key={venue.id}>
+      <Stands venue={venue} />
+      {crowd ? <Crowd venue={venue} /> : null}
       <AdBoards />
-      <Floodlights />
-      <ScoreScreen />
+      <Floodlights venue={venue} night={night} />
+      <Landmarks venue={venue} night={night} />
+      <ScoreScreen venue={venue} />
     </group>
   );
 }
@@ -59,7 +73,7 @@ function tierProfile(r0: number, y0: number, rows: number): Vector2[] {
  * Rows of plastic seats for a tier's lathe (u runs round the ground, v up the
  * profile): coloured seat rows on concrete steps, with aisles every so often.
  */
-function seatTexture(color: string, rows: number): CanvasTexture {
+function seatTexture(colors: readonly string[], rows: number, repeat: number): CanvasTexture {
   const w = 512;
   const h = 512;
   const canvas = document.createElement('canvas');
@@ -77,7 +91,8 @@ function seatTexture(color: string, rows: number): CanvasTexture {
       ctx.fillRect(0, y + rowH * 0.62, w, rowH * 0.38);
       for (let x = 0; x < w; x += 16) {
         if (x % 128 < 16) continue; // aisle
-        ctx.fillStyle = color;
+        // Blocks of colour between the aisles.
+        ctx.fillStyle = colors[Math.floor(x / 128) % colors.length] ?? '#1f5f9e';
         ctx.fillRect(x + 2, y + rowH * 0.12, 12, rowH * 0.5);
         ctx.fillStyle = 'rgba(0,0,0,0.25)';
         ctx.fillRect(x + 2, y + rowH * 0.5, 12, rowH * 0.12);
@@ -87,48 +102,92 @@ function seatTexture(color: string, rows: number): CanvasTexture {
   const tex = new CanvasTexture(canvas);
   tex.colorSpace = SRGBColorSpace;
   tex.wrapS = RepeatWrapping;
-  tex.repeat.set(24, 1);
+  tex.repeat.set(repeat, 1);
   tex.anisotropy = 8;
   return tex;
 }
 
-function Stands() {
-  const lower = useMemo(() => tierProfile(STAND_R, 1.6, LOWER_ROWS), []);
-  const upper = useMemo(() => tierProfile(UPPER_R, UPPER_Y, UPPER_ROWS), []);
-  const roofY = UPPER_Y + UPPER_ROWS * ROW_RISE + 6;
-  const seats = useMemo(() => ({ lower: seatTexture('#1f5f9e', LOWER_ROWS), upper: seatTexture('#9e2a2b', UPPER_ROWS) }), []);
-  useEffect(
-    () => () => {
-      seats.lower.dispose();
-      seats.upper.dispose();
-    },
-    [seats],
+/** Start and length of a tier's arc for a lathe (phi 0 = +z, behind the striker's end). */
+const arcOf = (t: Tier): [number, number] => {
+  const arc = t.arc ?? Math.PI * 2;
+  return [(t.facing ?? 0) - arc / 2, arc];
+};
+
+function TierMesh({ tier }: { tier: Tier }) {
+  const profile = useMemo(() => tierProfile(tier.r, tier.y, tier.rows), [tier]);
+  const [start, length] = arcOf(tier);
+  const seats = useMemo(() => seatTexture(tier.seats, tier.rows, Math.max(2, Math.round((24 * length) / (Math.PI * 2)))), [tier, length]);
+  useEffect(() => () => seats.dispose(), [seats]);
+  return (
+    <mesh>
+      <latheGeometry args={[profile, Math.max(12, Math.round((96 * length) / (Math.PI * 2))), start, length]} />
+      <meshStandardMaterial map={seats} roughness={0.85} side={DoubleSide} />
+    </mesh>
   );
+}
+
+function Stands({ venue }: { venue: Venue }) {
+  const tiers = venue.tiers;
+  const front = tiers[0];
+  const top = tiers.reduce((a, t) => (t.y + t.rows * ROW_RISE > a.y + a.rows * ROW_RISE ? t : a), tiers[0] ?? { r: 80, y: 1.6, rows: 14, seats: [] });
+  const topY = top.y + top.rows * ROW_RISE;
+  const outer = top.r + top.rows * ROW_DEPTH;
   return (
     <group>
-      <mesh>
-        <latheGeometry args={[lower, 96]} />
-        <meshStandardMaterial map={seats.lower} roughness={0.85} side={DoubleSide} />
-      </mesh>
-      <mesh>
-        <latheGeometry args={[upper, 96]} />
-        <meshStandardMaterial map={seats.upper} roughness={0.85} side={DoubleSide} />
-      </mesh>
-      {/* Fascia between the tiers */}
-      <mesh position={[0, UPPER_Y - 1.5, 0]}>
-        <cylinderGeometry args={[UPPER_R - 0.3, UPPER_R - 0.3, 3, 96, 1, true]} />
-        <meshStandardMaterial color="#1c2c44" roughness={0.6} side={BackSide} />
-      </mesh>
-      {/* Roof canopy */}
-      <mesh position={[0, roofY, 0]} rotation-x={Math.PI / 2}>
-        <ringGeometry args={[UPPER_R - 8, UPPER_R + UPPER_ROWS * ROW_DEPTH + 4, 96]} />
-        <meshStandardMaterial color="#d9dde3" roughness={0.6} side={DoubleSide} />
-      </mesh>
+      {tiers.map((t, i) => (
+        <TierMesh key={i} tier={t} />
+      ))}
+      {/* Fascias under the upper tiers */}
+      {tiers.slice(1).map((t, i) => {
+        const [start, length] = arcOf(t);
+        return (
+          <mesh key={i} position={[0, t.y - 1.5, 0]}>
+            <cylinderGeometry args={[t.r - 0.3, t.r - 0.3, 3, 64, 1, true, start, length]} />
+            <meshStandardMaterial color="#1c2c44" roughness={0.6} side={BackSide} />
+          </mesh>
+        );
+      })}
+      {venue.roof.kind === 'ring' ? (
+        <mesh position={[0, topY + 6, 0]} rotation-x={Math.PI / 2}>
+          <ringGeometry args={[top.r - 8, outer + 4, 96]} />
+          <meshStandardMaterial color={venue.roof.color} roughness={0.6} side={DoubleSide} />
+        </mesh>
+      ) : null}
+      {venue.roof.kind === 'cantilever' ? <Cantilever inner={top.r - 10} outer={outer + 3} y={topY + 5} color={venue.roof.color} /> : null}
       {/* Low wall at the front of the stands */}
-      <mesh position={[0, 0.8, 0]}>
-        <cylinderGeometry args={[STAND_R - 0.5, STAND_R - 0.5, 1.6, 96, 1, true]} />
-        <meshStandardMaterial color="#2c4f2a" roughness={0.9} side={BackSide} />
-      </mesh>
+      {front ? (
+        <mesh position={[0, 0.8, 0]}>
+          <cylinderGeometry args={[front.r - 0.5, front.r - 0.5, 1.6, 96, 1, true, ...arcOf(front)]} />
+          <meshStandardMaterial color={venue.wall} roughness={0.9} side={BackSide} />
+        </mesh>
+      ) : null}
+    </group>
+  );
+}
+
+/** A long cantilevered roof along both sides, sloping up to the front, on a row of trusses. */
+function Cantilever({ inner, outer, y, color }: { inner: number; outer: number; y: number; color: string }) {
+  const arcs = [Math.PI / 2, -Math.PI / 2];
+  const span = Math.PI * 0.7;
+  return (
+    <group>
+      {arcs.map((f) => (
+        <group key={f}>
+          <mesh position={[0, y, 0]}>
+            <cylinderGeometry args={[inner, outer, 4, 48, 1, true, f - span / 2, span]} />
+            <meshStandardMaterial color={color} roughness={0.55} side={DoubleSide} />
+          </mesh>
+          {Array.from({ length: 9 }, (_, k) => {
+            const a = f - span / 2 + (k / 8) * span;
+            return (
+              <mesh key={k} position={[Math.sin(a) * outer, y / 2, Math.cos(a) * outer]}>
+                <cylinderGeometry args={[0.5, 0.7, y + 2, 6]} />
+                <meshStandardMaterial color="#8e959e" roughness={0.5} metalness={0.4} />
+              </mesh>
+            );
+          })}
+        </group>
+      ))}
     </group>
   );
 }
@@ -233,32 +292,31 @@ function crowdAtlas(): CanvasTexture {
  * Each picks a cell of the sprite sheet; when something happens they jump,
  * animated on the GPU.
  */
-function Crowd() {
+function Crowd({ venue }: { venue: Venue }) {
   const ref = useRef<InstancedMesh>(null);
   const atlas = useMemo(crowdAtlas, []);
   useEffect(() => () => atlas.dispose(), [atlas]);
   const seats = useMemo(() => {
     const rng = new Rng('crowd');
     const out: { x: number; y: number; z: number; a: number; cell: number; phase: number; scale: number }[] = [];
-    const tier = (r0: number, y0: number, rows: number, fill: number) => {
-      for (let row = 0; row < rows; row++) {
-        const r = r0 + row * ROW_DEPTH + ROW_DEPTH * 0.5;
-        const y = y0 + row * ROW_RISE;
-        const count = Math.floor((Math.PI * 2 * r) / 0.62);
+    for (const t of venue.tiers) {
+      const [start, length] = arcOf(t);
+      for (let row = 0; row < t.rows; row++) {
+        const r = t.r + row * ROW_DEPTH + ROW_DEPTH * 0.5;
+        const y = t.y + row * ROW_RISE;
+        const count = Math.floor((length * r) / 0.62);
         for (let i = 0; i < count; i++) {
-          const a = (i / count) * Math.PI * 2 + rng.range(-0.002, 0.002);
+          const a = start + (i / count) * length + rng.range(-0.002, 0.002);
           // Leave the seats behind the sight screens empty.
           const fromLine = Math.min(Math.abs(Math.sin(a)), 1);
           if (Math.abs(Math.cos(a)) > 0.9 && fromLine < SCREEN_GAP) continue;
-          if (!rng.chance(fill)) continue;
+          if (!rng.chance(venue.crowd - row * 0.004)) continue;
           out.push({ x: Math.sin(a) * r, y, z: Math.cos(a) * r, a, cell: rng.int(0, CELLS_X * CELLS_Y - 1), phase: rng.next() * 6.28, scale: rng.range(0.9, 1.08) });
         }
       }
-    };
-    tier(STAND_R, 1.6, LOWER_ROWS, 0.82);
-    tier(UPPER_R, UPPER_Y, UPPER_ROWS, 0.74);
+    }
     return out;
-  }, []);
+  }, [venue]);
   const material = useMemo(() => {
     const m = new MeshLambertMaterial({ map: atlas, alphaTest: 0.5, side: DoubleSide });
     const uniforms = { uTime: { value: 0 }, uJump: { value: 0 } };
@@ -401,29 +459,62 @@ function BoardSet({ texture, index, every, count, radius, width }: { texture: Ca
   );
 }
 
-function Floodlights() {
-  const towers = [Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI) / 4];
-  const R = UPPER_R + 16;
+/**
+ * The lights: towers round the ground (the MCG's six tall ones, with their
+ * tilted heads), slim masts, or banks along the roof edge. At night the lamps
+ * glow (and bloom, on High).
+ */
+function Floodlights({ venue, night }: { venue: Venue; night: boolean }) {
+  const L = venue.lights;
+  const glow = night ? 3.2 : 0.5;
+  if (L.kind === 'roof') {
+    return (
+      <group>
+        {Array.from({ length: L.count }, (_, k) => {
+          const a = ((k + 0.5) / L.count) * Math.PI * 2;
+          return (
+            <group key={k} position={[Math.sin(a) * L.r, L.height, Math.cos(a) * L.r]} rotation-y={a + Math.PI}>
+              <mesh rotation-x={L.lean}>
+                <boxGeometry args={[7, 2.2, 0.5]} />
+                <meshStandardMaterial color="#e8eef5" emissive="#fff6dd" emissiveIntensity={glow} />
+              </mesh>
+            </group>
+          );
+        })}
+      </group>
+    );
+  }
+  const masts = L.kind === 'masts';
   return (
     <group>
-      {towers.map((a) => (
-        <group key={a} position={[Math.sin(a) * R, 0, Math.cos(a) * R]} rotation-y={a + Math.PI}>
-          <mesh position={[0, 26, 0]}>
-            <cylinderGeometry args={[0.6, 1.2, 52, 8]} />
-            <meshStandardMaterial color="#9aa1aa" roughness={0.6} metalness={0.4} />
-          </mesh>
-          <mesh position={[0, 53, 0.8]} rotation-x={0.35}>
-            <boxGeometry args={[10, 6, 0.6]} />
-            <meshStandardMaterial color="#e8eef5" emissive="#fff8e0" emissiveIntensity={0.6} />
-          </mesh>
-        </group>
-      ))}
+      {Array.from({ length: L.count }, (_, k) => {
+        const a = ((k + 0.5) / L.count) * Math.PI * 2;
+        return (
+          <group key={k} position={[Math.sin(a) * L.r, 0, Math.cos(a) * L.r]} rotation-y={a + Math.PI}>
+            <mesh position={[0, L.height / 2, 0]}>
+              <cylinderGeometry args={masts ? [0.35, 0.6, L.height, 8] : [0.8, 1.6, L.height, 8]} />
+              <meshStandardMaterial color="#9aa1aa" roughness={0.6} metalness={0.4} />
+            </mesh>
+            {/* The head, tilted towards the middle. */}
+            <group position={[0, L.height + 1, 1]} rotation-x={L.lean}>
+              <mesh>
+                <boxGeometry args={masts ? [6, 4, 0.5] : [L.height > 65 ? 16 : 10, L.height > 65 ? 9 : 6, 0.6]} />
+                <meshStandardMaterial color="#e8eef5" emissive="#fff8e0" emissiveIntensity={glow} />
+              </mesh>
+              <mesh position={[0, 0, -0.5]}>
+                <boxGeometry args={masts ? [6.4, 4.4, 0.4] : [L.height > 65 ? 16.6 : 10.6, L.height > 65 ? 9.6 : 6.6, 0.4]} />
+                <meshStandardMaterial color="#59616b" roughness={0.6} />
+              </mesh>
+            </group>
+          </group>
+        );
+      })}
     </group>
   );
 }
 
 /** Big screen behind the striker's end showing the live score. */
-function ScoreScreen() {
+function ScoreScreen({ venue }: { venue: Venue }) {
   const canvas = useMemo(() => {
     const c = document.createElement('canvas');
     c.width = 512;
@@ -460,7 +551,8 @@ function ScoreScreen() {
     texture.needsUpdate = true;
   }, [snap, canvas, texture]);
   return (
-    <group position={[-30, 20, UPPER_R + 4]} rotation-y={Math.PI}>
+    // Behind the striker's end, clear of any landmark there.
+    <group position={[venue.landmarks.includes('mediaCentre') ? -58 : -30, 20, standsOuterRadius(venue) - 6]} rotation-y={Math.PI}>
       <mesh>
         <planeGeometry args={[20, 10]} />
         <meshBasicMaterial map={texture} toneMapped={false} />

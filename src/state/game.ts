@@ -19,7 +19,11 @@ import type { DifficultyId } from '../game/model/difficulty.ts';
 import type { Hand, Player } from '../game/model/player.ts';
 import type { BallOutcome } from '../game/session/deliveryCycle.ts';
 import type { ContactResult } from '../game/batting/contact.ts';
+import type { VenueId } from '../game/data/venues.ts';
+import type { WeatherId } from '../game/data/weather.ts';
 import { type BatterState, timingScale } from '../game/batting/form.ts';
+import { type SavedMatch, deleteSave, listSaves, writeSave } from '../game/match/save.ts';
+import { type ChallengeId, type ChallengeStatus, challenge } from '../game/practice/challenges.ts';
 import { COIN_SETTLED, type CoinFace, type TossChoice, coinFor, computerChoice, flightTime, tossLine } from '../game/match/toss.ts';
 
 /**
@@ -65,6 +69,8 @@ export interface MatchSetup {
   readonly pitch: PitchId;
   readonly batFirst: BatFirst;
   readonly speed: GameSpeed;
+  readonly venue: VenueId;
+  readonly weather: WeatherId;
   /** Selected XIs in batting order (player ids). */
   readonly userXi: readonly string[];
   readonly opponentXi: readonly string[];
@@ -92,6 +98,8 @@ export interface MatchSnapshot {
   /** Autoplay asked for (the rest of the over or the innings), and whether the computer is playing this ball. */
   readonly autoplay: Autoplay;
   readonly autoplaying: boolean;
+  /** Practice: the challenge and how it is going. */
+  readonly challenge: { readonly id: ChallengeId; readonly status: ChallengeStatus } | undefined;
   readonly striker: { readonly id: string; readonly name: string; readonly hand: Hand; readonly card: BattingCard | undefined; readonly form: BatterState };
   readonly nonStriker: { readonly id: string; readonly name: string; readonly card: BattingCard | undefined; readonly form: BatterState };
   readonly bowler: { readonly name: string; readonly style: string; readonly card: BowlingCard | undefined; readonly fatigue: number; readonly spell: number };
@@ -173,6 +181,16 @@ export interface GameState {
   goTo: (screen: Screen) => void;
   updateSetup: (patch: Partial<MatchSetup>) => void;
   startMatch: () => void;
+  /** The practice challenge being played (or last played), if any. */
+  readonly practice: ChallengeId | undefined;
+  startPractice: (id: ChallengeId) => void;
+  /** Saves the match in this browser (as it stood before the ball in play, if one is). */
+  saveMatch: () => boolean;
+  /** Loads a saved match and carries on from where it was saved. */
+  loadMatch: (id: string) => boolean;
+  deleteSavedMatch: (id: string) => void;
+  /** The saved matches (newest first). */
+  readonly saves: readonly SavedMatch[];
   /** At the toss: the player's call, then (if he won) his choice. */
   callToss: (call: CoinFace) => void;
   chooseAtToss: (choice?: TossChoice) => void;
@@ -235,6 +253,7 @@ function snapshot(m: Match, toss: string): MatchSnapshot {
     userSide: m.userSide,
     autoplay: m.autoplay,
     autoplaying: m.autoplaying,
+    challenge: m.config.practice ? { id: m.config.practice, status: m.challengeStatus ?? { state: 'on', progress: '' } } : undefined,
     striker: { id: m.striker.id, name: m.striker.name, hand: m.striker.battingHand, card: card(m.striker), form: { ...m.formOf(m.striker) } },
     nonStriker: { id: m.nonStriker.id, name: m.nonStriker.name, card: card(m.nonStriker), form: { ...m.formOf(m.nonStriker) } },
     timingScale: timingScale(m.formOf(m.striker)),
@@ -295,6 +314,8 @@ const DEFAULT_SETUP: MatchSetup = {
   pitch: 'balanced',
   batFirst: 'toss',
   speed: 'normal',
+  venue: 'crease',
+  weather: 'sunny',
   userXi: ids(defaultXi(firstTeam)),
   opponentXi: ids(defaultXi(secondTeam)),
 };
@@ -322,14 +343,18 @@ function pick(team: Team, xiIds: readonly string[]): Player[] {
   return chosen.length === 11 ? chosen : defaultXi(team);
 }
 
-function createMatch(setup: MatchSetup, seed: string, decided?: { battingFirst: SideId; toss: string }): { match: Match; toss: string } {
+function createMatch(setup: MatchSetup, seed: string, decided?: { battingFirst: SideId; toss: string }, practice?: ChallengeId): { match: Match; toss: string } {
   const user = findTeam(setup.userTeamId);
   const opp = findTeam(setup.opponentId);
   const userXi = pick(user, setup.userXi);
   const oppXi = pick(opp, setup.opponentXi);
   let battingFirst: SideId;
   let toss: string;
-  if (decided) {
+  if (practice) {
+    const c = challenge(practice);
+    battingFirst = c.role === 'bat' ? 'home' : 'away';
+    toss = `Practice: ${c.name}. ${c.goal}`;
+  } else if (decided) {
     battingFirst = decided.battingFirst;
     toss = decided.toss;
   } else if (setup.batFirst === 'toss') {
@@ -346,11 +371,14 @@ function createMatch(setup: MatchSetup, seed: string, decided?: { battingFirst: 
   const match = new Match({
     home: { team: user, xi: userXi, keeperId: keeperFor(user, userXi)?.id ?? '', controller: 'human' },
     away: { team: opp, xi: oppXi, keeperId: keeperFor(opp, oppXi)?.id ?? '', controller: 'ai' },
-    overs: setup.overs,
+    overs: practice ? 1 : setup.overs,
     battingFirst,
     pitch: setup.pitch,
     difficulty: setup.difficulty,
     seed,
+    weather: setup.weather,
+    venue: setup.venue,
+    ...(practice ? { practice } : {}),
   });
   match.speed = GAME_SPEEDS[setup.speed];
   return { match, toss };
@@ -385,12 +413,13 @@ export const useGame = create<GameState>()((set, get) => {
   };
   // Building a match (squads, AI, 24 skinned players) takes a moment: show the
   // loading screen first, then build it once that has been painted.
-  const begin = (seed: string, decided?: { battingFirst: SideId; toss: string }) => {
+  const begin = (seed: string, decided?: { battingFirst: SideId; toss: string }, restore?: SavedMatch['state']) => {
     const ticket = ++pendingStart;
     set({ warming: true });
     afterPaint(() => {
       if (ticket !== pendingStart) return;
-      const { match, toss } = createMatch(get().setup, seed, decided);
+      const { match, toss } = createMatch(get().setup, seed, decided, restore ? undefined : get().practice);
+      if (restore) match.restoreState(restore);
       attach(match, toss);
     });
   };
@@ -447,6 +476,7 @@ export const useGame = create<GameState>()((set, get) => {
     // With "Toss for it", to the middle for the toss; otherwise straight to the match.
     startMatch: () => {
       sound.unlock();
+      set({ practice: undefined });
       const setup = get().setup;
       if (setup.batFirst === 'toss') {
         // To the middle for the toss first.
@@ -483,9 +513,49 @@ export const useGame = create<GameState>()((set, get) => {
       const userBats = t.userWins ? pick === 'bat' : pick === 'bowl';
       begin(t.seed, { battingFirst: userBats ? 'home' : 'away', toss: tossLine(t.userWins ? user.name : opp.name, pick) });
     },
+    saves: listSaves(),
+    practice: undefined,
+    startPractice: (id) => {
+      sound.unlock();
+      set({ practice: id });
+      begin(newSeed());
+    },
+    saveMatch: () => {
+      const m = get().match;
+      const snap = get().snap;
+      if (!m || !snap || m.phase === 'complete') return false;
+      const home = m.config.home.team;
+      const away = m.config.away.team;
+      const inn = m.current;
+      const ok = writeSave({
+        id: m.config.seed,
+        savedAt: new Date().toISOString(),
+        label: `${home.name} v ${away.name} — ${m.battingSide.team.shortName} ${inn.runs}/${inn.wickets} (${m.overs} ov)`,
+        meta: { setup: { ...get().setup }, toss: snap.toss, battingFirst: m.config.battingFirst } as unknown as SavedMatch['meta'],
+        state: m.saveState(),
+      });
+      set({ saves: listSaves() });
+      return ok;
+    },
+    loadMatch: (id) => {
+      const save = listSaves().find((s) => s.id === id);
+      if (!save) return false;
+      const meta = save.meta as unknown as { setup: MatchSetup; toss: string; battingFirst: SideId };
+      sound.unlock();
+      set({ setup: { ...DEFAULT_SETUP, ...meta.setup }, practice: undefined });
+      begin(save.id, { battingFirst: meta.battingFirst, toss: meta.toss }, save.state);
+      return true;
+    },
+    deleteSavedMatch: (id) => {
+      deleteSave(id);
+      set({ saves: listSaves() });
+    },
     rematch: () => {
       hush();
-      get().startMatch();
+      // A practice challenge: the same one again.
+      const id = get().practice;
+      if (id) get().startPractice(id);
+      else get().startMatch();
     },
     quitToMenu: () => {
       pendingStart++;

@@ -1,4 +1,5 @@
 import { useGame } from '../state/game.ts';
+import { challenge } from '../game/practice/challenges.ts';
 import { DELIVERY_TYPES } from '../game/bowling/deliveryTypes.ts';
 import { effortSpeed } from '../game/bowling/execute.ts';
 import type { BallOutcome } from '../game/session/deliveryCycle.ts';
@@ -37,6 +38,7 @@ export function Hud() {
       <Commentary />
       <ControlsPanel />
       <AutoplayControl />
+      <ChallengeCard />
       <AppealPrompt />
       <DrsPanel />
       <NextPrompt />
@@ -515,6 +517,7 @@ function Result() {
   const rematch = useGame((s) => s.rematch);
   const quit = useGame((s) => s.quitToMenu);
   if (!snap || snap.phase !== 'complete' || !match || !snap.result) return null;
+  if (snap.challenge) return <PracticeResult />;
   const userWon = snap.result.winner === 'home';
   const best = bestPerformers(match.innings);
   return (
@@ -604,6 +607,7 @@ function PauseOverlay() {
             <button type="button" className="secondary" onClick={toggleReplays}>
               Replays: {replaysOn ? 'on' : 'off'}
             </button>
+            <SaveButton />
             <button type="button" className="secondary" onClick={rematch}>
               Restart match
             </button>
@@ -1037,6 +1041,67 @@ function AutoplayControl() {
 }
 
 // --- Between balls ------------------------------------------------------------------------
+
+/** Practice: the challenge and how it is going, top centre. */
+function ChallengeCard() {
+  const snap = useGame((s) => s.snap);
+  const c = snap?.challenge;
+  if (!snap || !c || snap.phase === 'complete') return null;
+  const def = challenge(c.id);
+  return (
+    <div className={`challenge-card ${c.status.state}`} data-testid="challenge" data-state={c.status.state} role="status">
+      <strong>{def.name}</strong>
+      <span>{c.status.progress}</span>
+    </div>
+  );
+}
+
+function PracticeResult() {
+  const snap = useGame((s) => s.snap);
+  const rematch = useGame((s) => s.rematch);
+  const quit = useGame((s) => s.quitToMenu);
+  const c = snap?.challenge;
+  if (!snap || !c) return null;
+  const def = challenge(c.id);
+  const won = c.status.state === 'won';
+  return (
+    <div className="overlay" role="dialog" aria-label="Practice result" data-testid="practice-result">
+      <div className="panel">
+        <h2 className={`result-title ${won ? 'won' : 'lost'}`}>{won ? 'Challenge complete!' : 'Not this time'}</h2>
+        <p>
+          <strong>{def.name}.</strong> {def.goal}
+        </p>
+        <p className="dim">{c.status.progress}</p>
+        <div className="buttons row">
+          <button type="button" onClick={rematch} autoFocus data-testid="practice-again">
+            {won ? 'Play it again' : 'Try again'}
+          </button>
+          <button type="button" className="secondary" onClick={quit}>
+            Main menu
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Save the match from the pause menu (as it stood before the ball in play, if one is). */
+function SaveButton() {
+  const save = useGame((s) => s.saveMatch);
+  const midBall = useGame((s) => s.snap?.phase === 'delivery' || s.snap?.phase === 'appeal' || s.snap?.phase === 'drs');
+  const [state, setState] = useState<'idle' | 'saved' | 'failed'>('idle');
+  return (
+    <button type="button" className="secondary" onClick={() => setState(save() ? 'saved' : 'failed')} data-testid="save-match" aria-live="polite">
+      {state === 'saved'
+        ? 'Saved — continue it from the main menu'
+        : state === 'failed'
+          ? 'Could not save (browser storage unavailable)'
+          : midBall
+            ? 'Save match (from the start of this ball)'
+            : 'Save match'}
+    </button>
+  );
+}
 
 /** "Next ball" prompt while the game waits after an ordinary ball. */
 function NextPrompt() {

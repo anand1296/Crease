@@ -7,6 +7,7 @@ import type { ContactResult } from '../batting/contact.ts';
 import { powerScale, timingScale } from '../batting/form.ts';
 import { SHOTS, type ShotAttempt } from '../batting/shots.ts';
 import { type DeliveryPlan, type ExecutedDelivery, executeDelivery } from '../bowling/execute.ts';
+import type { DeliveryTypeId } from '../bowling/deliveryTypes.ts';
 import { runUpFor } from '../bowling/runUp.ts';
 import { type Fielder, type FieldingPlan, RUN, fielderReaction, fielderSpeed, planFielding } from '../fielding/plan.ts';
 import { type Player, offSideSign } from '../model/player.ts';
@@ -44,7 +45,17 @@ export interface BallOutcome {
   readonly contact?: ContactResult;
   /** Timing of the stroke in milliseconds (positive = late), if a stroke was played. */
   readonly timingMs?: number;
-  readonly delivery: { readonly name: string; readonly speedKph: number; readonly line: number; readonly length?: number };
+  readonly delivery: {
+    readonly name: string;
+    readonly type?: DeliveryTypeId;
+    readonly speedKph: number;
+    /** Across the stumps (x) where it passed them, and how high. */
+    readonly line: number;
+    readonly height?: number;
+    /** Where it pitched (world z and x), if it did. */
+    readonly length?: number;
+    readonly pitchX?: number;
+  };
   /** An lbw appeal: the on-field decision and the ball tracking, for a review. */
   readonly appeal?: { readonly onField: Decision; readonly tracking: LbwTracking };
   /** Set when the decision was reviewed: by whom (team short name) and how it came out. */
@@ -603,9 +614,11 @@ export class DeliveryCycle {
       ...(r.appeal && !noBall ? { appeal: r.appeal } : {}),
       delivery: {
         name: d.type.name,
+        type: d.type.id,
         speedKph: d.releaseSpeedKph,
         line: d.actual.atStumps?.x ?? 0,
-        ...(d.actual.pitch ? { length: d.actual.pitch.z } : {}),
+        ...(d.actual.atStumps ? { height: d.actual.atStumps.y } : {}),
+        ...(d.actual.pitch ? { length: d.actual.pitch.z, pitchX: d.actual.pitch.x } : {}),
       },
     };
     this.phase = 'dead';

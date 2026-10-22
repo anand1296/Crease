@@ -6,7 +6,7 @@ import type { Team } from '../data/teams.ts';
 import { COIN_RADIUS, COIN_SETTLED, COIN_THICKNESS, coinAt, flightTime } from '../match/toss.ts';
 import { type HumanoidHandle, type Kit, type Pose, neutralPose } from './rig/Humanoid.tsx';
 import { Cricketer } from './rig/Cricketer.tsx';
-import { avatarFor, teamKit, toneFor } from './rig/kits.ts';
+import { avatarFor, groomingFor, teamKit, toneFor } from './rig/kits.ts';
 import { resetPose } from './rig/motion.ts';
 import { exposeDebug } from '../debug.ts';
 
@@ -297,6 +297,7 @@ function TossScene({ toss, user, opponent }: { toss: TossState; user: Team; oppo
         <Cricketer
           kit={kits[0] ?? REFEREE_KIT}
           avatar={avatarFor(userCaptain.id)}
+          grooming={groomingFor(userCaptain.id)}
           tone={toneFor(userCaptain.id)}
           ref={(h) => {
             people.current[0] = h;
@@ -307,6 +308,7 @@ function TossScene({ toss, user, opponent }: { toss: TossState; user: Team; oppo
         <Cricketer
           kit={kits[1] ?? REFEREE_KIT}
           avatar={avatarFor(oppCaptain.id)}
+          grooming={groomingFor(oppCaptain.id)}
           tone={toneFor(oppCaptain.id)}
           ref={(h) => {
             people.current[1] = h;

@@ -18,8 +18,9 @@ import { Cricketer } from './rig/Cricketer.tsx';
 import { Stumps, type WicketHandle } from './Stumps.tsx';
 import { type ReplayKind, ReplayRecorder, replayVectors, restorePose } from './replay.ts';
 import { warmUp } from './warmup.ts';
+import { MARKER_RADIUS, markerFor } from '../practice/challenges.ts';
 import { TossView } from './TossView.tsx';
-import { avatarFor, teamKit, toneFor } from './rig/kits.ts';
+import { avatarFor, groomingFor, teamKit, toneFor } from './rig/kits.ts';
 import { type Shot, WIDE, direct } from './camera/director.ts';
 import { type ActionKind, THROW_SPAN, actionSpan, battingStance, bowlingAction, gait, gather, keeperStance, pickUp, pointField, polishBall, raiseBat, readyStance, resetPose, takeGuard, throwAction } from './rig/motion.ts';
 import { type RunUp, runUpFor } from '../bowling/runUp.ts';
@@ -158,6 +159,10 @@ function Driver({ match, recorder }: { match: Match; recorder: ReplayRecorder })
         balls: () => match.history.length,
         score: () => ({ runs: match.current.runs, wickets: match.current.wickets, balls: match.current.balls }),
         lastHeadline: () => match.lastOutcome?.headline,
+        // Tests: run the simulation on by this many seconds without drawing (waits for the player still wait).
+        advance: (seconds: number) => {
+          for (let i = 0; i < seconds * 240 && match.phase !== 'complete'; i++) match.step(1 / 240);
+        },
         drsTime: () => match.drs?.t,
         setSpeed: (speed: number) => {
           match.speed = speed;
@@ -661,6 +666,7 @@ function Players({ match, recorder, bowlerHand }: { match: Match; recorder: Repl
           key={p.id}
           kit={kits.get(p.id) ?? kitFor(match, fielding.team, p, 'fielder')}
           avatar={avatarFor(p.id)}
+          grooming={groomingFor(p.id)}
           tone={toneFor(p.id)}
           ref={(h) => {
             handles.current.set(p.id, h);
@@ -704,6 +710,7 @@ function BatterSlot({ match, player, team, handles }: { match: Match; player: Pl
     <Cricketer
       kit={kit}
       avatar={avatarFor(player.id)}
+          grooming={groomingFor(player.id)}
       tone={toneFor(player.id)}
       ref={(h) => {
         handles.current.set(player.id, h);
@@ -1164,6 +1171,7 @@ function Umpires({ match, recorder }: { match: Match; recorder: ReplayRecorder }
           key={i}
           kit={UMPIRE_KIT}
           avatar={i === 0 ? 'p4' : 'p1'}
+          grooming={i === 0 ? 'beard' : 'stubble'}
           tone={i === 0 ? 0.55 : 0.2}
           ref={(h) => {
             ends.current[i] = h;
@@ -1449,6 +1457,7 @@ function Markers({ match }: { match: Match }) {
   const pitchMark = useRef<Mesh>(null);
   const target = useRef<Group>(null);
   const bands = useRef<Group>(null);
+  const goalMark = useRef<Mesh>(null);
   const mats = useMemo(
     () => ({
       ring: new MeshBasicMaterial({ color: '#ffd23f', transparent: true, depthWrite: false, toneMapped: false }),
@@ -1459,6 +1468,17 @@ function Markers({ match }: { match: Match }) {
   useEffect(() => () => Object.values(mats).forEach((m) => m.dispose()), [mats]);
   useFrame((state) => {
     const c = match.cycle;
+    // Practice at the markers: this ball's target, a gold disc on the pitch.
+    const goal = goalMark.current;
+    if (goal) {
+      const on = match.config.practice === 'targets' && match.phase !== 'complete';
+      goal.visible = on;
+      if (on) {
+        const inn = match.current;
+        const m = markerFor(inn.balls + inn.wides + inn.noBalls - (c?.phase === 'dead' ? 1 : 0), offSideSign(match.striker.battingHand) > 0 ? 1 : -1);
+        goal.position.set(m.x, 0.015, m.z);
+      }
+    }
     const pm = pitchMark.current;
     if (pm) {
       const bounce = c?.events.find((e) => e.type === 'bounce' && !e.struck);
@@ -1504,6 +1524,10 @@ function Markers({ match }: { match: Match }) {
       <mesh ref={pitchMark} rotation-x={-Math.PI / 2} visible={false} renderOrder={2}>
         <circleGeometry args={[0.09, 20]} />
         <meshBasicMaterial color="#4a2f14" transparent opacity={0.75} depthWrite={false} />
+      </mesh>
+      <mesh ref={goalMark} rotation-x={-Math.PI / 2} visible={false} renderOrder={2}>
+        <circleGeometry args={[MARKER_RADIUS, 40]} />
+        <meshBasicMaterial color="#e0b23a" transparent opacity={0.55} depthWrite={false} toneMapped={false} />
       </mesh>
       <group ref={target} visible={false}>
         <mesh rotation-x={-Math.PI / 2} material={mats.ring} renderOrder={3}>

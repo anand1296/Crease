@@ -72,6 +72,14 @@ The same ball again is <kbd>Space</kbd>, <kbd>Space</kbd>, <kbd>Space</kbd>.
 
 **Fielding**: when the ball is gathered and the batters are running, hold <kbd>↑</kbd> to throw to the keeper's end or <kbd>↓</kbd> to the bowler's end; let go to throw. The longer you hold, the harder the throw: the green part of the meter is quick and accurate, the red is forced and wild. A direct hit can run a batter out; if you don't throw within about a second, the fielder throws himself.
 
+### Grounds, conditions, practice and saving
+
+**Ground** and **Conditions** are chosen in the match setup (the ground behind the menu shows them): Crease Park, Lord's, the MCG, Eden Gardens or Wankhede; sunny, overcast (more swing and seam), under lights (dew in the second innings: the ball skids on and spinners can't grip it) or hot and humid.
+
+**Practice challenges** (main menu) are a single over against the computer, batting or bowling: survive the over, fifteen off it, two boundaries, a six, middle four balls; take a wicket, a tight over, two yorkers, two bouncers, two slower balls, or hit the markers on the pitch.
+
+**Saving**: *Save match* in the pause menu; *Continue a saved match* on the main menu. A save made during a ball goes back to the start of that ball.
+
 ### General
 
 **Reviews (DRS)**: when an lbw decision goes against you, press <kbd>T</kbd> within 15 seconds to review it (or <kbd>Enter</kbd> to accept it). The third umpire's ball tracking shows where the ball pitched, where it hit the pad and whether it was going on to hit the stumps; less than half the ball in line or hitting is *umpire's call*, which keeps the on-field decision (and your review). Each side has two unsuccessful reviews per innings; the scoreboard shows how many you have left.

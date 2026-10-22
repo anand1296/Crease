@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { TEAMS, type Team } from '../game/data/teams.ts';
 import { PITCHES, type PitchId } from '../game/data/pitches.ts';
+import { VENUES, VENUE_IDS, type VenueId } from '../game/data/venues.ts';
+import { WEATHER, WEATHER_IDS, type WeatherId } from '../game/data/weather.ts';
+import { CHALLENGES, completedChallenges } from '../game/practice/challenges.ts';
 import { DIFFICULTIES, type DifficultyId } from '../game/model/difficulty.ts';
 import type { GameSpeed } from '../game/match/match.ts';
 import { type XiDrop as Drop, applyDrop, checkXi } from '../game/match/squad.ts';
@@ -22,6 +25,9 @@ export function MainMenu() {
   const replaysOn = useGame((s) => s.replaysOn);
   const toggleReplays = useGame((s) => s.toggleReplays);
   const [help, setHelp] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [practice, setPractice] = useState(false);
+  const saves = useGame((s) => s.saves);
   return (
     <div className="menu-shell">
       <div className="menu-column">
@@ -30,6 +36,14 @@ export function MainMenu() {
         <nav className="menu-actions" aria-label="Main menu">
           <button type="button" className="primary" onClick={() => goTo('setup')} autoFocus data-testid="menu-play">
             Play a match
+          </button>
+          {saves.length > 0 ? (
+            <button type="button" onClick={() => setSaved(true)} data-testid="menu-continue">
+              Continue a saved match
+            </button>
+          ) : null}
+          <button type="button" onClick={() => setPractice(true)} data-testid="menu-practice">
+            Practice challenges
           </button>
           <button type="button" onClick={() => setHelp(true)}>
             How to play
@@ -49,6 +63,89 @@ export function MainMenu() {
         </nav>
       </div>
       {help ? <HowToPlay onClose={() => setHelp(false)} /> : null}
+      {saved ? <SavedMatches onClose={() => setSaved(false)} /> : null}
+      {practice ? <PracticeMenu onClose={() => setPractice(false)} /> : null}
+    </div>
+  );
+}
+
+/** Practice challenges: one over each, batting or bowling, against the teams chosen in the match setup. */
+function PracticeMenu({ onClose }: { onClose: () => void }) {
+  const start = useGame((s) => s.startPractice);
+  const setup = useGame((s) => s.setup);
+  const done = completedChallenges();
+  const group = (role: 'bat' | 'bowl') => (
+    <ul className="challenges">
+      {CHALLENGES.filter((c) => c.role === role).map((c) => (
+        <li key={c.id}>
+          <button type="button" onClick={() => start(c.id)} data-testid={`challenge-${c.id}`}>
+            <span className="challenge-name">
+              {c.name}
+              {done.has(c.id) ? <span className="tick" aria-label="completed"> ✓</span> : null}
+            </span>
+            <span className="dim small">{c.goal}</span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+  return (
+    <div className="overlay" role="dialog" aria-label="Practice challenges" data-testid="practice-menu">
+      <div className="panel wide">
+        <h2>Practice challenges</h2>
+        <p className="dim">
+          One over in the middle, {findTeam(setup.userTeamId).name} against {findTeam(setup.opponentId).name}, at {VENUES[setup.venue].name} ({WEATHER[setup.weather].name.toLowerCase()}). Change the teams, ground or conditions in the match setup.
+        </p>
+        <div className="practice-cols">
+          <section>
+            <h3>Batting</h3>
+            {group('bat')}
+          </section>
+          <section>
+            <h3>Bowling</h3>
+            {group('bowl')}
+          </section>
+        </div>
+        <button type="button" className="secondary" onClick={onClose} autoFocus>
+          Back
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** The saved matches: carry one on, or throw it away. */
+function SavedMatches({ onClose }: { onClose: () => void }) {
+  const saves = useGame((s) => s.saves);
+  const load = useGame((s) => s.loadMatch);
+  const remove = useGame((s) => s.deleteSavedMatch);
+  return (
+    <div className="overlay" role="dialog" aria-label="Saved matches" data-testid="saved-matches">
+      <div className="panel">
+        <h2>Saved matches</h2>
+        {saves.length === 0 ? <p className="dim">No saved matches. Save one from the pause menu during a match.</p> : null}
+        <ul className="saves">
+          {saves.map((s) => (
+            <li key={s.id}>
+              <div>
+                <strong>{s.label}</strong>
+                <span className="dim small">Saved {new Date(s.savedAt).toLocaleString()}</span>
+              </div>
+              <div className="save-actions">
+                <button type="button" onClick={() => load(s.id)} data-testid="load-save">
+                  Continue
+                </button>
+                <button type="button" className="secondary" onClick={() => remove(s.id)}>
+                  Delete
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <button type="button" className="secondary" onClick={onClose} autoFocus>
+          Back
+        </button>
+      </div>
     </div>
   );
 }
@@ -156,6 +253,20 @@ export function MatchSetup() {
             onChange={(pitch) => update({ pitch })}
             render={(p) => PITCHES[p].name}
           />
+          <Segmented<VenueId>
+            label="Ground"
+            value={setup.venue}
+            options={VENUE_IDS}
+            onChange={(venue) => update({ venue })}
+            render={(v) => VENUES[v].name}
+          />
+          <Segmented<WeatherId>
+            label="Conditions"
+            value={setup.weather}
+            options={WEATHER_IDS}
+            onChange={(weather) => update({ weather })}
+            render={(w) => WEATHER[w].name}
+          />
           <Segmented<BatFirst>
             label="First innings"
             value={setup.batFirst}
@@ -171,7 +282,12 @@ export function MatchSetup() {
             render={(v) => (v === 'relaxed' ? 'Relaxed' : v === 'normal' ? 'Normal' : 'Real time')}
           />
         </div>
-        <p className="pitch-note">{PITCHES[setup.pitch].description}</p>
+        <p className="pitch-note">
+          {PITCHES[setup.pitch].description} {WEATHER[setup.weather].blurb}
+        </p>
+        <p className="pitch-note dim" data-testid="venue-note">
+          {VENUES[setup.venue].name}, {VENUES[setup.venue].city}: {VENUES[setup.venue].blurb}
+        </p>
 
         <footer className="board-foot">
           <button type="button" onClick={() => goTo('squad')} data-testid="choose-xi">
@@ -480,6 +596,11 @@ export function HowToPlay({ onClose }: { onClose: () => void }) {
         <p>
           When your fielder has the ball and the batters are running, hold <kbd>↑</kbd> to throw to the keeper or <kbd>↓</kbd> to the
           bowler, and let go to throw. Green is quick and accurate; red is forced and wild. Hit the stumps and they may be run out.
+        </p>
+        <h2>Practice and saving</h2>
+        <p>
+          <strong>Practice challenges</strong> on the main menu are one over each, batting or bowling. <strong>Save match</strong> in the pause
+          menu keeps the match in this browser; <strong>Continue a saved match</strong> picks it up again.
         </p>
         <h2>Autoplay and the toss</h2>
         <p>

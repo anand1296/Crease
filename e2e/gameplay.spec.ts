@@ -93,7 +93,18 @@ test.describe('gameplay', () => {
       // Call a run if the ball was hit; harmless otherwise.
       await page.waitForTimeout(250);
       await page.keyboard.press('Space');
-      await expect.poll(() => balls(page), { timeout: 90_000 }).toBe(i + 1);
+      // An lbw appeal can bring a review, which takes a while at software-rendering speed: speed it up.
+      await expect
+        .poll(
+          async () => {
+            const ph = await page.evaluate(() => window.__crease?.phase?.());
+            if (ph === 'appeal' || ph === 'drs') await page.evaluate(() => window.__crease?.setSpeed?.(4));
+            return balls(page);
+          },
+          { timeout: 240_000 },
+        )
+        .toBe(i + 1);
+      await page.evaluate(() => window.__crease?.setSpeed?.(1));
       await expect(page.getByTestId('banner')).toBeVisible();
       // After every ball the game waits for a key press (a wicket or over end shows a card).
       await expect.poll(() => page.evaluate(() => window.__crease?.phase?.()), { timeout: 90_000 }).toBe('review');
@@ -110,7 +121,9 @@ test.describe('gameplay', () => {
     expect(await page.evaluate(() => window.__crease?.renderInfo?.().programs)).toBe(programs);
 
     // Autoplay: Y hands the rest of the over to the computer; it plays on without waiting, until Y takes it back.
-    await expect(page.getByTestId('autoplay')).toHaveAttribute('data-mode', 'off');
+    // (A replay hides the buttons: skip it if one is playing.)
+    if (await page.getByTestId('replay').isVisible()) await page.keyboard.press('Enter');
+    await expect(page.getByTestId('autoplay')).toHaveAttribute('data-mode', 'off', { timeout: 30_000 });
     const before = await balls(page);
     await page.keyboard.press('KeyY');
     await expect(page.getByTestId('autoplay')).toHaveAttribute('data-mode', 'over');
@@ -175,6 +188,10 @@ test.describe('gameplay', () => {
     await page.getByTestId('menu-play').click();
     await page.getByRole('button', { name: '2', exact: true }).click();
     await page.getByRole('button', { name: 'Toss for it' }).click();
+    // At Lord's, under cloud.
+    await page.getByRole('button', { name: "Lord's", exact: true }).click();
+    await page.getByRole('button', { name: 'Overcast', exact: true }).click();
+    await expect(page.getByTestId('venue-note')).toContainText('Pavilion');
     await page.getByTestId('start-match').click();
     const toss = page.getByTestId('toss');
     await expect(toss).toHaveAttribute('data-stage', 'call');
@@ -247,4 +264,58 @@ test.describe('gameplay', () => {
     expect(errors).toEqual([]);
   });
 
+  test('save a match from the pause menu, quit, and carry it on from the main menu', async ({ page }) => {
+    const errors: string[] = [];
+    await ready(page, errors);
+    await page.getByTestId('menu-play').click();
+    await page.getByRole('button', { name: '2', exact: true }).click();
+    await page.getByRole('button', { name: 'We bat' }).click();
+    await page.getByRole('button', { name: 'Under lights', exact: true }).click();
+    await page.getByTestId('start-match').click();
+    await takeTheField(page);
+    await page.keyboard.press('Enter');
+    // Let a ball go by (leave it), then save.
+    await expect.poll(() => page.evaluate(() => window.__crease?.ballPhase?.()), { timeout: 90_000 }).toBe('inFlight');
+    await page.keyboard.press('KeyA');
+    await expect.poll(() => balls(page), { timeout: 120_000 }).toBe(1);
+    const before = await page.evaluate(() => window.__crease?.score?.());
+    await page.keyboard.press('KeyP');
+    await page.getByTestId('save-match').click();
+    await expect(page.getByTestId('save-match')).toContainText('Saved');
+    await page.getByRole('button', { name: 'Quit to main menu' }).click();
+    await page.getByTestId('menu-continue').click();
+    await expect(page.getByTestId('saved-matches')).toContainText('India v Pakistan');
+    await page.getByTestId('load-save').first().click();
+    await takeTheField(page);
+    // Back where it was: the same score and balls, waiting for the player.
+    await expect(page.getByTestId('review')).toBeVisible();
+    expect(await page.evaluate(() => window.__crease?.score?.())).toEqual(before);
+    await expect(page.getByTestId('role')).toContainText('You are batting');
+    expect(errors).toEqual([]);
+  });
+  test('practice: a challenge from the main menu, its progress, and the result', async ({ page }) => {
+    const errors: string[] = [];
+    await ready(page, errors);
+    await page.getByTestId('menu-practice').click();
+    await expect(page.getByTestId('practice-menu')).toContainText('Hit the markers');
+    await page.getByTestId('challenge-survive').click();
+    await takeTheField(page);
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('challenge')).toContainText('Survive the over');
+    await expect(page.getByTestId('challenge')).toContainText('6 balls left');
+    // Let the computer bat it out, quickly.
+    await page.keyboard.press('KeyU');
+    // Run the over on without drawing every frame (software rendering manages about a ball a minute).
+    await expect
+      .poll(
+        async () => {
+          await page.evaluate(() => window.__crease?.advance?.(4));
+          return page.getByTestId('practice-result').isVisible();
+        },
+        { timeout: 300_000 },
+      )
+      .toBe(true);
+    await expect(page.getByTestId('practice-result')).toContainText(/Challenge complete|Not this time/);
+    expect(errors).toEqual([]);
+  });
 });

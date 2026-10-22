@@ -59,6 +59,10 @@ Simulation (core, physics,        deterministic TypeScript — no React or three
 | `game/scenes/rig/avatarRig.ts` | Drives the model's skeleton from a motion-capture clip or by retargeting the control skeleton (bind-pose corrections, spine distribution, head look-at, model-side arm IK, finger grip), cross-fading between sources |
 | `game/scenes/rig/avatarAssets.ts` | Asset URLs and the clip library loader |
 | `game/scenes/camera/director.ts` | The broadcast director: which shot is on air and its framing, as a pure function of the ball's state (unit-tested); `frameBetween` tilts and zooms a fixed camera to keep two points (the running bowler, the batter) in frame |
+| `game/data/venues.ts`, `game/data/weather.ts` | Grounds (stands, roof, lights, landmarks) and conditions (swing, seam, grip, dew; sky and light) |
+| `game/scenes/Landmarks.tsx`, `game/scenes/SkyDome.tsx` | Lord's Pavilion and Media Centre, tents, canopies, trees; night sky and cloud cover |
+| `game/match/save.ts` | Saving and loading a match (generic state encoding, per-ball checkpoints, browser save slots) |
+| `game/practice/challenges.ts` | Practice challenges: one over with a goal, judged from the ball-by-ball record |
 | `game/match/toss.ts` | The toss: the coin's face from the seed, the computer captain's choice, and the coin's flight (pure, unit-tested) |
 | `game/scenes/TossView.tsx` | The toss scene: captains and referee on the pitch, the flicked coin, the toss cameras |
 | `game/scenes/rig/kits.ts` | Kits, models and skin tones for players (shared by the match and the toss) |

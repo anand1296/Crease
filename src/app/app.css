@@ -2614,3 +2614,107 @@ kbd.k.on {
   color: #8cc6ec;
   font: 600 11px/1.5 var(--display);
 }
+
+/* --- Saved matches ---------------------------------------------------------------------- */
+
+.saves {
+  list-style: none;
+  margin: 12px 0 16px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  text-align: left;
+}
+
+.saves li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 4px;
+  background: rgba(241, 238, 227, 0.06);
+}
+
+.saves li > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.save-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* --- Practice ------------------------------------------------------------------------------ */
+
+.challenge-card {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  gap: 2px;
+  padding: 8px 18px;
+  border-radius: 4px;
+  background: var(--glass);
+  border-bottom: 3px solid var(--brass);
+  color: var(--chalk);
+  text-align: center;
+  font: 600 16px var(--display);
+}
+
+.challenge-card span {
+  color: var(--chalk-dim);
+  font: 500 14px var(--body);
+}
+
+.challenge-card.won {
+  border-bottom-color: var(--good);
+}
+
+.challenge-card.lost {
+  border-bottom-color: var(--bad);
+}
+
+.practice-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin: 12px 0 16px;
+  text-align: left;
+}
+
+.challenges {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.challenges button {
+  width: 100%;
+  display: grid;
+  gap: 2px;
+  padding: 8px 12px;
+  text-align: left;
+  border-radius: 4px;
+  border: 1px solid rgba(241, 238, 227, 0.14);
+  background: rgba(241, 238, 227, 0.04);
+  color: var(--chalk);
+  cursor: pointer;
+}
+
+.challenges button:hover,
+.challenges button:focus-visible {
+  border-color: var(--brass);
+}
+
+.challenge-name {
+  font: 600 17px var(--display);
+}
+
+.challenge-name .tick {
+  color: var(--good);
+}

@@ -1,4 +1,8 @@
 import { FixedStepClock } from '../core/fixedStep.ts';
+import { type WeatherId, pitchInConditions } from '../data/weather.ts';
+import { decodeInto, encodeSnapshot, playersOf, snapshotMatch } from './save.ts';
+import { type ChallengeId, type ChallengeStatus, challenge, markCompleted } from '../practice/challenges.ts';
+import type { VenueId } from '../data/venues.ts';
 import { Rng } from '../core/rng.ts';
 import { BOWLER_FOLLOW_THROUGH, STANDARD_FIELD } from '../data/fieldPositions.ts';
 import { AdaptiveBowling, ballReward } from '../ai/adaptiveBowling.ts';
@@ -18,7 +22,7 @@ import { type FieldPreset, findPreset, legalPresets } from '../fielding/presets.
 import { fatigueAfterBall, fatigueAfterRest } from '../bowling/fatigue.ts';
 import { type Fielder, buildField, rebuildField } from '../fielding/plan.ts';
 import { DIFFICULTIES, type DifficultyId } from '../model/difficulty.ts';
-import { type Player, isSpinner } from '../model/player.ts';
+import { type Player, isSpinner, offSideSign } from '../model/player.ts';
 import { type BallOutcome, DeliveryCycle, type WicketKind } from '../session/deliveryCycle.ts';
 import { type Decision, type LbwTracking, REVIEWS_PER_INNINGS, REVIEW_WINDOW, type ReviewResult, review, reviewConfidence } from '../simulation/tracking.ts';
 
@@ -51,6 +55,12 @@ export interface MatchConfig {
   readonly pitch: PitchId;
   readonly difficulty: DifficultyId;
   readonly seed: string;
+  /** Conditions (default sunny): swing, seam and grip, and dew in the second innings under lights. */
+  readonly weather?: WeatherId;
+  /** The ground (only how it looks). */
+  readonly venue?: VenueId;
+  /** A practice challenge: one innings of one over, ending as soon as it is won or lost. */
+  readonly practice?: ChallengeId;
 }
 
 export interface Dismissal {
@@ -881,6 +891,11 @@ export class Match {
     this.recent = [];
     this.fieldPreset = 'auto';
     this.bowlerId = this.suggestedBowler().id;
+    // Practice against the quicks: the fastest bowler in the side opens.
+    if (this.config.practice === 'survive') {
+      const pace = this.bowlingSide.xi.filter((p) => p.bowlingStyle === 'fast' || p.bowlingStyle === 'fastMedium').sort((a, b) => b.bowling.pace - a.bowling.pace)[0];
+      if (pace) this.bowlerId = pace.id;
+    }
     this.reviewsLeft = { home: REVIEWS_PER_INNINGS, away: REVIEWS_PER_INNINGS };
     this.appeal = undefined;
     this.drs = undefined;
@@ -892,7 +907,35 @@ export class Match {
     this.emit();
   }
 
+  /** The state at the start of the current ball, for a save made during it. */
+  private checkpoint: Record<string, unknown> | undefined;
+
+  /**
+   * The match as it can be saved: as it is now between balls, or as it stood
+   * at the start of the ball in play (which is then bowled again on loading).
+   */
+  saveState(): ReturnType<typeof encodeSnapshot> {
+    // The ball is over and scored: finish with it (strike, the next batter, the end of the over) and save after it.
+    if (this.phase === 'delivery' && this.cycle?.phase === 'dead' && this.cycle.outcome && this.lastOutcome === this.cycle.outcome) this.afterBall();
+    const mid = this.phase === 'delivery' || this.phase === 'appeal' || this.phase === 'drs';
+    return encodeSnapshot(mid && this.checkpoint ? this.checkpoint : snapshotMatch(this));
+  }
+
+  /** Restores a saved state (into a match built from the same configuration); play resumes before the next ball. */
+  restoreState(state: ReturnType<typeof encodeSnapshot>): void {
+    decodeInto(this, state, playersOf(this.config.home.team, this.config.away.team));
+    this.cycle = undefined;
+    this.appeal = undefined;
+    this.drs = undefined;
+    this.clock.reset();
+    // A saved ball in play starts again; a human gets a moment to get ready.
+    if (this.phase === 'delivery' || this.phase === 'appeal' || this.phase === 'drs') this.phase = 'between';
+    if (this.phase === 'between' && this.humanInvolved) this.waitForStart();
+    this.emit();
+  }
+
   private beginBall(): void {
+    this.checkpoint = snapshotMatch(this);
     this.updateAutoplay();
     if (this.humanBowling) {
       // A new over (or innings): the human captain chooses the bowler. Each ball starts by choosing
@@ -935,7 +978,7 @@ export class Match {
       striker: this.striker,
       nonStriker: this.nonStriker,
       field: this.buildField(bowler),
-      pitch: PITCHES[this.config.pitch],
+      pitch: pitchInConditions(PITCHES[this.config.pitch], this.config.weather ?? 'sunny', this.innings.length - 1),
       plan,
       fatigue: this.bowlerFatigue,
       rng: this.rng.fork(`ball-${this.ballNumber}`),
@@ -1287,9 +1330,37 @@ export class Match {
     else this.nonStrikerIndex = incoming;
   }
 
+  /** The practice challenge's progress (practice matches only). */
+  get challengeStatus(): ChallengeStatus | undefined {
+    const id = this.config.practice;
+    if (!id) return undefined;
+    const inn = this.current;
+    const balls = this.history.slice(this.history.length - this.inningsBallCount());
+    const over = inn.balls >= this.config.overs * 6;
+    return challenge(id).check(balls, over, offSideSign(this.striker.battingHand) > 0 ? 1 : -1);
+  }
+
+  /** How many entries of the history (extras included) belong to this innings. */
+  private inningsBallCount(): number {
+    const inn = this.current;
+    return inn.balls + inn.wides + inn.noBalls;
+  }
+
   private inningsOver(): boolean {
     const inn = this.current;
     const total = this.config.overs * 6;
+    // Practice: over as soon as the challenge is decided.
+    const status = this.challengeStatus;
+    if (status && (status.state !== 'on' || inn.balls >= total || inn.wickets >= 10)) {
+      this.innings[this.innings.length - 1] = { ...inn, endReason: inn.balls >= total ? 'overs' : 'target' };
+      this.endAutoplay();
+      const won = status.state === 'won';
+      this.result = { tie: false, margin: '', summary: won ? 'Challenge complete!' : 'Challenge failed' };
+      this.phase = 'complete';
+      if (won && this.config.practice) markCompleted(this.config.practice);
+      this.emit();
+      return true;
+    }
     let reason: InningsState['endReason'];
     if (inn.target !== undefined && inn.runs >= inn.target) reason = 'target';
     else if (inn.wickets >= 10 || this.nextIndex > this.battingSide.xi.length) reason = 'allOut';

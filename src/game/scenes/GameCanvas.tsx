@@ -9,12 +9,12 @@ import { useGame } from '../../state/game.ts';
 import { preloadCricketers } from './rig/Cricketer.tsx';
 import { FrameBudget } from './FrameBudget.tsx';
 import { exposeDebug } from '../debug.ts';
+import { WEATHER } from '../data/weather.ts';
+import { CloudDome, NightSky } from './SkyDome.tsx';
 
 // Start fetching the player models while the menus are up.
 preloadCricketers();
 
-/** Late-afternoon sun: long enough shadows to read the players' shapes. */
-const SUN: [number, number, number] = [42, 40, -34];
 
 /** Calls `onReady` once, after the first frame has actually been rendered. */
 function FirstFrame({ onReady }: { onReady: () => void }) {
@@ -33,9 +33,9 @@ function FirstFrame({ onReady }: { onReady: () => void }) {
  * from the grass below), so skin, kit and bat pick up believable fill and
  * reflections.
  */
-function Lighting() {
+function Lighting({ intensity }: { intensity: number }) {
   return (
-    <Environment frames={1} resolution={128} environmentIntensity={0.55}>
+    <Environment frames={1} resolution={128} environmentIntensity={0.55 * intensity}>
       <Lightformer form="rect" intensity={1.6} color="#dcebff" position={[0, 60, 0]} rotation-x={Math.PI / 2} scale={[200, 200, 1]} />
       <Lightformer form="rect" intensity={1.2} color="#ffe9c7" position={[60, 25, -50]} scale={[60, 30, 1]} target={[0, 0, 0]} />
       <Lightformer form="rect" intensity={0.5} color="#5f8f45" position={[0, -10, 0]} rotation-x={-Math.PI / 2} scale={[200, 200, 1]} />
@@ -59,9 +59,15 @@ function useLive(): boolean {
 /** Draws one more frame whenever the view stops being live, so it shows the latest state. */
 function Invalidator({ live }: { live: boolean }) {
   const invalidate = useThree((s) => s.invalidate);
+  // The ground and the conditions chosen in the setup show at once behind it.
+  const venue = useGame((s) => s.setup.venue);
+  const weather = useGame((s) => s.setup.weather);
   useEffect(() => {
     invalidate();
-  }, [live, invalidate]);
+    // Textures and models take a frame or two to appear.
+    const id = setTimeout(invalidate, 300);
+    return () => clearTimeout(id);
+  }, [live, invalidate, venue, weather]);
   return null;
 }
 
@@ -101,6 +107,10 @@ export function GameCanvas({ onReady }: { onReady: () => void }) {
   const high = quality === 'high';
   const device = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1;
   const dpr = (high ? Math.min(device, 1.5) : 1) * (DPR_SCALE[perf] ?? 1);
+  // The conditions: the match's, or those being chosen in the setup (the ground behind the menus shows them).
+  const weatherId = useGame((s) => s.match?.config.weather ?? s.setup.weather);
+  const look = (WEATHER[weatherId] ?? WEATHER.sunny).look;
+  const sun: [number, number, number] = [look.sun[0], look.sun[1], look.sun[2]];
   return (
     <Canvas
       key={quality}
@@ -117,14 +127,19 @@ export function GameCanvas({ onReady }: { onReady: () => void }) {
       camera={{ fov: 15, near: 0.5, far: 900, position: [0, 12.5, -55] }}
       gl={{ antialias: !high, powerPreference: 'high-performance' }}
     >
-      <fog attach="fog" args={['#c9dbe9', 180, 520]} />
-      <Sky distance={600} sunPosition={SUN} turbidity={5} rayleigh={1.1} mieCoefficient={0.004} mieDirectionalG={0.82} />
-      {high ? <Lighting /> : null}
-      <hemisphereLight args={['#eaf3ff', '#4a6b3c', high ? 0.45 : 0.85]} />
+      <fog attach="fog" args={[look.fog.color, look.fog.near, look.fog.far]} />
+      {look.night ? (
+        <NightSky />
+      ) : (
+        <Sky distance={600} sunPosition={sun} turbidity={look.sky.turbidity} rayleigh={look.sky.rayleigh} mieCoefficient={look.sky.mie} mieDirectionalG={0.82} />
+      )}
+      {look.cloud > 0.05 ? <CloudDome cover={look.cloud} night={look.night} /> : null}
+      {high ? <Lighting key={weatherId} intensity={look.night ? 0.45 : look.cloud > 0.8 ? 0.8 : 1} /> : null}
+      <hemisphereLight args={[look.hemi.sky, look.hemi.ground, (high ? 0.45 : 0.85) * look.hemi.intensity]} />
       <directionalLight
-        position={SUN}
-        intensity={high ? 2.6 : 2.1}
-        color="#fff4e2"
+        position={sun}
+        intensity={(high ? 2.6 : 2.1) * look.sunIntensity}
+        color={look.sunColor}
         castShadow={high}
         shadow-mapSize={[2048, 2048]}
         shadow-camera-left={-38}
@@ -136,6 +151,14 @@ export function GameCanvas({ onReady }: { onReady: () => void }) {
         shadow-bias={-0.0003}
         shadow-normalBias={0.02}
       />
+      {/* Under lights: the other towers fill in from every side. */}
+      {look.night
+        ? [
+            [-40, 60, 40],
+            [40, 60, 40],
+            [-40, 60, -40],
+          ].map((p, i) => <directionalLight key={i} position={p as [number, number, number]} intensity={high ? 0.6 : 0.5} color="#eef2ff" />)
+        : null}
       <Ground />
       <Stadium crowd={high} />
       <MatchView />

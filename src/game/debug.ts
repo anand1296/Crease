@@ -15,6 +15,8 @@ export interface CreaseDebug {
   /** Total runs and wickets. */
   score?: () => { runs: number; wickets: number; balls: number };
   lastHeadline?: () => string | undefined;
+  /** Runs the simulation on by this many seconds without drawing. */
+  advance?: (seconds: number) => void;
   /** Slows or speeds the simulation (tests and frame-by-frame captures only). */
   setSpeed?: (speed: number) => void;
   /** Pins the camera (tests and close-up captures only); undefined releases it. */

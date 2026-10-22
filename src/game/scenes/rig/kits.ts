@@ -2,6 +2,7 @@ import type { Team } from '../../data/teams.ts';
 import { kitColors } from '../../data/teams.ts';
 import { AVATARS, type AvatarId } from './avatarAssets.ts';
 import type { Kit } from './Humanoid.tsx';
+import type { Grooming } from './Cricketer.tsx';
 
 /** How each player looks: kit from his team's colours, and a model and skin tone fixed by his id. */
 
@@ -40,4 +41,10 @@ export function teamKit(team: Team, opponent: Team, home: boolean, playerId: str
     pads: role === 'batter' || role === 'keeper',
     gloves: role === 'batter' ? 'batting' : role === 'keeper' ? 'keeping' : 'none',
   };
+}
+
+/** Facial hair, fixed per player: most clean-shaven or stubbled, some with a moustache or a beard. */
+export function groomingFor(id: string): Grooming {
+  const k = Math.abs(hash(`${id}:face`)) % 20;
+  return k < 8 ? 'clean' : k < 13 ? 'stubble' : k < 16 ? 'moustache' : 'beard';
 }

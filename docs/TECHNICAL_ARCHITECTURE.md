@@ -4,11 +4,11 @@
 
 | | |
 | --- | --- |
-| Version | 0.11.0 (October 2026) |
+| Version | 0.12.0 (October 2026) |
 | Repository | https://github.com/anand1296/Crease |
 | Hosting | Vercel (static site, Git-integrated: every push to `main` deploys; pull requests get previews) |
 | Stack | TypeScript (strict) · React 19 · Three.js r180 via React Three Fiber 9 · Vite 7 · Zustand 5 · Vitest 3 · Playwright |
-| Size | ≈16,900 lines of application TypeScript, ≈2,300 lines of unit and simulation tests (172 tests), 5 browser tests |
+| Size | ≈18,500 lines of application TypeScript, ≈2,500 lines of unit and simulation tests (185 tests), 7 browser tests |
 | Backend | None. Everything — physics, AI, commentary, audio — runs in the player's browser |
 
 Companion documents: [README](../README.md) (running and playing), [GAME_DESIGN](../GAME_DESIGN.md) (rules and the simulation's numbers), [ARCHITECTURE](../ARCHITECTURE.md) (module summary), [CHANGELOG](../CHANGELOG.md), [batting report](batting-report.md).
@@ -63,6 +63,7 @@ Crease was built in vertical slices, each of which was playable, tested, documen
 | 0.6.0 | 22 Oct 2026 | Game AI: learning bowling attack, AI captain with fielding restrictions, field-aware T20 batting, spoken commentary, coach |
 | 0.7.0–0.9.0 | 22 Oct 2026 | Match flow and replays; smoothness (shader warm-up, adaptive quality); bowling overhaul (three-step bowling, real actions, field presets); Cricket 07 batting, fielding throws, broadcast cameras |
 | 0.10.0 | 23 Oct 2026 | Run-up framed on the bowler, autoplay (over or innings), the toss in 3D |
+| 0.12.0 | 23 Oct 2026 | Grounds (Lord's, MCG, Eden Gardens, Wankhede) and weather with physical effects, practice challenges, save and load, helmets with grilles, facial hair |
 | 0.11.0 | 23 Oct 2026 | Shots all round the ground, drag-and-drop XI, pause scorecard and stats, confidence and stamina, lbw ball tracking and DRS, throw camera, between-ball moments and celebrations |
 
 ### Working method
@@ -361,6 +362,14 @@ Since 0.9.0 the **broadcast** style is the default and modelled on television co
 The director has two styles. **Classic** (the default since 0.7.0) is Cricket 07's framing: the camera sits about 5 m up and 27 m behind the bowler's stumps with a 30° lens, and pushes in to 3.9 m up, 17 m back with a 19° lens — high enough that the line to the striker clears the umpire's hat. **TV** is the long-lens broadcast framing (46 m back, 15° → 9.5°). <kbd>C</kbd> cycles classic → broadcast → batter's view → high wide view.
 
 **Action replays** (`scenes/replay.ts`). While a ball is live, every view writes what it drew into a per-frame record: the ball's position and visibility, every player's and umpire's pose (position, facing, limb angles, IK targets, the motion-capture clip and its time), both bats and the state of both sets of stumps. After a wicket or a boundary, the same views read frames back instead of the live match, at 0.45×, while the HUD shows a REPLAY badge. The window depends on the dismissal (from just before release to just after the stumps break for bowled and LBW; from before contact to after the catch, run-out or boundary otherwise), and so does the camera: square-on at the striker's stumps for bowled and LBW; behind the striker for the rest, rising with a lofted ball but aiming below it so the frame keeps the ground. Because it is a recording rather than a re-simulation, a replay always shows exactly what happened and costs only a few hundred numbers per frame. Enter skips; the setting is persisted.
+
+### Grounds and conditions (0.12.0)
+
+`data/venues.ts` describes each ground as data — tiers (radius, height, rows, seat colours by block, the arc they cover), roof (ring, cantilever, none), lights (towers, masts, roof banks: count, height, lean) and landmarks — and `scenes/Stadium.tsx` and `scenes/Landmarks.tsx` build it: lathes for the tiers (partial arcs where a ground has stands only on its sides), an instanced crowd seated from the same tiers, and procedural landmarks (Lord's Pavilion with a canvas-drawn brick facade, the Media Centre as a capsule on two legs, tents, canopies, instanced trees). `data/weather.ts` gives each condition its physics — multipliers on swing, seam and grip, and for night games a second-innings dew that cuts grip and friction (`pitchInConditions`, applied per innings in `Match.startCycle`) — and its look: sun direction, colour and strength, sky model parameters, hemisphere light, fog, cloud cover (a procedural cloud dome) or a night sky with stars and fill lights from the towers.
+
+### Practice and saving (0.12.0)
+
+A practice challenge (`practice/challenges.ts`) is a one-over match with `config.practice` set; each challenge is a pure function from the over's ball-by-ball record to *on / won / lost* plus a progress line, and `Match.inningsOver` ends the match as soon as it is decided. Saving (`match/save.ts`) writes the match's own fields generically — players by id, Maps as entry lists, class instances (the random-number generator, the learning attack, the commentator) as their fields, poured back into fresh instances on load. A cheap copy (containers copied, immutable records shared) is taken at the start of every ball, so a save during a ball goes back to its start. A test plays a match, saves it halfway through a JSON round trip, loads it into a new match and checks both finish identically.
 
 ## 11. Audio and voice
 

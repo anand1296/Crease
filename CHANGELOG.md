@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.12.0 — Famous grounds, weather, practice challenges, saved matches, real helmets (2026-10-23)
+
+- **Grounds**: Crease Park, **Lord's** (the red-brick Pavilion with its two towers behind the bowler's end, the Media Centre pod on its two legs above the Nursery End — behind the batter on the broadcast camera, as on television — the tented Mound Stand, low white stands, plane trees, slim light masts), the **MCG** (a vast three-tier bowl under a ring roof, six tall light towers), **Eden Gardens** (blocks of coloured seats under a long cantilevered roof) and **Wankhede** (steep stands under a crown of white fabric canopies, lights along the roof). They are impressions built from simple shapes, not survey models; the playing area is the same everywhere. The ground behind the menus shows the one you pick.
+- **Conditions** change the cricket as well as the picture: *sunny* (little swing, the pitch grips for spin), *overcast* (grey skies, the ball swings and seams — about a third more), *under lights* (a night sky, glowing light towers; dew in the second innings, so the ball skids on and the spinners lose about a third of their grip) and *hot and humid* (hazy; some swing, the surface grips).
+- **Practice challenges** (main menu): one over in the middle against the computer, with the field set. Batting — survive an over from the quickest bowler, fifteen off the over, two boundaries, clear the rope, middle four balls. Bowling — take a wicket, a tight over (five or fewer), two yorkers, two bouncers, two slower balls on a length, and hit the markers (a gold disc on the pitch for every ball; land three of six on it). The over stops as soon as the challenge is won or lost; completed challenges get a tick.
+- **Save and carry on**: *Save match* in the pause menu keeps the match in this browser (as it stands between balls, or from the start of the ball in play); *Continue a saved match* on the main menu picks it up exactly where it was — scores, cards, the bowlers' overs and tiredness, the batters' form, what the computer has learnt, and the random-number state, so it plays on exactly as it would have.
+- **Helmets**: a glossy shell in a deep shade of the team colour coming down over the ears and the back of the head, a sloping peak, a crest, a steel grille of two crossbars, a chin bar and uprights in front of the face, and stem guards at the back of the neck.
+- **Faces**: skin with a soft sheen and more relief; facial hair varies by player — clean-shaven, stubble, a moustache or a beard — drawn from each face's own shape.
+- Long hair hangs down under a cap or helmet rather than sticking out from under it.
+
 ## 0.11.0 — Shots all round the ground, form and stamina, ball tracking and DRS (2026-10-23)
 
 - **Caps and hats fit**: the hair (and the top of the head) is tucked under the cap, helmet or hat instead of poking through its crown; when a bowler hands his cap to the umpire, his hair is back as it was.
