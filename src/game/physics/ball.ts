@@ -72,6 +72,15 @@ export interface BallMovement {
   spinTop: number;
   /** Per-delivery bounce variation (1 = true bounce). */
   bounceFactor: number;
+  /**
+   * Spin off the bat (struck balls only): how fast the ball's path bends on
+   * the ground, rad/s about the vertical (positive turns it anticlockwise seen
+   * from above) — the slice on a cut running away towards third man, the
+   * hook spin on a flick. A little of it acts in the air too. It dies away.
+   */
+  curl?: number;
+  /** Off the bat: topspin (+) runs on after each bounce, backspin (−) checks; fraction of the pace, halving each bounce. */
+  carry?: number;
 }
 
 export const NO_MOVEMENT: Readonly<BallMovement> = {
@@ -80,6 +89,8 @@ export const NO_MOVEMENT: Readonly<BallMovement> = {
   spinSide: 0,
   spinTop: 0,
   bounceFactor: 1,
+  curl: 0,
+  carry: 0,
 };
 
 export interface BallState {
@@ -175,6 +186,7 @@ export function stepBall(
       const scale = (speed - drop) / speed;
       v.x *= scale;
       v.z *= scale;
+      if (m.curl) curlPath(v, m, dt, Math.min(1, speed / 6));
     }
     p.x += v.x * dt;
     p.z += v.z * dt;
@@ -192,6 +204,8 @@ export function stepBall(
     ax += m.swingAccel - SPIN.driftPerRps * m.spinSide;
     ay -= SPIN.dipPerRps * m.spinTop;
   }
+  // Spin off the bat bends the path a little in the air (most of it shows on the ground).
+  if (m.curl) curlPath(v, m, dt, 0.35);
   v.x += ax * dt;
   v.y += ay * dt;
   v.z += az * dt;
@@ -224,6 +238,17 @@ export function stepBall(
   return events;
 }
 
+/** Turns the horizontal velocity by the spin off the bat over `dt` (scaled), and lets the spin die away. */
+function curlPath(v: Vec3, m: BallMovement, dt: number, scale: number): void {
+  const a = (m.curl ?? 0) * dt * scale;
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  const x = v.x;
+  v.x = x * c + v.z * s;
+  v.z = -x * s + v.z * c;
+  m.curl = (m.curl ?? 0) * Math.exp(-0.45 * dt);
+}
+
 function resolveBounce(ball: BallState, surface: SurfaceProperties, events: BallStepEvents): void {
   const v = ball.velocity;
   const m = ball.movement;
@@ -251,6 +276,13 @@ function resolveBounce(ball: BallState, surface: SurfaceProperties, events: Ball
     const keep = (h - loss) / h;
     v.x *= keep;
     v.z *= keep;
+  }
+
+  // Spin off the bat: topspin skids on, backspin checks up.
+  if (m.carry) {
+    v.x *= 1 + m.carry;
+    v.z *= 1 + m.carry;
+    m.carry *= 0.5;
   }
 
   if (firstBounce) {

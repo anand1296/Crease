@@ -597,6 +597,11 @@ export function HowToPlay({ onClose }: { onClose: () => void }) {
           When your fielder has the ball and the batters are running, hold <kbd>↑</kbd> to throw to the keeper or <kbd>↓</kbd> to the
           bowler, and let go to throw. Green is quick and accurate; red is forced and wild. Hit the stumps and they may be run out.
         </p>
+        <h2>Running, fields and the laws</h2>
+        <p>
+          After the hit, <kbd>A</kbd> sends your partner back. When bowling, <kbd>G</kbd> lets you place your own field. A no-ball brings a free
+          hit, a second bouncer in an over is a no-ball, leg byes count only off a stroke, and a tie goes to a super over.
+        </p>
         <h2>Practice and saving</h2>
         <p>
           <strong>Practice challenges</strong> on the main menu are one over each, batting or bowling. <strong>Save match</strong> in the pause

@@ -109,3 +109,50 @@ export const outsideCircle = (preset: FieldPreset): number => preset.positions.f
 export const legalPresets = (maxOutside: number): FieldPreset[] => FIELD_PRESETS.filter((p) => outsideCircle(p) <= maxOutside);
 
 export const findPreset = (id: string): FieldPreset | undefined => FIELD_PRESETS.find((p) => p.id === id);
+
+// --- The captain's own field ------------------------------------------------------------
+
+/** The usual name for a spot on the field (angle from straight, + off side; distance from the striker's stumps, m). */
+export function positionName(angleDeg: number, distance: number): string {
+  const off = angleDeg >= 0;
+  const a = Math.abs(angleDeg);
+  if (distance < 10) {
+    if (off) return a > 150 ? 'Slip' : a > 115 ? 'Gully' : a > 70 ? 'Silly point' : 'Silly mid-off';
+    return a > 150 ? 'Leg slip' : a > 115 ? 'Leg gully' : a > 70 ? 'Short leg' : 'Silly mid-on';
+  }
+  const deep = distance > CIRCLE;
+  if (a < 12) return deep ? 'Long-off' : 'Mid-off';
+  if (off) {
+    if (a < 35) return deep ? 'Long-off' : 'Mid-off';
+    if (a < 58) return deep ? 'Deep extra cover' : 'Extra cover';
+    if (a < 80) return deep ? 'Deep cover' : 'Cover';
+    if (a < 105) return deep ? 'Deep point' : 'Point';
+    if (a < 130) return deep ? 'Deep backward point' : 'Backward point';
+    return deep ? 'Third man' : 'Short third man';
+  }
+  if (a < 35) return deep ? 'Long-on' : 'Mid-on';
+  if (a < 55) return deep ? 'Cow corner' : 'Mid-on';
+  if (a < 80) return deep ? 'Deep midwicket' : 'Midwicket';
+  if (a < 105) return deep ? 'Deep square leg' : 'Square leg';
+  if (a < 135) return deep ? 'Deep backward square' : 'Backward square leg';
+  return deep ? 'Fine leg' : 'Short fine leg';
+}
+
+/** A field position from a spot on the ground (from the striker's stumps; angles + off side). */
+export function customPosition(i: number, angleDeg: number, distance: number): FieldPosition {
+  const d = Math.min(66, Math.max(4, distance));
+  return { id: `custom${i}`, name: positionName(angleDeg, d), angleDeg, distance: d };
+}
+
+/**
+ * Whether a field is legal: at most `maxOut` outside the circle (the
+ * powerplay allows two, after it five), and — Law 28.4 — no more than two
+ * fielders behind square on the leg side. Returns what is wrong, if anything.
+ */
+export function checkField(positions: readonly FieldPosition[], maxOut: number): string | undefined {
+  const out = positions.filter((p) => p.distance > CIRCLE).length;
+  if (out > maxOut) return `Only ${maxOut} fielders may be outside the circle now (you have ${out}).`;
+  const legBehind = positions.filter((p) => p.angleDeg < -90).length;
+  if (legBehind > 2) return `No more than two fielders behind square on the leg side (you have ${legBehind}).`;
+  return undefined;
+}

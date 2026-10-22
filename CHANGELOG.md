@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.13.0 — Byes, leg byes, overthrows, sending a batter back, spin off the bat, your own field, free hits, super overs (2026-10-23)
+
+- **Leg byes**: a ball that hits the pad (or body) and isn't out now runs on — glancing fine down the leg side with some pace, or dropping at his feet — and the batters can run. Leg byes count only if a stroke was offered or he was hit getting out of the way; otherwise the runs don't count. They go to the extras, not the batter or the bowler. If a review then gives it out, the leg byes are wiped.
+- **Byes**: the keeper can miss it — more often wide down the leg side, very low, very quick, or from a poorer keeper — and the ball runs on behind for byes (a wide that beats him: the runs are all wides).
+- **Overthrows**: a throw wide of the stumps with nobody backing up runs away past them; the batters can take more runs while a fielder chases it down (the ball is seen rolling away and coming back in). Headlines show them: "3 runs (2 overthrows)".
+- **Sending a batter back**: once the ball is hit, **A** calls off the run under way ("No!"). Only in the first half of the run; turning round costs a moment, and if the ball beats them back, it's a run-out.
+- **Spin off the bat**: cuts are sliced and run away finer towards third man (more when played late); flicks, glances and sweeps hook finer on the leg side; drives roll on with topspin; lofted hits carry backspin and check up; edges spin any way. It is in the ball physics, so the fielders' reading of the ball allows for it.
+- **Inside edges on to the pad**: the ball runs on off the pad, or occasionally loops up — a bat-pad catch for the close fielders.
+- **Your own field**: press **G** (or *edit* in the bowling panel) and drag any of the nine fielders anywhere; the editor names each spot the way commentators do and enforces the restrictions as you go — two outside the circle in the powerplay, five after it, and no more than two behind square on the leg side.
+- **Free hit** after a no-ball (the batter can only be run out; the computer batter swings harder), and the **one-bouncer-an-over** rule: a second bouncer is a no-ball.
+- **Super over**: a tie goes to a super over — one over each, two wickets, the side that batted second batting first — repeated if that is tied too (up to three).
+- **Hat-tricks**: two wickets in two balls and the bowler is "on a hat-trick" (a badge on the next ball, whenever it comes); a third is the HAT-TRICK.
+- Scorecards show byes and leg byes in the extras; the over summary marks them (2b, 1lb).
+
 ## 0.12.0 — Famous grounds, weather, practice challenges, saved matches, real helmets (2026-10-23)
 
 - **Grounds**: Crease Park, **Lord's** (the red-brick Pavilion with its two towers behind the bowler's end, the Media Centre pod on its two legs above the Nursery End — behind the batter on the broadcast camera, as on television — the tented Mound Stand, low white stands, plane trees, slim light masts), the **MCG** (a vast three-tier bowl under a ring roof, six tall light towers), **Eden Gardens** (blocks of coloured seats under a long cantilevered roof) and **Wankhede** (steep stands under a crown of white fabric canopies, lights along the roof). They are impressions built from simple shapes, not survey models; the playing area is the same everywhere. The ground behind the menus shows the one you pick.

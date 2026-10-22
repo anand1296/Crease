@@ -4,11 +4,11 @@
 
 | | |
 | --- | --- |
-| Version | 0.12.0 (October 2026) |
+| Version | 0.13.0 (October 2026) |
 | Repository | https://github.com/anand1296/Crease |
 | Hosting | Vercel (static site, Git-integrated: every push to `main` deploys; pull requests get previews) |
 | Stack | TypeScript (strict) · React 19 · Three.js r180 via React Three Fiber 9 · Vite 7 · Zustand 5 · Vitest 3 · Playwright |
-| Size | ≈18,500 lines of application TypeScript, ≈2,500 lines of unit and simulation tests (185 tests), 7 browser tests |
+| Size | ≈19,300 lines of application TypeScript, ≈2,800 lines of unit and simulation tests (199 tests), 7 browser tests |
 | Backend | None. Everything — physics, AI, commentary, audio — runs in the player's browser |
 
 Companion documents: [README](../README.md) (running and playing), [GAME_DESIGN](../GAME_DESIGN.md) (rules and the simulation's numbers), [ARCHITECTURE](../ARCHITECTURE.md) (module summary), [CHANGELOG](../CHANGELOG.md), [batting report](batting-report.md).
@@ -63,6 +63,7 @@ Crease was built in vertical slices, each of which was playable, tested, documen
 | 0.6.0 | 22 Oct 2026 | Game AI: learning bowling attack, AI captain with fielding restrictions, field-aware T20 batting, spoken commentary, coach |
 | 0.7.0–0.9.0 | 22 Oct 2026 | Match flow and replays; smoothness (shader warm-up, adaptive quality); bowling overhaul (three-step bowling, real actions, field presets); Cricket 07 batting, fielding throws, broadcast cameras |
 | 0.10.0 | 23 Oct 2026 | Run-up framed on the bowler, autoplay (over or innings), the toss in 3D |
+| 0.13.0 | 23 Oct 2026 | Leg byes and byes as live balls, overthrows, sending a batter back, spin off the bat in the ball physics, bat-pad, the captain's own field, free hits, the bouncer rule, super overs |
 | 0.12.0 | 23 Oct 2026 | Grounds (Lord's, MCG, Eden Gardens, Wankhede) and weather with physical effects, practice challenges, save and load, helmets with grilles, facial hair |
 | 0.11.0 | 23 Oct 2026 | Shots all round the ground, drag-and-drop XI, pause scorecard and stats, confidence and stamina, lbw ball tracking and DRS, throw camera, between-ball moments and celebrations |
 
@@ -362,6 +363,10 @@ Since 0.9.0 the **broadcast** style is the default and modelled on television co
 The director has two styles. **Classic** (the default since 0.7.0) is Cricket 07's framing: the camera sits about 5 m up and 27 m behind the bowler's stumps with a 30° lens, and pushes in to 3.9 m up, 17 m back with a 19° lens — high enough that the line to the striker clears the umpire's hat. **TV** is the long-lens broadcast framing (46 m back, 15° → 9.5°). <kbd>C</kbd> cycles classic → broadcast → batter's view → high wide view.
 
 **Action replays** (`scenes/replay.ts`). While a ball is live, every view writes what it drew into a per-frame record: the ball's position and visibility, every player's and umpire's pose (position, facing, limb angles, IK targets, the motion-capture clip and its time), both bats and the state of both sets of stumps. After a wicket or a boundary, the same views read frames back instead of the live match, at 0.45×, while the HUD shows a REPLAY badge. The window depends on the dismissal (from just before release to just after the stumps break for bowled and LBW; from before contact to after the catch, run-out or boundary otherwise), and so does the camera: square-on at the striker's stumps for bowled and LBW; behind the striker for the rest, rising with a lofted ball but aiming below it so the frame keeps the ground. Because it is a recording rather than a re-simulation, a replay always shows exactly what happened and costs only a few hundred numbers per frame. Enter skips; the setting is persisted.
+
+### Extras, running and the laws (0.13.0)
+
+A ball that hits the pad without being out is no longer killed: `BallInPlay` deflects it (a glance fine on the leg side with pace, or a drop at the feet) and it carries on as a struck ball flagged `deflectedFrom: 'pad'`; a keeper's fumble (`BallInPlay.fumble`, probability from the line, height, pace and his catching) does the same with `'keeper'`. The cycle plans the fielding for these with `planFielding(..., catchable = false)` and scores the runs as leg byes (only if a stroke was offered, or the batter was evading) or byes. An inside edge that meets the pad within 0.3 s is deflected again (`deflected` event) and the fielding re-planned, so bat-pad catches come from the same catch model. Spin off the bat lives in the ball physics (`BallMovement.curl`, rad/s of bend about the vertical, and `carry`, a fraction of pace gained or lost at each bounce) so that `projectPath` and the fielders read it too; `strokeSpin` in `batting/contact.ts` sets it per stroke family, timing and edge. Overthrows: when a non-direct throw misses by more than a long stride and nobody is backing up, the ball runs on (`overthrow`) and the return comes later; the computer takes the safe extra runs, the human calls them. `sendBack()` removes the run under way and sets a `recall` whose progress runs back to zero; a ball that beats them back is a run-out. Free hits (after a no-ball, carried over a wide) only allow a run-out; a second bouncer (pitched 8.5 m+ from the stumps, at 1.25 m+ as it passes them) is a no-ball. A tie goes to up to three super overs (`Match.superOver`, `inningsOvers`, `wicketLimit`, played under the last over's fielding restrictions).
 
 ### Grounds and conditions (0.12.0)
 

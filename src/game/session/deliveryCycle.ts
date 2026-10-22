@@ -1,6 +1,6 @@
 import type { Rng } from '../core/rng.ts';
 import type { Vec3 } from '../core/vec3.ts';
-import { BOWLER_STUMPS_Z, STRIKER_STUMPS_Z } from '../data/field.ts';
+import { BOWLER_STUMPS_Z, FIELD, STRIKER_STUMPS_Z } from '../data/field.ts';
 import { type PitchPreset, groundFor } from '../data/pitches.ts';
 import { type BattingAiOptions, decideStroke, deepGaps } from '../ai/battingAi.ts';
 import type { ContactResult } from '../batting/contact.ts';
@@ -27,7 +27,17 @@ export type WicketKind = 'bowled' | 'caught' | 'lbw' | 'runOut' | 'stumped';
 export interface BallOutcome {
   /** Runs credited to the batter (including boundaries). */
   readonly runs: number;
+  /** All extras on the ball: wides and no-balls, byes and leg byes. */
   readonly extras: number;
+  /** Byes (the keeper missed it) and leg byes (off the pad), included in `extras`. */
+  readonly byes?: number;
+  readonly legByes?: number;
+  /** Runs from overthrows, included in `runs` (or the byes). */
+  readonly overthrows?: number;
+  /** The ball was a free hit (after a no-ball). */
+  readonly freeHit?: boolean;
+  /** A bouncer (short, and past the batter at shoulder height or more). */
+  readonly bouncer?: boolean;
   readonly noBall: boolean;
   readonly wide: boolean;
   readonly boundary?: 4 | 6;
@@ -87,6 +97,10 @@ export interface CycleOptions {
   readonly humanFielding?: boolean;
   /** The batters' state: the striker's confidence (0–1), and how tired each is (0 fresh – 1 spent). */
   readonly form?: BatterForm;
+  /** A free hit (the ball after a no-ball): the batter can only be run out. */
+  readonly freeHit?: boolean;
+  /** Bouncers already bowled this over (T20: one is allowed; the second is a no-ball). */
+  readonly bouncersThisOver?: number;
 }
 
 /** Which end a throw goes to: the keeper (striker's end) or the bowler. */
@@ -179,6 +193,17 @@ export class DeliveryCycle {
   throwPlan: ThrowPlan | undefined;
   /** Human fielding: waiting for the throw since this time. */
   awaitingThrowSince: number | undefined;
+  /** Runs off this ball are byes (keeper missed it) or leg byes (off the pad) — and whether leg byes are allowed. */
+  extrasKind: { readonly kind: 'byes' | 'legByes'; readonly allowed: boolean } | undefined;
+  /** An overthrow: the throw got past the stumps and nobody was backing up; the ball runs on. */
+  overthrow: { readonly at: number; readonly until: number; readonly completedBefore: number; readonly from: { x: number; z: number }; readonly end: ThrowEnd } | undefined;
+  /** The striker sent his partner back: the run in progress was called off at `at`. */
+  recall: { readonly run: number; readonly at: number; readonly back: number; readonly progress: number } | undefined;
+  /** An lbw appeal turned down, the ball running on off the pad: kept for the outcome (and a review). */
+  private pendingAppeal: { onField: Decision; tracking: LbwTracking } | undefined;
+  /** This ball is a second bouncer in the over: a no-ball. */
+  private secondBouncer = false;
+  private isBouncer = false;
   readonly events: BallEvent[] = [];
   private releaseQuality: number | undefined;
   /** Changes a human bowler makes during the run-up (amount of swing/spin/cut, the pace they lock). */
@@ -306,6 +331,10 @@ export class DeliveryCycle {
       rng: this.rng.fork('delivery'),
     });
     this.delivery = delivery;
+    // T20: one bouncer an over; the second is a no-ball (and the next ball a free hit).
+    const pitched = delivery.actual.pitch;
+    this.isBouncer = !!pitched && STRIKER_STUMPS_Z - pitched.z >= 8.5 && (delivery.actual.atStumps?.y ?? 0) > 1.25;
+    this.secondBouncer = this.isBouncer && (o.bouncersThisOver ?? 0) >= 1;
     const form = o.form ? { confidence: o.form.confidence, fatigue: o.form.strikerFatigue } : undefined;
     this.play = new BallInPlay({
       delivery,
@@ -364,14 +393,7 @@ export class DeliveryCycle {
         this.contactTime = this.time;
         this.contact = this.time;
         this.fieldingPlan = planFielding(play.ball, this.opts.field, this.rng.fork('fielding'), this.ground, this.runPace);
-        if (!this.opts.manualRunning && (this.fieldingPlan.kind === 'fielded' || this.fieldingPlan.kind === 'dropped')) {
-          // Computer batters take exactly the runs that are safe.
-          let start = this.time + RUN.start;
-          for (let i = 0; i < this.fieldingPlan.runs; i++) {
-            this.runStarts.push(start);
-            start += this.runLen(i);
-          }
-        }
+        if (!this.opts.manualRunning && (this.fieldingPlan.kind === 'fielded' || this.fieldingPlan.kind === 'dropped')) this.takeSafeRuns(this.fieldingPlan.runs);
         break;
       }
       case 'stumps':
@@ -384,12 +406,27 @@ export class DeliveryCycle {
           // Worth an appeal (and so a review): given, or close enough that the fielders go up.
           const close = ev.lbw.out || (t.pitching !== 'outsideLeg' && t.impactZone !== 'outsideLeg' && Math.abs(t.atStumps.x) < 0.27 && t.atStumps.y < 0.95);
           const appeal = close ? { appeal: { onField: ev.lbw.out ? ('out' as const) : ('notOut' as const), tracking: t } } : {};
+          if (ev.live) {
+            // Not out, and the ball runs on off the pad: leg byes, if a stroke was offered (or he was evading it).
+            if (close) this.pendingAppeal = { onField: 'notOut', tracking: t };
+            this.extrasKind = { kind: 'legByes', allowed: ev.legByes === true };
+            this.liveAfter(play, false, ev.legByes === true);
+            break;
+          }
           if (ev.lbw.out) {
             this.finish({ wicket: { kind: 'lbw', batter: 'striker' }, headline: 'LBW!', detail: 'Given out lbw — the finger goes up.', ...appeal });
           } else {
             const why = ev.lbw.reason === 'out' ? '' : ` — ${ev.lbw.reason}.`;
             this.finish({ headline: close ? 'Appeal… not out' : ev.type === 'pad' ? 'Off the pad' : 'Hit on the body', detail: `Not out${why}`, ...appeal });
           }
+        }
+        break;
+      case 'deflected':
+        // An inside edge off the pad: where it goes now decides everything (bat-pad catches included).
+        this.fieldingPlan = planFielding(play.ball, this.opts.field, this.rng.fork('fielding-deflected'), this.ground, this.runPace);
+        if (!this.opts.manualRunning) {
+          this.runStarts.length = 0;
+          if (this.fieldingPlan.kind === 'fielded' || this.fieldingPlan.kind === 'dropped') this.takeSafeRuns(this.fieldingPlan.runs);
         }
         break;
       case 'passedBatter': {
@@ -399,6 +436,27 @@ export class DeliveryCycle {
         const line = ev.position.x * off;
         // Limited-overs wide: well outside off, down the leg side, or over head height.
         const wide = line > 0.85 || line < -0.45 || ev.position.y > 1.95;
+        // The keeper: wide down the leg side, a lot of movement or a low, quick ball can beat his gloves.
+        const keeperIdx = this.opts.field.findIndex((f) => f.keeper);
+        const keeperP = this.opts.field[keeperIdx];
+        if (keeperP && shot?.footwork !== 'out') {
+          const skill = keeperP.player.fielding.catching / 100;
+          const v = play.ball.velocity;
+          const speed = Math.hypot(v.x, v.y, v.z);
+          const awkward = (line < -0.35 ? 0.1 : 0) + (line > 0.7 ? 0.04 : 0) + (ev.position.y < 0.25 ? 0.03 : 0) + (speed > 36 ? 0.02 : 0) + (wide ? 0.05 : 0);
+          const pMiss = Math.min(0.35, (0.012 + awkward) * (1.6 - skill));
+          const rng = this.rng.fork('keeper');
+          if (rng.chance(pMiss)) {
+            // Off the gloves (or past them altogether): slower, and off to one side, behind.
+            const keep = rng.range(0.25, 0.6);
+            const swerve = rng.range(-0.5, 0.5);
+            play.fumble({ x: v.x * keep + swerve * speed * 0.3, y: Math.abs(v.y) * 0.2 + rng.range(0, 1), z: v.z * keep });
+            this.extrasKind = { kind: 'byes', allowed: true };
+            this.fumbleWide = wide;
+            this.liveAfter(play, false, true);
+            break;
+          }
+        }
         const headline = wide ? 'Wide' : !shot || shot.shot === 'leave' ? 'Left alone' : c?.kind === 'miss' ? 'Beaten!' : 'Dot ball';
         this.carrier = this.opts.field.findIndex((f) => f.keeper);
         // Down the pitch and beaten: the keeper has the bails off before he can get back.
@@ -425,6 +483,29 @@ export class DeliveryCycle {
       case 'bounce':
       case 'beaten':
         break;
+    }
+  }
+
+  /** Was the ball that beat the keeper a wide (the byes then count as wides)? */
+  private fumbleWide = false;
+  /** Runs run off a wide that beat the keeper (all wides). */
+  private wideExtra = 0;
+
+  /** The ball runs on without having been hit (off the pad, past the keeper): plan the fielding, and the computer's running. */
+  private liveAfter(play: BallInPlay, catchable: boolean, runningAllowed: boolean): void {
+    this.phase = 'struck';
+    this.contactTime = this.time;
+    this.contact = this.time;
+    this.fieldingPlan = planFielding(play.ball, this.opts.field, this.rng.fork('fielding'), this.ground, this.runPace, catchable);
+    if (!this.opts.manualRunning && runningAllowed && (this.fieldingPlan.kind === 'fielded' || this.fieldingPlan.kind === 'dropped')) this.takeSafeRuns(this.fieldingPlan.runs);
+  }
+
+  /** Computer batters take exactly the runs that are safe. */
+  private takeSafeRuns(n: number): void {
+    let start = this.time + RUN.start;
+    for (let i = 0; i < n; i++) {
+      this.runStarts.push(start);
+      start += this.runLen(i);
     }
   }
 
@@ -523,7 +604,8 @@ export class DeliveryCycle {
     if (this.returnAt !== undefined && this.time >= this.returnAt) return false;
     const n = this.runStarts.length;
     if (n === 0) {
-      this.runStarts.push(Math.max(this.time, (this.contactTime ?? this.time) + 0.1) + 0.15);
+      const ready = Math.max(this.time, (this.contactTime ?? this.time) + 0.1, this.recall?.back ?? 0);
+      this.runStarts.push(ready + 0.15);
       return true;
     }
     const finishLast = (this.runStarts[n - 1] ?? this.time) + this.runLen(n - 1);
@@ -541,7 +623,31 @@ export class DeliveryCycle {
       if (t >= end) completed = i + 1;
       else if (t >= start) current = (t - start) / this.runLen(i);
     });
+    // Sent back: turning round and going back the way they came.
+    const r = this.recall;
+    if (r && current === undefined && t >= r.at && t < r.back) current = r.progress * (1 - (t - r.at) / (r.back - r.at));
     return { completed, current };
+  }
+
+  /**
+   * Human batter: "No! Go back!" — the run under way is called off. Only in
+   * the first half of it; turning round costs a moment, and if the ball
+   * comes in before they are back in their ground, it is a run out.
+   */
+  sendBack(): boolean {
+    if (this.phase !== 'struck' || !this.opts.manualRunning) return false;
+    const n = this.runStarts.length;
+    const start = this.runStarts[n - 1];
+    if (start === undefined || this.time < start) {
+      // Called but not yet started: simply not run.
+      if (start !== undefined) this.runStarts.pop();
+      return start !== undefined;
+    }
+    const p = (this.time - start) / this.runLen(n - 1);
+    if (p >= 0.55) return false;
+    this.runStarts.pop();
+    this.recall = { run: n - 1, at: this.time, back: this.time + (this.time - start) + 0.3, progress: p };
+    return true;
   }
 
   /** The return has arrived (or nobody ran): count completed runs; anyone short of their ground is run out. */
@@ -560,6 +666,34 @@ export class DeliveryCycle {
       if (end <= back + 0.05) completed = i + 1;
       else if (shortRun === undefined) shortRun = i;
     });
+    // Sent back, and the ball came in before they had regained their ground.
+    const r = this.recall;
+    if (shortRun === undefined && r && back < r.back) shortRun = r.run;
+    // An overthrow: the throw missed, nobody was backing up, and the ball runs away — more runs.
+    const t = this.throwPlan;
+    if (shortRun === undefined && t && !t.direct && !this.overthrow && this.carrier !== undefined) {
+      const backerPos = this.backer !== undefined ? this.fielderPos[this.backer] : undefined;
+      const tz = t.end === 'striker' ? STRIKER_STUMPS_Z : BOWLER_STUMPS_Z;
+      const backedUp = backerPos !== undefined && Math.hypot(backerPos.x, backerPos.z - tz) < 7;
+      // Out of reach of whoever is at the stumps (the gatherer gets to anything within a long stride).
+      const pOver = Math.min(0.6, Math.max(0, t.miss - 0.65) * 0.55) * (backedUp ? 0.2 : 1);
+      if (pOver > 0 && this.rng.fork('overthrow').chance(pOver)) {
+        const from = this.fielderPos[this.carrier] ?? { x: 0, z: tz };
+        const roll = 2.4 + this.rng.fork('overthrow-roll').range(0, 2.6);
+        this.overthrow = { at: back, until: back + roll, completedBefore: completed, from: { ...from }, end: t.end };
+        this.returnAt = back + roll;
+        // Computer batters see it go and take the extra runs that are safe.
+        if (!this.opts.manualRunning) {
+          let start = Math.max(back, (this.runStarts[this.runStarts.length - 1] ?? back) + this.runLen(this.runStarts.length - 1));
+          for (let i = this.runStarts.length; i < MAX_RUNS; i++) {
+            if (start + this.runLen(i) + 0.4 > back + roll) break;
+            this.runStarts.push(start);
+            start += this.runLen(i);
+          }
+        }
+        return;
+      }
+    }
     const dropped = plan.kind === 'dropped' ? `Dropped by ${name}! ` : '';
     if (shortRun !== undefined) {
       // Run `k`: the original striker runs towards the bowler's end on even runs.
@@ -576,8 +710,10 @@ export class DeliveryCycle {
       return;
     }
     const runs = completed;
-    const headline = runs === 0 ? (dropped ? 'Dropped!' : 'Fielded') : `${runs} run${runs > 1 ? 's' : ''}`;
-    this.finish({ runs, headline, detail: `${dropped}${runs === 0 ? `Stopped by ${name}.` : `Fielded by ${name}.`}` });
+    const over = this.overthrow ? Math.max(0, runs - this.overthrow.completedBefore) : 0;
+    const headline = runs === 0 ? (dropped ? 'Dropped!' : 'Fielded') : `${runs} run${runs > 1 ? 's' : ''}${over ? ` (${over} overthrow${over > 1 ? 's' : ''})` : ''}`;
+    const detail = over ? `${dropped}The throw from ${name} beat everyone and ran away: ${over} overthrow${over > 1 ? 's' : ''}.` : `${dropped}${runs === 0 ? `Stopped by ${name}.` : `Fielded by ${name}.`}`;
+    this.finish({ runs, headline, detail, ...(over ? { overthrows: over } : {}) });
   }
 
   private finish(r: {
@@ -588,30 +724,66 @@ export class DeliveryCycle {
     detail: string;
     wide?: boolean;
     appeal?: { onField: Decision; tracking: LbwTracking };
+    overthrows?: number;
   }): void {
     const d = this.delivery;
     const play = this.play;
     if (!d || !play) return;
-    const noBall = d.noBall;
-    // No wicket off a no-ball (bowled or caught), but runs off the bat count.
-    const wicket = noBall ? undefined : r.wicket;
+    const noBall = d.noBall || this.secondBouncer;
+    const free = this.opts.freeHit === true;
+    // No wicket off a no-ball (bowled or caught), but runs off the bat count. On a free hit, only a run-out.
+    const wicket = noBall || (free && r.wicket?.kind !== 'runOut') ? undefined : r.wicket;
+    // Byes and leg byes: the runs are extras, not the batter's.
+    let runs = r.runs ?? 0;
+    let byes = 0;
+    let legByes = 0;
+    let headline = r.headline;
+    let note = '';
+    const k = this.extrasKind;
+    if (k && runs > 0) {
+      const what = k.kind === 'byes' ? 'bye' : 'leg bye';
+      if (k.kind === 'legByes' && !k.allowed) {
+        note = ' No stroke offered, so no leg byes: the runs don’t count.';
+        headline = 'No leg byes';
+      } else {
+        headline = r.boundary ? `${runs} ${what}s!` : `${runs} ${what}${runs > 1 ? 's' : ''}`;
+        if (k.kind === 'byes' && !this.fumbleWide) byes = runs;
+        else if (k.kind === 'legByes') legByes = runs;
+      }
+      // Wide and past the keeper: the runs are all wides.
+      const wideRuns = k.kind === 'byes' && this.fumbleWide ? runs : 0;
+      runs = 0;
+      if (wideRuns) {
+        byes = 0;
+        this.wideExtra = wideRuns;
+        headline = `Wide, and ${wideRuns} more`;
+      }
+    }
+    const wideBall = (r.wide === true || (k?.kind === 'byes' && this.fumbleWide)) && !noBall;
+    const appeal = free ? undefined : (r.appeal ?? this.pendingAppeal);
     const contact = play.contact;
     const shot = play.shot;
     const stroke = shot && contact && contact.kind !== 'leave' ? `${SHOTS[shot.shot].name}${contact.kind === 'edge' ? `, ${contact.edge} edge` : contact.kind === 'mistimed' ? ', mistimed' : ''}. ` : '';
     const timingMs = contact && shot && shot.shot !== 'leave' ? Math.round(contact.timingSeconds * 1000) : undefined;
+    const extras = (noBall || wideBall ? 1 : 0) + byes + legByes + this.wideExtra;
     this.outcome = {
-      runs: r.runs ?? 0,
-      extras: noBall || r.wide ? 1 : 0,
+      runs,
+      extras,
+      ...(byes ? { byes } : {}),
+      ...(legByes ? { legByes } : {}),
+      ...(r.overthrows ? { overthrows: r.overthrows } : {}),
+      ...(free ? { freeHit: true } : {}),
+      ...(this.isBouncer ? { bouncer: true } : {}),
       noBall,
-      wide: r.wide === true && !noBall,
-      ...(r.boundary ? { boundary: r.boundary } : {}),
+      wide: wideBall,
+      ...(r.boundary && !k ? { boundary: r.boundary } : {}),
       ...(wicket ? { wicket } : {}),
-      headline: noBall && r.wicket ? 'NO BALL — not out!' : r.headline,
-      detail: `${stroke}${r.detail}`.trim(),
+      headline: (noBall || free) && r.wicket && r.wicket.kind !== 'runOut' ? (free ? 'FREE HIT — not out!' : 'NO BALL — not out!') : headline,
+      detail: `${stroke}${r.detail}${note}${this.secondBouncer ? ' No-ball: the second bouncer of the over.' : ''}`.trim(),
       ...(shot ? { shot } : {}),
       ...(contact ? { contact } : {}),
       ...(timingMs !== undefined ? { timingMs } : {}),
-      ...(r.appeal && !noBall ? { appeal: r.appeal } : {}),
+      ...(appeal && !noBall ? { appeal } : {}),
       delivery: {
         name: d.type.name,
         type: d.type.id,
@@ -713,6 +885,22 @@ export class DeliveryCycle {
       if (p) {
         // Gathered, then (if the batters are running) thrown in: a flat throw, or a lob that bounces in.
         const t = this.throwPlan;
+        const ot = this.overthrow;
+        if (t && ot && this.time >= ot.at) {
+          // The overthrow: past the stumps and away, until someone gets to it and throws it back in.
+          const tz = ot.end === 'striker' ? STRIKER_STUMPS_Z : BOWLER_STUMPS_Z;
+          const dx = 0 - ot.from.x;
+          const dz = tz - ot.from.z;
+          const len = Math.hypot(dx, dz) || 1;
+          const since = this.time - ot.at;
+          const away = 15 * (1 - Math.exp(-since / 1.1));
+          const left = ot.until - this.time;
+          const back = left < 0.6 ? Math.max(0, left) / 0.6 : 1;
+          out.x = (dx / len) * away * back;
+          out.z = tz + (dz / len) * away * back;
+          out.y = left < 0.6 ? 0.45 + Math.sin(Math.PI * back) * 1.5 : FIELD.ballRadius;
+          return out;
+        }
         if (t && this.time > t.releaseAt) {
           const u = Math.min(1, (this.time - t.releaseAt) / Math.max(0.05, t.arriveAt - t.releaseAt));
           const tz = t.end === 'striker' ? STRIKER_STUMPS_Z : BOWLER_STUMPS_Z;

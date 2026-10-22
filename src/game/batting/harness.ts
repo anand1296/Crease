@@ -3,7 +3,7 @@ import { STRIKER_STUMPS_Z } from '../data/field.ts';
 import { PITCHES, type PitchId, groundFor } from '../data/pitches.ts';
 import { type DeliveryPlan, executeDelivery } from '../bowling/execute.ts';
 import type { Player } from '../model/player.ts';
-import { BallInPlay, predictArrival } from '../simulation/ballInPlay.ts';
+import { type BallEvent, BallInPlay, predictArrival } from '../simulation/ballInPlay.ts';
 import { contactPlaneZ } from './body.ts';
 import type { ContactKind, EdgeKind } from './contact.ts';
 import { SHOTS, type ShotAttempt } from './shots.ts';
@@ -24,6 +24,11 @@ export interface StrokeScenario {
   readonly seed: string | number;
   /** Fix the delivery (same ball every time) and vary only the stroke's randomness. */
   readonly deliverySeed?: string | number;
+}
+
+/** Whether the bat touched the ball before time `t`. */
+function struckFirst(events: readonly BallEvent[], t: number): boolean {
+  return events.some((e) => e.type === 'contact' && e.t < t);
 }
 
 export type StrokeEnd = 'boundary4' | 'boundary6' | 'stopped' | 'bowled' | 'pad' | 'body' | 'passed' | 'other';
@@ -78,7 +83,10 @@ export function simulateStroke(s: StrokeScenario): StrokeSummary {
   const fb = play.firstBounceAfterContact;
   const dist = (x: number, z: number) => Math.hypot(x, z - STRIKER_STUMPS_Z);
   let end: StrokeEnd = 'other';
-  if (last) {
+  // Off the pad (or body) without touching the bat: that is how the ball ended, even if it then ran on.
+  const padded = play.events.find((e) => (e.type === 'pad' || e.type === 'body') && !struckFirst(play.events, e.t));
+  if (padded && (padded.type === 'pad' || padded.type === 'body')) end = padded.type;
+  else if (last) {
     switch (last.type) {
       case 'boundary':
         end = last.six ? 'boundary6' : 'boundary4';

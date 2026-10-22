@@ -2,7 +2,7 @@ import type { Rng } from '../core/rng.ts';
 import { type Vec3, length3, vec3 } from '../core/vec3.ts';
 import { FIELD } from '../data/field.ts';
 import { type Player, offSideSign } from '../model/player.ts';
-import { PUSH, SHOTS, type ShotAttempt, type ShotDef } from './shots.ts';
+import { PUSH, SHOTS, type ShotAttempt, type ShotDef, type ShotId } from './shots.ts';
 
 /**
  * Bat–ball contact.
@@ -69,6 +69,79 @@ export interface ContactResult {
   /** What the batter was trying to do, for feedback and tests. */
   readonly intendedDirectionDeg: number;
   readonly intendedElevationDeg: number;
+  /** Spin off the bat (see BallMovement.curl and carry). */
+  readonly spin?: { readonly curl: number; readonly carry: number };
+}
+
+/** A 0–1 value from where the ball hit the bat (so the spin varies without drawing more random numbers). */
+const spinNoise = (across: number, along: number) => {
+  const x = Math.abs(across) * 9137.1 + Math.abs(along) * 7919.3;
+  return x - Math.floor(x);
+};
+
+/**
+ * The spin a stroke puts on the ball, as how it bends along the ground and
+ * how it comes off each bounce. Cuts are sliced: backspin and side spin that
+ * run the ball away finer, towards third man (more so when played late).
+ * Flicks, glances and sweeps hook it finer on the leg side; drives and pulls
+ * roll it with topspin; lofted hits carry backspin; edges spin any way.
+ * `drift` is degrees per second of bend in the batter's frame (+ towards the
+ * off side, so finer on the off side and squarer on the leg side).
+ */
+export function strokeSpin(shot: ShotId, kind: ContactKind, timing: number, off: number, rngValue: number): { curl: number; carry: number } {
+  let drift = 0;
+  let carry = 0;
+  switch (shot) {
+    case 'lateCut':
+      drift = 13;
+      carry = -0.07;
+      break;
+    case 'squareCut':
+      drift = 8;
+      carry = -0.06;
+      break;
+    case 'straightDrive':
+    case 'coverDrive':
+    case 'offDrive':
+    case 'onDrive':
+      carry = 0.07;
+      break;
+    case 'pull':
+    case 'hook':
+      drift = -5;
+      carry = 0.05;
+      break;
+    case 'flick':
+    case 'legGlance':
+      drift = -9;
+      carry = 0.02;
+      break;
+    case 'sweep':
+    case 'slogSweep':
+      drift = -8;
+      carry = -0.02;
+      break;
+    case 'reverseSweep':
+      drift = 8;
+      carry = -0.02;
+      break;
+    case 'loftedDrive':
+    case 'loftedAttack':
+      carry = -0.05;
+      break;
+    default:
+      break;
+  }
+  // Late through the shot opens the face (slices towards the off side); early closes it.
+  drift += Math.max(-1.5, Math.min(1.5, timing)) * 4;
+  if (kind === 'edge') {
+    drift = (rngValue * 2 - 1) * 16;
+    carry = -0.08;
+  } else if (kind === 'mistimed') {
+    drift += (rngValue * 2 - 1) * 5;
+  }
+  // In the world: bending towards the off side is clockwise seen from above for a right-hander.
+  return { curl: (-off * drift * Math.PI) / 180, carry };
 }
 
 const HALF_BAT = FIELD.batWidth / 2;
@@ -281,6 +354,7 @@ export function resolveContact(input: ContactInput): ContactResult {
     const a = anglesOf(v, off);
     return {
       kind: 'edge', edge, quality: quality * 0.4, timing, timingSeconds: input.timingError, reach, across, along,
+      spin: strokeSpin(attempt.shot, 'edge', timing, off, spinNoise(across, along)),
       velocity: v, exitSpeed: length3(v), directionDeg: a.directionDeg, elevationDeg: a.elevationDeg,
       intendedDirectionDeg: aimDeg, intendedElevationDeg: intendedElev,
     };
@@ -323,6 +397,7 @@ export function resolveContact(input: ContactInput): ContactResult {
   const a = anglesOf(v, off);
   return {
     kind: quality > 0.6 ? 'middled' : 'mistimed',
+    spin: strokeSpin(attempt.shot, quality > 0.6 ? 'middled' : 'mistimed', timing, off, spinNoise(across, along)),
     quality,
     timing,
     timingSeconds: input.timingError,

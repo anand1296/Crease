@@ -227,6 +227,12 @@ test.describe('gameplay', () => {
     await page.keyboard.press('Enter');
 
     await expect(page.getByTestId('bowler-choice')).toBeVisible({ timeout: 20_000 });
+    // G opens the field editor: the captain places his own field (Esc closes it).
+    await page.keyboard.press('KeyG');
+    await expect(page.getByTestId('field-editor')).toBeVisible();
+    await expect(page.getByTestId('fe-fielder')).toHaveCount(9);
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('field-editor')).toBeHidden();
     await page.keyboard.press('Digit2');
     await expect(page.getByTestId('bowler-choice')).toBeHidden();
     await expect.poll(() => page.evaluate(() => window.__crease?.phase?.())).toBe('aiming');

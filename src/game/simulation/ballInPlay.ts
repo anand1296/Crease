@@ -28,7 +28,19 @@ export type BallEvent =
   | { readonly type: 'bounce'; readonly t: number; readonly x: number; readonly z: number; readonly struck: boolean }
   | { readonly type: 'contact'; readonly t: number; readonly result: ContactResult; readonly position: Vec3 }
   | { readonly type: 'beaten'; readonly t: number; readonly result: ContactResult }
-  | { readonly type: 'pad' | 'body'; readonly t: number; readonly position: Vec3; readonly velocity: Vec3; readonly lbw: LbwVerdict }
+  | {
+      readonly type: 'pad' | 'body';
+      readonly t: number;
+      readonly position: Vec3;
+      readonly velocity: Vec3;
+      readonly lbw: LbwVerdict;
+      /** Not out, and the ball runs on off the pad (leg byes may be run, if `legByes`). */
+      readonly live?: boolean;
+      /** Leg byes allowed: a stroke was offered, or the batter was hit trying to get out of the way. */
+      readonly legByes?: boolean;
+    }
+  /** An inside edge on to the pad (or body): the ball runs on — or pops up for a bat-pad catch. */
+  | { readonly type: 'deflected'; readonly t: number; readonly position: Vec3 }
   | { readonly type: 'stumps'; readonly t: number; readonly afterContact: boolean }
   | { readonly type: 'passedBatter'; readonly t: number; readonly position: Vec3 }
   | { readonly type: 'boundary'; readonly t: number; readonly six: boolean; readonly position: Vec3 }
@@ -97,6 +109,10 @@ export class BallInPlay {
   private readonly stepEvents = newStepEvents();
   private struckAt = 0;
   private edged = false;
+  /** An inside edge has already come off the pad. */
+  private padded = false;
+  /** The ball is running on after hitting the pad, or after the keeper fumbled it (no catch possible). */
+  deflectedFrom: 'pad' | 'keeper' | undefined;
   private bounceTime?: number;
 
   constructor(opts: BallInPlayOptions) {
@@ -228,6 +244,20 @@ export class BallInPlay {
     return raised;
   }
 
+  /**
+   * The keeper has not taken it cleanly: the ball comes off his gloves (or
+   * past him) and runs on behind, live — byes may be run.
+   */
+  fumble(velocity: Vec3): void {
+    copyVec3(this.ball.velocity, velocity);
+    clearMovement(this.ball);
+    this.ball.bounces = 0;
+    this.ball.atRest = false;
+    this.phase = 'struck';
+    this.struckAt = this.time;
+    this.deflectedFrom = 'keeper';
+  }
+
   /** Runs headless until the ball is dead or `maxSeconds` pass. */
   runToEnd(dt = 1 / 240, maxSeconds = 20): void {
     while (this.phase !== 'dead' && this.time < maxSeconds) this.step(dt);
@@ -285,6 +315,11 @@ export class BallInPlay {
             copyVec3(b.position, at);
             copyVec3(b.velocity, result.velocity);
             clearMovement(b);
+            // The spin the stroke put on it.
+            if (result.spin) {
+              b.movement.curl = result.spin.curl;
+              b.movement.carry = result.spin.carry;
+            }
             b.bounces = 0;
             this.phase = 'struck';
             this.struckAt = this.time;
@@ -300,8 +335,31 @@ export class BallInPlay {
     const hit = this.hitBox(p0, p1);
     if (hit) {
       const lbw = this.judgeLbw();
-      raised.push({ type: hit.part, t: this.time, position: { ...p1 }, velocity: { ...b.velocity }, lbw });
-      this.deaden();
+      const velocity = { ...b.velocity };
+      if (lbw.out) {
+        raised.push({ type: hit.part, t: this.time, position: { ...p1 }, velocity, lbw });
+        this.deaden();
+        return;
+      }
+      // Not out: the ball comes off the pad and runs on, usually down to the leg side.
+      const rng = this.opts.rng.fork('pad-deflection');
+      const off = offSideSign(this.opts.striker.battingHand) > 0 ? 1 : -1;
+      // A glance off the pad runs fine on the leg side with some pace; a straighter hit just drops at his feet.
+      const glance = rng.chance(0.55);
+      const speed = Math.hypot(velocity.x, velocity.y, velocity.z) * (glance ? rng.range(0.18, 0.42) : rng.range(0.05, 0.16));
+      const legSide = glance || rng.chance(0.6);
+      const angle = ((glance ? -rng.range(115, 168) : legSide ? -rng.range(40, 120) : rng.range(55, 140)) * Math.PI) / 180;
+      const lift = rng.range(0.05, 0.3);
+      b.velocity.x = Math.sin(angle) * off * speed;
+      b.velocity.z = -Math.cos(angle) * speed;
+      b.velocity.y = speed * lift;
+      clearMovement(b);
+      b.bounces = 0;
+      this.phase = 'struck';
+      this.struckAt = this.time;
+      this.deflectedFrom = 'pad';
+      const offered = !!this.stroke && this.stroke.attempt.shot !== 'leave';
+      raised.push({ type: hit.part, t: this.time, position: { ...p1 }, velocity, lbw, live: true, legByes: offered || hit.part === 'body' });
       return;
     }
 
@@ -317,6 +375,22 @@ export class BallInPlay {
     const b = this.ball;
     const p = b.position;
     this.apex = Math.max(this.apex, p.y);
+    // An inside edge can go straight on to the pad: it runs on, or pops up for the close catchers.
+    if (this.edged && !this.padded && this.contact?.edge === 'inside' && this.time - this.struckAt < 0.3 && this.hitBox(this.previous, p)) {
+      this.padded = true;
+      const rng = this.opts.rng.fork('bat-pad');
+      const off = offSideSign(this.opts.striker.battingHand) > 0 ? 1 : -1;
+      const speed = rng.range(2.5, 7.5);
+      const angle = (-rng.range(35, 150) * Math.PI) / 180;
+      b.velocity.x = Math.sin(angle) * off * speed;
+      b.velocity.z = -Math.cos(angle) * speed;
+      // Mostly down into the ground; now and then it loops up off the pad for the man at short leg.
+      b.velocity.y = rng.chance(0.2) ? rng.range(1.8, 3.5) : rng.range(0.1, 0.8);
+      b.movement.curl = 0;
+      b.movement.carry = 0;
+      raised.push({ type: 'deflected', t: this.time, position: { ...p } });
+      return;
+    }
     // Edges and defensive strokes can still go on to the stumps or pads.
     if (this.edged || b.velocity.z > 0) {
       if (this.crossedStumps(this.previous, p, raised, true)) return;

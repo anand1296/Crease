@@ -48,7 +48,8 @@ The controls follow EA Sports Cricket 07's keyboard scheme. Hold an arrow for di
 | <kbd>D</kbd> | Use your feet: step down the pitch and drive or work it to leg (miss it and you may be stumped). Alone: smother it |
 | <kbd>A</kbd> | Leave |
 | <kbd>Shift</kbd> (hold) | Lofted version: lofted drive, over cover or midwicket, slog sweep (S+↗), reverse sweep (S+↖), hook (W+↗), upper cut (W+↖) |
-| <kbd>Space</kbd> / <kbd>D</kbd> after the hit | Run. Press again for each further run. Boundaries need no running; anything else only counts if you run it, and if the throw beats you, you are run out |
+| <kbd>Space</kbd> / <kbd>D</kbd> after the hit | Run. Press again for each further run. Boundaries need no running; anything else only counts if you run it, and if the throw beats you, you are run out. Byes, leg byes (if you offered a stroke) and overthrows are run the same way |
+| <kbd>A</kbd> after the hit | "No!" — send your partner back, calling off the run under way (in its first half; if the ball beats you back, it's a run-out) |
 
 ### Bowling
 
@@ -60,6 +61,7 @@ The controls follow EA Sports Cricket 07's keyboard scheme. Hold an arrow for di
 | <kbd>↑</kbd> / <kbd>↓</kbd> | How much it swings, cuts or spins |
 | <kbd>O</kbd> | Over or around the wicket |
 | <kbd>F</kbd> (<kbd>Shift</kbd>+<kbd>F</kbd> back) | Field: the captain's own, or one of ten T20 presets (only powerplay-legal ones in the powerplay) |
+| <kbd>G</kbd> | Place your own field: drag any fielder anywhere (the restrictions are checked: two outside the circle in the powerplay, five after; no more than two behind square on the leg side) |
 | <kbd>Space</kbd> | Next: the landing spot |
 | **2. Landing spot** | |
 | Arrows | Move the marker to where the ball should pitch (↑ fuller, ↓ shorter) |
@@ -71,6 +73,10 @@ The controls follow EA Sports Cricket 07's keyboard scheme. Hold an arrow for di
 The same ball again is <kbd>Space</kbd>, <kbd>Space</kbd>, <kbd>Space</kbd>.
 
 **Fielding**: when the ball is gathered and the batters are running, hold <kbd>↑</kbd> to throw to the keeper's end or <kbd>↓</kbd> to the bowler's end; let go to throw. The longer you hold, the harder the throw: the green part of the meter is quick and accurate, the red is forced and wild. A direct hit can run a batter out; if you don't throw within about a second, the fielder throws himself.
+
+### Laws you will meet
+
+A no-ball is followed by a **free hit** (the batter can only be run out); a second **bouncer** in an over is a no-ball; **leg byes** count only if a stroke was offered; a tied match goes to a **super over** (one over each, two wickets).
 
 ### Grounds, conditions, practice and saving
 

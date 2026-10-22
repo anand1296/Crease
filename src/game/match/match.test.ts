@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { TEAMS } from '../data/teams.ts';
 import { type MatchConfig, Match, maxOversPerBowler } from './match.ts';
+import type { BallOutcome } from '../session/deliveryCycle.ts';
 import { applyDrop, checkXi, defaultXi, keeperFor } from './squad.ts';
 import type { Team } from '../data/teams.ts';
 
@@ -218,6 +219,68 @@ describe('Match (human)', () => {
     }
     expect(b.result?.summary).toBe(a.result?.summary);
     expect(fb / fa).toBeCloseTo(1 / 0.65, 1);
+  });
+});
+
+describe('Hat-trick', () => {
+  it('two wickets in two balls by the same bowler: on a hat-trick; a third is the hat-trick', () => {
+    const m = new Match(config({ seed: 'hat' }));
+    const record = (o: BallOutcome) => (m as unknown as { record(o: BallOutcome): void }).record(o);
+    const out: BallOutcome = { runs: 0, extras: 0, noBall: false, wide: false, wicket: { kind: 'bowled', batter: 'striker' }, headline: 'BOWLED!', detail: '', delivery: { name: 'x', speedKph: 140, line: 0 } };
+    record(out);
+    expect(m.hatTrickBall).toBe(false);
+    record(out);
+    expect(m.hatTrickBall).toBe(true);
+    record(out);
+    expect(m.lastOutcome?.headline).toBe('HAT-TRICK!');
+    // A ball without a wicket ends it.
+    record({ ...out, wicket: undefined } as unknown as BallOutcome);
+    expect(m.hatTrickBall).toBe(false);
+  });
+});
+
+describe('Super over', () => {
+  it('a tie goes to a super over: one over each, two wickets, the side batting second goes first', () => {
+    let found = 0;
+    for (let i = 0; i < 400 && found < 3; i++) {
+      const m = new Match(config({ overs: 1, seed: `tie-${i}` }));
+      play(m, 3000);
+      if (m.innings.length <= 2) continue;
+      found += 1;
+      const [first, second, so1, so2] = m.innings;
+      expect(first?.runs).toBe(second?.runs);
+      expect(so1?.batting).toBe(second?.batting);
+      for (const so of m.innings.slice(2)) {
+        expect(so.balls).toBeLessThanOrEqual(6);
+        expect(so.wickets).toBeLessThanOrEqual(2);
+      }
+      expect(m.phase).toBe('complete');
+      if (so1 && so2 && so1.runs !== so2.runs && m.innings.length === 4) {
+        expect(m.result?.summary).toContain('won the super over');
+        expect(m.result?.winner).toBe(so2.runs > so1.runs ? so2.batting : so1.batting);
+      }
+    }
+    expect(found).toBeGreaterThan(0);
+  });
+});
+
+describe("The human captain's field", () => {
+  it('his own field is used when legal, and refused when it breaks the restrictions', () => {
+    const m = new Match(config({ home: side(team(0), 'human'), battingFirst: 'away', seed: 'own-field' }));
+    while (m.phase !== 'chooseBowler') tick(m, 1 / 240);
+    const spots = m.currentPositions();
+    expect(spots.length).toBe(9);
+    // Powerplay: three on the boundary is one too many.
+    const three = spots.map((p, i) => (i < 3 ? { ...p, distance: 60 } : { ...p, distance: Math.min(p.distance, 25) }));
+    expect(m.setCustomField(three)).toContain('Only 2');
+    const legal = spots.map((p, i) => ({ ...p, distance: i === 0 ? 60 : Math.min(p.distance, 22) }));
+    expect(m.setCustomField(legal)).toBeUndefined();
+    expect(m.fieldPreset).toBe('custom');
+    const pick = m.eligibleBowlers()[0];
+    if (!pick) throw new Error('bowler');
+    m.chooseBowler(pick.id);
+    const deep = m.field.filter((f) => !f.keeper && Math.hypot(f.start.x, f.start.z - 10.06) > 50);
+    expect(deep.length).toBe(1);
   });
 });
 

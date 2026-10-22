@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { maxOutside } from '../ai/captain.ts';
-import { CIRCLE, FIELD_PRESETS, legalPresets, outsideCircle } from './presets.ts';
+import { checkField, CIRCLE, customPosition, FIELD_PRESETS, legalPresets, positionName, outsideCircle } from './presets.ts';
 
 describe('field presets', () => {
   it('has ten presets of nine distinct positions, attacking to defensive', () => {
@@ -55,5 +55,24 @@ describe('hungarian assignment', () => {
     expect(hungarian([[4, 1, 3], [2, 0, 5], [3, 2, 2]])).toEqual([1, 0, 2]);
     // Greedy would take (0,0)=1 then be forced into (1,1)=100; optimal is 2+2.
     expect(hungarian([[1, 2], [2, 100]])).toEqual([1, 0]);
+  });
+});
+
+describe("the captain's own field", () => {
+  it('names spots the way commentators do', () => {
+    expect(positionName(160, 4.5)).toBe('Slip');
+    expect(positionName(70, 25)).toBe('Cover');
+    expect(positionName(-155, 60)).toBe('Fine leg');
+    expect(positionName(-95, 6)).toBe('Short leg');
+  });
+
+  it('enforces the circle and the leg-side rule', () => {
+    const ring = Array.from({ length: 9 }, (_, i) => customPosition(i, -60 + i * 20, 22));
+    expect(checkField(ring, 2)).toBeUndefined();
+    const deep = ring.map((p, i) => (i < 3 ? customPosition(i, p.angleDeg, 60) : p));
+    expect(checkField(deep, 2)).toContain('Only 2');
+    expect(checkField(deep, 5)).toBeUndefined();
+    const leg = ring.map((p, i) => (i < 3 ? customPosition(i, -120 - i * 10, 20) : p));
+    expect(checkField(leg, 5)).toContain('two fielders behind square on the leg side');
   });
 });

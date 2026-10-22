@@ -98,6 +98,10 @@ export interface MatchSnapshot {
   /** Autoplay asked for (the rest of the over or the innings), and whether the computer is playing this ball. */
   readonly autoplay: Autoplay;
   readonly autoplaying: boolean;
+  /** The next ball is a free hit; this innings is a super over. */
+  readonly freeHit: boolean;
+  readonly superOver: boolean;
+  readonly hatTrickBall: boolean;
   /** Practice: the challenge and how it is going. */
   readonly challenge: { readonly id: ChallengeId; readonly status: ChallengeStatus } | undefined;
   readonly striker: { readonly id: string; readonly name: string; readonly hand: Hand; readonly card: BattingCard | undefined; readonly form: BatterState };
@@ -198,6 +202,9 @@ export interface GameState {
   quitToMenu: () => void;
   setPaused: (paused: boolean) => void;
   toggleHelp: () => void;
+  /** The field editor (the human captain placing his own field) is open. */
+  readonly fieldEditor: boolean;
+  setFieldEditor: (open: boolean) => void;
   cycleCamera: () => void;
   setMeter: (m: number) => void;
   toggleMute: () => void;
@@ -253,6 +260,9 @@ function snapshot(m: Match, toss: string): MatchSnapshot {
     userSide: m.userSide,
     autoplay: m.autoplay,
     autoplaying: m.autoplaying,
+    freeHit: m.freeHit,
+    superOver: m.superOver,
+    hatTrickBall: m.hatTrickBall,
     challenge: m.config.practice ? { id: m.config.practice, status: m.challengeStatus ?? { state: 'on', progress: '' } } : undefined,
     striker: { id: m.striker.id, name: m.striker.name, hand: m.striker.battingHand, card: card(m.striker), form: { ...m.formOf(m.striker) } },
     nonStriker: { id: m.nonStriker.id, name: m.nonStriker.name, card: card(m.nonStriker), form: { ...m.formOf(m.nonStriker) } },
@@ -572,6 +582,13 @@ export const useGame = create<GameState>()((set, get) => {
       set({ paused });
     },
     toggleHelp: () => set({ showHelp: !get().showHelp }),
+    fieldEditor: false,
+    setFieldEditor: (open) => {
+      // While it is open the game's keys are off (the editor uses the arrows and Enter itself).
+      keyboard.enabled = !open && get().screen === 'match';
+      if (open) keyboard.clear();
+      set({ fieldEditor: open });
+    },
     cycleCamera: () => {
       const order: CameraMode[] = ['broadcast', 'classic', 'batter', 'high'];
       const i = order.indexOf(get().camera);

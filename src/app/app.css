@@ -2718,3 +2718,104 @@ kbd.k.on {
 .challenge-name .tick {
   color: var(--good);
 }
+
+/* --- Free hit and super over badges ------------------------------------------------------------ */
+
+.hud-card .badge {
+  display: inline-block;
+  margin: 0 0 6px 6px;
+  padding: 2px 10px;
+  border-radius: 2px;
+  font: 700 15px var(--display);
+  letter-spacing: 0.04em;
+}
+
+.badge.free-hit {
+  background: #e2701d;
+  color: #1c0e03;
+}
+
+.badge.super-over {
+  background: var(--brass);
+  color: #1c1505;
+}
+
+/* --- Field editor ---------------------------------------------------------------------------- */
+
+.field-editor .fe-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.fe-field {
+  width: min(460px, 86vw);
+  height: auto;
+  overflow: visible;
+  touch-action: none;
+  user-select: none;
+}
+
+.fe-circle {
+  fill: none;
+  stroke: rgba(241, 238, 227, 0.4);
+  stroke-dasharray: 4 4;
+}
+
+.fe-dot {
+  cursor: grab;
+}
+
+.fe-dot circle {
+  fill: var(--brass);
+  stroke: #1c1505;
+  stroke-width: 1.5;
+}
+
+.fe-dot.dragging circle,
+.fe-dot:focus-visible circle {
+  fill: #fff2c2;
+}
+
+.fe-dot:focus {
+  outline: none;
+}
+
+.fe-dot text {
+  fill: var(--chalk);
+  font: 600 11px var(--body);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.7);
+  stroke-width: 3px;
+  pointer-events: none;
+}
+
+.fe-side {
+  min-width: 220px;
+  max-width: 300px;
+  text-align: left;
+}
+
+.fe-side .bad {
+  color: var(--bad);
+}
+
+.bp-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--chalk-dim);
+  font: inherit;
+  cursor: pointer;
+}
+
+.badge.hat-trick {
+  background: var(--bad);
+  color: #200704;
+}

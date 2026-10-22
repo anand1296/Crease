@@ -28,6 +28,7 @@ export const GAME_ACTIONS = [
   'mute',
   'commentary',
   'autoOver',
+  'editField',
   'autoInnings',
   'review',
   'pick1',
@@ -71,6 +72,8 @@ export const DEFAULT_BINDINGS: Bindings = {
   commentary: ['KeyV'],
   // Autoplay: the computer plays the rest of the over (Y) or the innings (U) for you.
   autoOver: ['KeyY'],
+  // The fielding captain places his own field.
+  editField: ['KeyG'],
   autoInnings: ['KeyU'],
   // T for the review signal (a T with the arms), as a player asks for the third umpire.
   review: ['KeyT'],

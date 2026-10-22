@@ -1,5 +1,8 @@
 import { useGame } from '../state/game.ts';
 import { challenge } from '../game/practice/challenges.ts';
+import { CIRCLE, checkField, customPosition } from '../game/fielding/presets.ts';
+import { type FieldPosition, fieldPositionXZ } from '../game/data/fieldPositions.ts';
+import { STRIKER_STUMPS_Z } from '../game/data/field.ts';
 import { DELIVERY_TYPES } from '../game/bowling/deliveryTypes.ts';
 import { effortSpeed } from '../game/bowling/execute.ts';
 import type { BallOutcome } from '../game/session/deliveryCycle.ts';
@@ -39,6 +42,7 @@ export function Hud() {
       <ControlsPanel />
       <AutoplayControl />
       <ChallengeCard />
+      <FieldEditor />
       <AppealPrompt />
       <DrsPanel />
       <NextPrompt />
@@ -149,8 +153,26 @@ function DeliveryPanel() {
   const style = useGame((s) => s.snap?.bowler.style);
   const toss = useGame((s) => s.snap?.toss);
   const balls = useGame((s) => s.snap?.ballCount ?? 0);
+  const freeHit = useGame((s) => s.snap?.freeHit ?? false);
+  const superOver = useGame((s) => s.snap?.superOver ?? false);
+  const hatTrick = useGame((s) => s.snap?.hatTrickBall ?? false);
   return (
     <section className="hud-card delivery" aria-label="Last delivery">
+      {superOver ? (
+        <div className="badge super-over" data-testid="super-over">
+          Super over
+        </div>
+      ) : null}
+      {freeHit ? (
+        <div className="badge free-hit" data-testid="free-hit">
+          Free hit
+        </div>
+      ) : null}
+      {hatTrick ? (
+        <div className="badge hat-trick" data-testid="hat-trick">
+          On a hat-trick
+        </div>
+      ) : null}
       <div className="label">{style}</div>
       {o ? (
         <div className="value">
@@ -304,13 +326,20 @@ function BowlingPanel() {
             <div>
               <span className="bp-label">Field</span>
               <button type="button" className="bp-preset" onClick={() => match.cycleFieldPreset(1)} data-testid="field-preset">
-                {preset ? preset.name : "Captain's field (auto)"}
+                {snap.fieldPreset === 'custom' ? 'Your own field' : preset ? preset.name : "Captain's field (auto)"}
               </button>
               <span className="dim small">
-                {preset ? `${MOOD_NAME[preset.mood]} · ${preset.blurb}` : 'Set ball by ball for this batter and phase'}
+                {snap.fieldPreset === 'custom'
+                  ? 'Placed by you'
+                  : preset
+                    ? `${MOOD_NAME[preset.mood]} · ${preset.blurb}`
+                    : 'Set ball by ball for this batter and phase'}
               </span>
               <span className="bp-keys">
-                <Key label="F" on={lit('field')} /> <span className="dim small">next · Shift+F back</span>
+                <Key label="F" on={lit('field')} /> <span className="dim small">next · Shift+F back ·</span>{' '}
+                <button type="button" className="bp-edit" onClick={() => useGame.getState().setFieldEditor(true)} data-testid="edit-field">
+                  <Key label="G" on={lit('editField')} /> edit
+                </button>
               </span>
             </div>
           </div>
@@ -472,8 +501,8 @@ function BowlerChoice() {
       </ol>
       <p className="dim small">Enter picks the highlighted bowler.</p>
       <p className="small chooser-field">
-        Field: <strong>{snap.presets.find((p) => p.id === snap.fieldPreset)?.name ?? "Captain's field (auto)"}</strong>{' '}
-        <span className="dim">· F to change</span>
+        Field: <strong>{snap.fieldPreset === 'custom' ? 'Your own field' : (snap.presets.find((p) => p.id === snap.fieldPreset)?.name ?? "Captain's field (auto)")}</strong>{' '}
+        <span className="dim">· F to change, G to place it yourself</span>
       </p>
     </div>
   );
@@ -489,22 +518,32 @@ function InningsBreak() {
   const snap = useGame((s) => s.snap);
   const match = useGame((s) => s.match);
   if (!snap || snap.phase !== 'inningsBreak' || !match) return null;
-  const first = snap.innings[0];
+  const first = snap.innings[snap.innings.length - 1];
   if (!first) return null;
   const batting = match.side(first.batting).team;
   const bowling = match.side(first.bowling).team;
   const chaser = bowling;
+  const tied = match.superOverNext;
+  const superOver = snap.innings.length > 2;
   return (
     <div className="overlay" role="dialog" aria-label="Innings break" data-testid="innings-break">
       <div className="panel wide">
-        <h2>Innings break</h2>
+        <h2>{tied ? 'Scores level — super over!' : superOver ? 'Super over: the chase' : 'Innings break'}</h2>
         <p>
-          {chaser.name} need <strong>{first.runs + 1}</strong> to win from {snap.maxOvers} overs.
+          {tied ? (
+            <>
+              {first.runs} apiece. One over each, two wickets: <strong>{batting.name}</strong> bat first.
+            </>
+          ) : (
+            <>
+              {chaser.name} need <strong>{first.runs + 1}</strong> to win from {superOver ? 'one over' : `${snap.maxOvers} overs`}.
+            </>
+          )}
         </p>
         <Scorecard innings={first} batting={batting} bowling={bowling} />
-        <Coach notes={snap.coach} />
+        {superOver || tied ? null : <Coach notes={snap.coach} />}
         <button type="button" onClick={() => match.continueAfterBreak()} autoFocus data-testid="continue">
-          Start the chase (Enter)
+          {tied ? 'On to the super over (Enter)' : 'Start the chase (Enter)'}
         </button>
       </div>
     </div>
@@ -846,7 +885,7 @@ function ControlsPanel() {
       struck
         ? { a: 'shotFeet', k: 'D', what: 'Run', label: snap.runsCalled > 0 ? `${snap.runsCalled} called` : 'call a run' }
         : { a: 'shotFeet', k: 'D', what: 'Use your feet', label: name('feet'), to: where('feet') },
-      { a: 'leave', k: 'A', what: 'Leave', label: '' },
+      { a: 'leave', k: 'A', what: struck ? 'Send back' : 'Leave', label: struck ? '“No!” — call off the run' : '' },
     ];
     return (
       <section className="keys" aria-label="Batting controls" data-testid="controls-panel">
@@ -1041,6 +1080,150 @@ function AutoplayControl() {
 }
 
 // --- Between balls ------------------------------------------------------------------------
+
+/**
+ * The captain's own field: drag any of the nine fielders (the keeper and
+ * the bowler stay put) anywhere on the ground. The restrictions are checked
+ * as you go: fielders outside the circle (two in the powerplay, five after),
+ * and no more than two behind square on the leg side.
+ */
+function FieldEditor() {
+  const open = useGame((s) => s.fieldEditor);
+  const match = useGame((s) => s.match);
+  const close = useGame((s) => s.setFieldEditor);
+  const [spots, setSpots] = useState<FieldPosition[]>([]);
+  const [drag, setDrag] = useState<number | undefined>(undefined);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const svgRef = useRef<SVGSVGElement>(null);
+  useEffect(() => {
+    if (open && match) {
+      setSpots(match.currentPositions());
+      setError(undefined);
+    }
+  }, [open, match]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === 'Escape') close(false);
+      else if (e.code === 'Enter') apply();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+  if (!open || !match) return null;
+  const left = match.striker.battingHand === 'left';
+  const R = 190;
+  const k = R / 70;
+  const maxOut = match.maxOutsideNow;
+  const problem = checkField(spots, maxOut);
+  const out = spots.filter((p) => p.distance > CIRCLE).length;
+  const legBehind = spots.filter((p) => p.angleDeg < -90).length;
+  // Screen: as the broadcast camera sees it, the striker at the top, the off side of a right-hander on the left.
+  const toScreen = (p: FieldPosition) => {
+    const { x, z } = fieldPositionXZ(p, left);
+    return { cx: -x * k, cy: -(z - 0) * k };
+  };
+  const fromScreen = (sx: number, sy: number, i: number): FieldPosition => {
+    const x = -sx / k;
+    const z = -sy / k;
+    const bx = left ? -x : x;
+    const dz = STRIKER_STUMPS_Z - z;
+    return customPosition(i, (Math.atan2(bx, dz) * 180) / Math.PI, Math.hypot(bx, dz));
+  };
+  const point = (e: React.PointerEvent) => {
+    const svg = svgRef.current;
+    if (!svg) return undefined;
+    const r = svg.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) / r.width) * (2 * R + 20) - (R + 10), y: ((e.clientY - r.top) / r.height) * (2 * R + 20) - (R + 10) };
+  };
+  const move = (i: number, p: FieldPosition) => setSpots((s) => s.map((q, j) => (j === i ? p : q)));
+  function apply() {
+    if (!match) return;
+    const why = match.setCustomField(spots);
+    if (why) setError(why);
+    else close(false);
+  }
+  const wk = toScreen({ id: 'wk', name: '', angleDeg: 180, distance: 2.5 });
+  const bowlerSpot = toScreen({ id: 'b', name: '', angleDeg: 0, distance: 20 });
+  return (
+    <div className="overlay" role="dialog" aria-label="Set your field" data-testid="field-editor">
+      <div className="panel wide field-editor">
+        <h2>Set your field</h2>
+        <p className="dim small">
+          Drag the fielders where you want them (or focus one and use the arrows). The keeper and the bowler stay where they are. Seen from behind the bowler, the batter at the top.
+        </p>
+        <div className="fe-body">
+          <svg
+            ref={svgRef}
+            viewBox={`${-R - 10} ${-R - 10} ${2 * R + 20} ${2 * R + 20}`}
+            className="fe-field"
+            onPointerMove={(e) => {
+              if (drag === undefined) return;
+              const p = point(e);
+              if (p) move(drag, fromScreen(p.x, p.y, drag));
+            }}
+            onPointerUp={() => setDrag(undefined)}
+            onPointerLeave={() => setDrag(undefined)}
+          >
+            <circle r={R} className="fm-ground" />
+            <circle r={CIRCLE * k} className="fe-circle" />
+            <rect x={-1.6 * k} y={-10.06 * k} width={3.2 * k} height={20.12 * k} className="fm-pitch" />
+            <circle cx={wk.cx} cy={wk.cy} r={6} className="fm-keeper" />
+            <circle cx={bowlerSpot.cx} cy={bowlerSpot.cy} r={6} className="fm-bowler" />
+            {spots.map((p, i) => {
+              const s = toScreen(p);
+              return (
+                <g
+                  key={i}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${p.name}: drag, or use the arrows`}
+                  className={`fe-dot${drag === i ? ' dragging' : ''}`}
+                  transform={`translate(${s.cx} ${s.cy})`}
+                  onPointerDown={(e) => {
+                    (e.target as Element).setPointerCapture?.(e.pointerId);
+                    setDrag(i);
+                  }}
+                  onKeyDown={(e) => {
+                    const step = 2 * k;
+                    const d = e.key === 'ArrowLeft' ? [-step, 0] : e.key === 'ArrowRight' ? [step, 0] : e.key === 'ArrowUp' ? [0, -step] : e.key === 'ArrowDown' ? [0, step] : undefined;
+                    if (!d) return;
+                    e.preventDefault();
+                    move(i, fromScreen(s.cx + (d[0] ?? 0), s.cy + (d[1] ?? 0), i));
+                  }}
+                  data-testid="fe-fielder"
+                >
+                  <circle r={9} />
+                  <text y={-13}>{p.name}</text>
+                </g>
+              );
+            })}
+          </svg>
+          <div className="fe-side">
+            <p className={out > maxOut ? 'bad' : ''}>
+              Outside the circle: <strong>{out}</strong> of {maxOut}
+            </p>
+            <p className={legBehind > 2 ? 'bad' : ''}>
+              Behind square on the leg side: <strong>{legBehind}</strong> of 2
+            </p>
+            {error || problem ? <p className="bad" role="alert">{error ?? problem}</p> : null}
+            <div className="buttons">
+              <button type="button" onClick={apply} disabled={!!problem} data-testid="fe-done">
+                Set this field (Enter)
+              </button>
+              <button type="button" className="secondary" onClick={() => setSpots(match.currentPositions())}>
+                Start again
+              </button>
+              <button type="button" className="secondary" onClick={() => close(false)}>
+                Cancel (Esc)
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /** Practice: the challenge and how it is going, top centre. */
 function ChallengeCard() {

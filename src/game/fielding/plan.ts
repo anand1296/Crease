@@ -283,6 +283,8 @@ export function planFielding(
   ground?: GroundModel,
   /** How slowly the batters run (1 fresh; more when tired). */
   runPace = 1,
+  /** False for a ball that has not touched the bat (off the pad, past the keeper): no catch can be taken. */
+  catchable = true,
 ): FieldingPlan {
   const { samples, boundaryT, six } = projectPath(struckBall, ground);
   let path = samples;
@@ -296,7 +298,7 @@ export function planFielding(
     const s = reach.sample;
     const pos = vec3(s.x, s.y, s.z);
     const pace = Math.max(0, s.speed - 18) / 25;
-    if (!s.grounded) {
+    if (!s.grounded && catchable) {
       // Catch chance.
       // Close catchers (keeper, slips) are there for fast edges: pace troubles them less.
       const paceFactor = f.keeper ? 0.4 : f.position.id.startsWith('slip') || f.position.id === 'gully' ? 0.6 : 1;

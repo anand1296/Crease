@@ -48,6 +48,11 @@ export function useGameControls(): void {
         if (action === 'confirm' || action === 'bowl' || action === 'run') g.skipReplay();
         return;
       }
+      // The fielding captain's own field (G), while setting up a ball or choosing the bowler.
+      if (action === 'editField') {
+        if (m.humanBowling && (m.phase === 'aiming' || m.phase === 'chooseBowler')) g.setFieldEditor(true);
+        return;
+      }
       // Autoplay: Y the over, U the innings; either again takes the controls back.
       if (action === 'autoOver' || action === 'autoInnings') {
         if (m.autoplay !== 'off') m.stopAutoplay();
@@ -94,6 +99,11 @@ export function useGameControls(): void {
         const struck = m.cycle?.phase === 'struck';
         if (action === 'run' || (struck && action === 'shotFeet')) {
           m.callRun();
+          return;
+        }
+        // Once it is hit, A sends your partner back: "No!"
+        if (struck && action === 'leave') {
+          m.sendBack();
           return;
         }
         if (action === 'shotFront' || action === 'shotBack' || action === 'shotFeet' || action === 'leave') {

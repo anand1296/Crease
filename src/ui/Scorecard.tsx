@@ -22,7 +22,8 @@ export function howOut(c: BattingCard, keeperName?: string): string {
 }
 
 export function Scorecard({ innings, batting, bowling }: { innings: InningsState; batting: Team; bowling: Team }) {
-  const extras = innings.wides + innings.noBalls;
+  // Everything not off the bat: wides and no-balls (and runs off them), byes, leg byes.
+  const extras = innings.runs - innings.battingCards.reduce((a, c) => a + c.runs, 0);
   const batted = innings.battingCards.filter((c) => c.batted);
   const yetToBat = innings.battingCards.filter((c) => !c.batted);
   return (
@@ -61,6 +62,8 @@ export function Scorecard({ innings, batting, bowling }: { innings: InningsState
           <tr>
             <td>Extras</td>
             <td className="dim">
+              {innings.byes ? `${innings.byes} b, ` : ''}
+              {innings.legByes ? `${innings.legByes} lb, ` : ''}
               {innings.wides} wd, {innings.noBalls} nb
             </td>
             <td className="num strong">{extras}</td>

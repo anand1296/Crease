@@ -4,7 +4,8 @@ import { decodeInto, encodeSnapshot, playersOf, snapshotMatch } from './save.ts'
 import { type ChallengeId, type ChallengeStatus, challenge, markCompleted } from '../practice/challenges.ts';
 import type { VenueId } from '../data/venues.ts';
 import { Rng } from '../core/rng.ts';
-import { BOWLER_FOLLOW_THROUGH, STANDARD_FIELD } from '../data/fieldPositions.ts';
+import { BOWLER_FOLLOW_THROUGH, type FieldPosition, STANDARD_FIELD } from '../data/fieldPositions.ts';
+import { STRIKER_STUMPS_Z } from '../data/field.ts';
 import { AdaptiveBowling, ballReward } from '../ai/adaptiveBowling.ts';
 import { fieldingPhase, maxOutside, setField, type WagonShot } from '../ai/captain.ts';
 import { type BallRecord, type CoachNote, battingNotes, bowlingNotes } from '../ai/coach.ts';
@@ -18,7 +19,7 @@ import { chooseDelivery } from '../ai/bowlingAi.ts';
 import { DELIVERY_TYPES, type DeliveryTypeId, LENGTHS, humanDeliveries } from '../bowling/deliveryTypes.ts';
 import type { DeliveryPlan } from '../bowling/execute.ts';
 import type { BowlingSide } from '../bowling/runUp.ts';
-import { type FieldPreset, findPreset, legalPresets } from '../fielding/presets.ts';
+import { type FieldPreset, checkField, customPosition, findPreset, legalPresets } from '../fielding/presets.ts';
 import { fatigueAfterBall, fatigueAfterRest } from '../bowling/fatigue.ts';
 import { type Fielder, buildField, rebuildField } from '../fielding/plan.ts';
 import { DIFFICULTIES, type DifficultyId } from '../model/difficulty.ts';
@@ -110,6 +111,9 @@ export interface InningsState {
   readonly balls: number;
   readonly wides: number;
   readonly noBalls: number;
+  /** Byes and leg byes (runs). */
+  readonly byes?: number;
+  readonly legByes?: number;
   readonly fours: number;
   readonly sixes: number;
   readonly battingCards: readonly BattingCard[];
@@ -159,8 +163,12 @@ export function reviewedOutcome(o: BallOutcome, r: ReviewResult, by: string): Ba
   const why = r.umpiresCall ? "umpire's call" : r.overturned ? 'overturned' : 'the decision stands';
   const kept = r.retained ? `${by} keep their review.` : `${by} lose a review.`;
   if (r.decision === 'out') {
+    // Out: any leg byes run off the pad don't count.
+    const { legByes: lb, overthrows: _ov, ...noRuns } = rest;
+    void _ov;
     return {
-      ...rest,
+      ...noRuns,
+      extras: rest.extras - (lb ?? 0),
       wicket: { kind: 'lbw', batter: 'striker' },
       headline: r.overturned ? 'OUT! Overturned on review' : 'OUT — the decision stands',
       detail: `${r.overturned ? 'Ball tracking has it hitting the stumps.' : r.umpiresCall ? "Umpire's call: out stands." : 'Hitting the stumps.'} ${kept}`,
@@ -257,6 +265,14 @@ export const LENGTH_RANGE = { min: 0.3, max: 12.5 } as const;
 const BETWEEN_BALLS = 0.9;
 const AUTO_BREAK = 3;
 
+/** Runs the batters actually ran (or hit) on a ball: off the bat, byes and leg byes (wides and no-balls aside). */
+export function ranRuns(o: BallOutcome): number {
+  return o.runs + (o.byes ?? 0) + (o.legByes ?? 0) + (o.wide ? Math.max(0, o.extras - 1) : 0);
+}
+
+/** Super overs played before a tie is left a tie. */
+const MAX_SUPER_OVERS = 3;
+
 export const maxOversPerBowler = (overs: number): number => Math.max(1, Math.ceil(overs / 5));
 
 export class Match {
@@ -287,6 +303,16 @@ export class Match {
   private lastOverBowlerId = '';
   private ballsThisOver = 0;
   private runsThisOver = 0;
+  /** The next ball is a free hit (after a no-ball). */
+  freeHit = false;
+  /** Each bowler's wickets with his last consecutive deliveries (two: the next is a hat-trick ball). */
+  private readonly wicketStreak = new Map<string, number>();
+
+  /** The current bowler is on a hat-trick. */
+  get hatTrickBall(): boolean {
+    return (this.wicketStreak.get(this.bowler.id) ?? 0) === 2;
+  }
+  private bouncersThisOver = 0;
   private readonly fatigue = new Map<string, number>();
   /** Each batter's confidence and tiredness this innings (see batting/form.ts). */
   private readonly form = new Map<string, BatterState>();
@@ -521,7 +547,7 @@ export class Match {
   get chase(): { needed: number; ballsLeft: number } | undefined {
     const t = this.current.target;
     if (t === undefined) return undefined;
-    return { needed: Math.max(0, t - this.current.runs), ballsLeft: this.config.overs * 6 - this.current.balls };
+    return { needed: Math.max(0, t - this.current.runs), ballsLeft: this.inningsOvers * 6 - this.current.balls };
   }
 
   /**
@@ -544,7 +570,7 @@ export class Match {
 
   /** Field presets allowed now (the powerplay allows only two outside the circle). */
   get availablePresets(): FieldPreset[] {
-    return legalPresets(maxOutside(fieldingPhase(this.config.overs, this.current.balls), this.config.overs));
+    return legalPresets(maxOutside(fieldingPhase(this.config.overs, this.phaseBalls), this.config.overs));
   }
 
   /** Bowlers allowed to bowl the next over: not the last over's bowler, under the limit. */
@@ -658,6 +684,12 @@ export class Match {
   reaimShot(shot: ShotAttempt): boolean {
     if (!this.humanBatting || this.paused) return false;
     return this.cycle?.reaimShot(shot) ?? false;
+  }
+
+  /** Human batter: call off the run under way ("No! Go back!"). */
+  sendBack(): boolean {
+    if (!this.humanBatting || this.paused) return false;
+    return this.cycle?.sendBack() ?? false;
   }
 
   playShot(shot: ShotAttempt): boolean {
@@ -806,6 +838,39 @@ export class Match {
     this.emit();
   }
 
+  /** The human captain's own field (nine positions; the keeper and bowler are where they always are). */
+  customField: FieldPosition[] | undefined;
+
+  /** Fielders allowed outside the circle at this point of the innings. */
+  get maxOutsideNow(): number {
+    return maxOutside(fieldingPhase(this.config.overs, this.phaseBalls), this.config.overs);
+  }
+
+  /** The nine fielders as they stand now (not the keeper or bowler), as positions for the batter on strike. */
+  currentPositions(): FieldPosition[] {
+    const left = this.striker.battingHand === 'left';
+    return this.field
+      .filter((f) => !f.keeper && f.position.id !== 'bowler')
+      .map((f, i) => {
+        const x = left ? -f.start.x : f.start.x;
+        const dz = STRIKER_STUMPS_Z - f.start.z;
+        return customPosition(i, (Math.atan2(x, dz) * 180) / Math.PI, Math.hypot(x, dz));
+      });
+  }
+
+  /** Sets the human captain's own field. Returns what is wrong with it, if it is not allowed. */
+  setCustomField(positions: readonly FieldPosition[]): string | undefined {
+    if (!this.humanBowling) return 'You are not the fielding captain.';
+    if (positions.length !== 9) return 'A field has nine fielders besides the keeper and the bowler.';
+    const problem = checkField(positions, this.maxOutsideNow);
+    if (problem) return problem;
+    this.customField = positions.map((p, i) => customPosition(i, p.angleDeg, p.distance));
+    this.fieldPreset = 'custom';
+    this.fieldCache = undefined;
+    this.emit();
+    return undefined;
+  }
+
   setFieldPreset(id: string): boolean {
     if (!this.humanBowling || (this.phase !== 'aiming' && this.phase !== 'chooseBowler')) return false;
     if (id !== 'auto' && !this.availablePresets.some((p) => p.id === id)) return false;
@@ -851,8 +916,12 @@ export class Match {
   /** Start the second innings after the break. */
   continueAfterBreak(): void {
     if (this.phase !== 'inningsBreak') return;
-    const first = this.current;
-    this.startInnings(first.bowling, first.runs + 1);
+    const last = this.current;
+    // A super over: the side that batted second goes first (no target); otherwise the chase.
+    if (this.superOverNext) {
+      this.superOverNext = false;
+      this.startInnings(last.batting);
+    } else this.startInnings(last.bowling, last.runs + 1);
     if (this.humanInvolved) this.waitForStart();
     else this.enterBetween();
   }
@@ -951,7 +1020,7 @@ export class Match {
     const difficulty = DIFFICULTIES[this.config.difficulty];
     if (this.humanBatting) {
       // Against the human: an attack that learns what works against each batter.
-      const phase = fieldingPhase(this.config.overs, this.current.balls);
+      const phase = fieldingPhase(this.config.overs, this.phaseBalls);
       const d = this.brain.choose(this.bowler, this.striker, phase === 'powerplay' ? 0 : phase === 'middle' ? 1 : 2, difficulty, rng);
       this.pendingPlan = { batterId: this.striker.id, planId: d.planId, insight: d.insight };
       this.startCycle(d.plan, d.releaseQuality);
@@ -984,13 +1053,15 @@ export class Match {
       rng: this.rng.fork(`ball-${this.ballNumber}`),
       manualRunning: this.humanBatting,
       humanFielding: this.humanBowling,
+      ...(this.freeHit ? { freeHit: true } : {}),
+      bouncersThisOver: this.bouncersThisOver,
       form: {
         confidence: this.formOf(this.striker).confidence,
         strikerFatigue: this.formOf(this.striker).fatigue,
         nonStrikerFatigue: this.formOf(this.nonStriker).fatigue,
       },
       ...(releaseQuality !== undefined ? { releaseQuality } : {}),
-      ...(!this.humanBatting ? { battingAi: { difficulty: DIFFICULTIES[this.config.difficulty], intent: this.battingIntent() } } : {}),
+      ...(!this.humanBatting ? { battingAi: { difficulty: DIFFICULTIES[this.config.difficulty], intent: this.battingIntent() + (this.freeHit ? 0.4 : 0) } } : {}),
     });
     this.ballNumber += 1;
     this.phase = 'delivery';
@@ -999,6 +1070,8 @@ export class Match {
 
   /** How positive the computer batters should be, from the match situation. */
   battingIntent(): number {
+    // A super over: six balls, everything goes.
+    if (this.superOver) return 1.4;
     const inn = this.current;
     const total = this.config.overs * 6;
     const progress = inn.balls / total;
@@ -1023,6 +1096,8 @@ export class Match {
     const striker = this.striker;
     const outPlayer = o.wicket ? (o.wicket.batter === 'nonStriker' ? this.nonStriker : striker) : undefined;
     const runsTotal = o.runs + o.extras;
+    // Byes and leg byes are not the bowler's fault.
+    const conceded = runsTotal - (o.byes ?? 0) - (o.legByes ?? 0);
     const balls = inn.balls + (legal ? 1 : 0);
     const wickets = inn.wickets + (o.wicket ? 1 : 0);
     const battingCards = inn.battingCards.map((c) => {
@@ -1054,13 +1129,13 @@ export class Match {
     const card: BowlingCard = existing ?? { player: bowler, balls: 0, runs: 0, wickets: 0, maidens: 0, dots: 0, wides: 0, noBalls: 0, fours: 0, sixes: 0 };
     const updatedCard: BowlingCard = {
       ...card,
-      dots: card.dots + (legal && runsTotal === 0 ? 1 : 0),
+      dots: card.dots + (legal && conceded === 0 ? 1 : 0),
       wides: card.wides + (o.wide ? 1 : 0),
       noBalls: card.noBalls + (o.noBall ? 1 : 0),
       fours: card.fours + (o.boundary === 4 ? 1 : 0),
       sixes: card.sixes + (o.boundary === 6 ? 1 : 0),
       balls: card.balls + (legal ? 1 : 0),
-      runs: card.runs + runsTotal,
+      runs: card.runs + conceded,
       wickets: card.wickets + (o.wicket && o.wicket.kind !== 'runOut' ? 1 : 0),
     };
     const bowlingCards = existing ? inn.bowlingCards.map((c) => (c.player.id === bowler.id ? updatedCard : c)) : [...inn.bowlingCards, updatedCard];
@@ -1072,6 +1147,8 @@ export class Match {
       balls,
       wides: inn.wides + (o.wide ? 1 : 0),
       noBalls: inn.noBalls + (o.noBall ? 1 : 0),
+      byes: (inn.byes ?? 0) + (o.byes ?? 0),
+      legByes: (inn.legByes ?? 0) + (o.legByes ?? 0),
       fours: inn.fours + (o.boundary === 4 ? 1 : 0),
       sixes: inn.sixes + (o.boundary === 6 ? 1 : 0),
       battingCards,
@@ -1100,7 +1177,29 @@ export class Match {
     this.updateForm(o, striker, this.cycle?.play?.contact);
     if (legal) this.ballsThisOver += 1;
     this.runsThisOver += runsTotal;
-    const mark = o.wicket ? 'W' : o.wide ? `${o.extras}wd` : o.noBall ? `${o.runs + o.extras}nb` : o.runs === 0 ? '•' : String(o.runs);
+    const mark = o.wicket
+      ? 'W'
+      : o.wide
+        ? `${o.extras}wd`
+        : o.noBall
+          ? `${o.runs + o.extras}nb`
+          : o.byes
+            ? `${o.byes}b`
+            : o.legByes
+              ? `${o.legByes}lb`
+              : o.runs === 0
+                ? '•'
+                : String(o.runs);
+    // Wickets with consecutive deliveries by the same bowler: on a hat-trick after two, a hat-trick at three.
+    const bowlerWicket = o.wicket !== undefined && o.wicket.kind !== 'runOut';
+    const streak = bowlerWicket ? (this.wicketStreak.get(bowler.id) ?? 0) + 1 : 0;
+    this.wicketStreak.set(bowler.id, streak);
+    if (streak === 3) this.history[this.history.length - 1] = { ...o, headline: 'HAT-TRICK!', detail: `${bowler.name} takes three in three! ${o.detail}` };
+    if (streak === 3) this.lastOutcome = this.history[this.history.length - 1];
+    // A no-ball: the next ball is a free hit (it carries over a wide). A bouncer counts towards the over's one.
+    if (o.noBall) this.freeHit = true;
+    else if (!o.wide) this.freeHit = false;
+    if (o.bouncer && !o.noBall) this.bouncersThisOver += 1;
     this.recent = [...this.recent, mark].slice(-8);
     this.learnAndDescribe(o, striker, bowler, updatedCard, legal);
     this.emit();
@@ -1231,7 +1330,7 @@ export class Match {
   /** What the computer's attack has learned about a batter (best plans first). */
   scoutingReport(batter: Player): { label: string; mean: number; n: number }[] {
     const bowler = this.bowlingSide.xi.find((p) => !isSpinner(p.bowlingStyle) && p.bowlingStyle !== 'none') ?? this.bowler;
-    const phase = fieldingPhase(this.config.overs, this.current.balls);
+    const phase = fieldingPhase(this.config.overs, this.phaseBalls);
     return this.brain.report(batter, bowler, phase === 'powerplay' ? 0 : phase === 'middle' ? 1 : 2).map((r) => ({ label: r.plan.label, mean: r.mean, n: r.n }));
   }
 
@@ -1254,7 +1353,7 @@ export class Match {
     this.incoming = undefined;
     if (o) {
       // Odd completed runs (not boundaries) mean the batters changed ends.
-      if (o.runs % 2 === 1 && !o.boundary) this.swapStrike();
+      if (ranRuns(o) % 2 === 1 && !o.boundary) this.swapStrike();
       if (o.wicket) this.replaceBatter(o);
     }
     if (this.inningsOver()) return;
@@ -1308,7 +1407,7 @@ export class Match {
     if (this.nextIndex >= xi.length) return; // all out; handled by inningsOver
     // Strike has already been swapped for odd completed runs, so the batter who
     // started the ball as striker is now at the striker's index only if the runs were even.
-    const outIsStriker = (w.batter === 'striker') === (o.runs % 2 === 0);
+    const outIsStriker = (w.batter === 'striker') === (ranRuns(o) % 2 === 0);
     const incoming = this.nextIndex;
     this.nextIndex += 1;
     const newcomer = xi[incoming];
@@ -1362,19 +1461,29 @@ export class Match {
       return true;
     }
     let reason: InningsState['endReason'];
+    const overs = this.inningsOvers * 6;
     if (inn.target !== undefined && inn.runs >= inn.target) reason = 'target';
-    else if (inn.wickets >= 10 || this.nextIndex > this.battingSide.xi.length) reason = 'allOut';
-    else if (inn.balls >= total) reason = 'overs';
+    else if (inn.wickets >= this.wicketLimit || this.nextIndex > this.battingSide.xi.length) reason = 'allOut';
+    else if (inn.balls >= overs) reason = 'overs';
     if (!reason) return false;
     this.innings[this.innings.length - 1] = { ...inn, endReason: reason };
     // Autoplay stops with the innings: the player takes the break and the next innings.
     this.endAutoplay();
-    if (this.innings.length === 1) {
+    const done = this.current;
+    const prev = this.innings[this.innings.length - 2];
+    if (this.innings.length % 2 === 1) {
       this.phase = 'inningsBreak';
       this.phaseTimer = AUTO_BREAK;
       this.needsBowlerChoice = true;
-      const done = this.current;
+      this.superOverNext = false;
       this.say(this.commentator.inningsBreak(this.side(done.batting).team.name, done.runs, done.wickets, done.runs + 1, this.side(done.bowling).team.name));
+    } else if (prev && prev.runs === done.runs && this.innings.length < 2 + 2 * MAX_SUPER_OVERS && !this.config.practice) {
+      // Scores level: a super over (again, if the last one was tied too).
+      this.phase = 'inningsBreak';
+      this.phaseTimer = AUTO_BREAK;
+      this.needsBowlerChoice = true;
+      this.superOverNext = true;
+      this.say({ text: `Scores level! ${done.runs} apiece — we're going to a super over.`, excitement: 2 });
     } else {
       this.result = this.decide();
       this.phase = 'complete';
@@ -1384,10 +1493,41 @@ export class Match {
     return true;
   }
 
+  /** This innings is a super over. */
+  get superOver(): boolean {
+    return this.innings.length > 2;
+  }
+
+  /** Overs in this innings: the match's, or one in a super over. */
+  get inningsOvers(): number {
+    return this.superOver ? 1 : this.config.overs;
+  }
+
+  /** Two wickets end a super over. */
+  get wicketLimit(): number {
+    return this.superOver ? 2 : 10;
+  }
+
+  /** Balls into the innings for the fielding restrictions (a super over is played as the last over). */
+  get phaseBalls(): number {
+    return this.superOver ? (this.config.overs - 1) * 6 + this.current.balls : this.current.balls;
+  }
+
+  /** At the innings break: the next innings is a super over. */
+  superOverNext = false;
+
   private decide(): MatchResult {
-    const [first, second] = this.innings;
+    const n = this.innings.length;
+    const first = this.innings[n - 2];
+    const second = this.innings[n - 1];
     if (!first || !second) throw new Error('match incomplete');
     const name = (s: SideId) => this.side(s).team.name;
+    if (n > 2) {
+      // Decided by a super over.
+      if (second.runs === first.runs) return { tie: true, margin: '', summary: 'Match tied — even after the super over' };
+      const winner = second.runs > first.runs ? second.batting : first.batting;
+      return { winner, tie: false, margin: 'in the super over', summary: `${name(winner)} won the super over` };
+    }
     if (second.runs > first.runs) {
       const wkts = 10 - second.wickets;
       const left = this.config.overs * 6 - second.balls;
@@ -1410,6 +1550,7 @@ export class Match {
     }
     this.ballsThisOver = 0;
     this.runsThisOver = 0;
+    this.bouncersThisOver = 0;
     this.swapStrike();
     this.lastOverBowlerId = this.bowlerId;
     // The bowler's spell: another over in a row from his end, or the start of a new one.
@@ -1452,6 +1593,13 @@ export class Match {
     // The AI captain sets the field for this batter and bowler, reviewing it at the start of each
     // over and when a new batter comes in — not every ball, so fielders are not forever moving.
     // The human captain's preset, if one is set and allowed now.
+    // The human captain's own field, if it is legal at this stage of the innings.
+    if (this.humanBowling && this.fieldPreset === 'custom' && this.customField && !checkField(this.customField, this.maxOutsideNow)) {
+      const [wk] = buildField([keeper], STANDARD_FIELD.filter((p) => p.id === 'wk'), hand);
+      const ring = this.place(others, this.customField, hand);
+      const [bowlerSpot] = buildField([bowler], [BOWLER_FOLLOW_THROUGH], hand);
+      return [...(wk ? [wk] : []), ...ring, ...(bowlerSpot ? [bowlerSpot] : [])];
+    }
     const preset = this.humanBowling && this.fieldPreset !== 'auto' ? findPreset(this.fieldPreset) : undefined;
     if (preset && this.availablePresets.includes(preset)) {
       const [wk] = buildField([keeper], STANDARD_FIELD.filter((p) => p.id === 'wk'), hand);
