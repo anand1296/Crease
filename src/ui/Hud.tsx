@@ -32,6 +32,7 @@ export function Hud() {
       <BowlerChoice />
       <Commentary />
       <ControlsPanel />
+      <AutoplayControl />
       <NextPrompt />
       <ReviewCard />
       <ReplayBadge />
@@ -97,7 +98,7 @@ function ScoreStrip() {
           <span>RR {rate}</span>
         )}
         <span className="sb-role" data-testid="role">
-          {snap.userBatting ? 'You are batting' : 'You are bowling'}
+          {snap.userSide === 'batting' ? 'You are batting' : 'You are bowling'}
           {snap.fieldPhase === 'powerplay' ? (
             <span className="phase-tag" data-testid="powerplay">
               Powerplay
@@ -773,6 +774,50 @@ function ControlsPanel() {
   return null;
 }
 
+/**
+ * Autoplay: hand your side to the computer for the rest of the over or the
+ * innings, and take it back. Top left, out of the way of play.
+ */
+function AutoplayControl() {
+  const snap = useGame((s) => s.snap);
+  const match = useGame((s) => s.match);
+  const replaying = useGame((s) => s.replaying);
+  if (!snap || !match || !snap.userSide || replaying) return null;
+  if (snap.phase === 'inningsBreak' || snap.phase === 'complete') return null;
+  const role = snap.userSide === 'batting' ? 'batting' : 'bowling';
+  if (snap.autoplay !== 'off') {
+    return (
+      <div className="autoplay on" data-testid="autoplay" data-mode={snap.autoplay} role="status">
+        <span className="autoplay-dot" aria-hidden="true" />
+        <span>
+          Autoplay: the computer is {role} for you {snap.autoplay === 'over' ? 'to the end of the over' : 'for the rest of the innings'}
+        </span>
+        <button type="button" onClick={() => match.stopAutoplay()} data-testid="autoplay-stop">
+          Take over <kbd>{snap.autoplay === 'over' ? 'Y' : 'U'}</kbd>
+        </button>
+      </div>
+    );
+  }
+  if (snap.autoplaying) {
+    return (
+      <div className="autoplay on" data-testid="autoplay" data-mode="ending" role="status">
+        <span>You take over from the next ball</span>
+      </div>
+    );
+  }
+  return (
+    <div className="autoplay" data-testid="autoplay" data-mode="off">
+      <span className="dim">Autoplay</span>
+      <button type="button" onClick={() => match.startAutoplay('over')} data-testid="autoplay-over">
+        {snap.balls % 6 === 0 ? 'Next over' : 'Rest of over'} <kbd>Y</kbd>
+      </button>
+      <button type="button" onClick={() => match.startAutoplay('innings')} data-testid="autoplay-innings">
+        Innings <kbd>U</kbd>
+      </button>
+    </div>
+  );
+}
+
 // --- Between balls ------------------------------------------------------------------------
 
 /** "Next ball" prompt while the game waits after an ordinary ball. */
@@ -863,7 +908,10 @@ function ReviewCard() {
                 </li>
               </ol>
             )}
-            <p className="dim small">The controls stay on screen at the bottom left. After every ball the game waits for you.</p>
+            <p className="dim small">
+              The controls stay on screen at the bottom left. After every ball the game waits for you — or let the computer play the
+              over (<kbd>Y</kbd>) or the innings (<kbd>U</kbd>).
+            </p>
           </>
         ) : review.kind === 'over' ? (
           <>

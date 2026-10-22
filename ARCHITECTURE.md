@@ -50,7 +50,7 @@ Simulation (core, physics,        deterministic TypeScript — no React or three
 | `game/ai/commentary.ts`, `game/audio/voice.ts` | Ball-by-ball commentary generator and its spoken voice (Web Speech API) |
 | `game/ai/coach.ts` | Post-innings analysis of the human's batting and bowling |
 | `game/session/deliveryCycle.ts` | Run-up → release → flight → struck → dead, with fielder movement, called runs, run-outs, wides and the outcome |
-| `game/match/match.ts` | The match: toss, innings, strike, bowler eligibility and quotas, maidens, fall of wickets, scorecards, result, match-situation AI intent |
+| `game/match/match.ts` | The match: autoplay, innings, strike, bowler eligibility and quotas, maidens, fall of wickets, scorecards, result, match-situation AI intent |
 | `game/match/squad.ts` | Default XI, keeper choice, XI validation (errors and warnings) |
 | `game/input/` | Keyboard (bindings as data, one shared instance), input → stroke mapping, wiring to the match |
 | `game/audio/sound.ts` | Web Audio synthesis: bat, pads, stumps, bounce, catch, boundary, crowd ambience; mute persisted |
@@ -58,7 +58,10 @@ Simulation (core, physics,        deterministic TypeScript — no React or three
 | `game/scenes/rig/Cricketer.tsx` | Skinned player model: loads the avatar, paints the kit through its mask (shader patch on `MeshStandardMaterial`), attaches helmet/cap/hat, pads and keeper's mitts to bones |
 | `game/scenes/rig/avatarRig.ts` | Drives the model's skeleton from a motion-capture clip or by retargeting the control skeleton (bind-pose corrections, spine distribution, head look-at, model-side arm IK, finger grip), cross-fading between sources |
 | `game/scenes/rig/avatarAssets.ts` | Asset URLs and the clip library loader |
-| `game/scenes/camera/director.ts` | The broadcast director: which shot is on air and its framing, as a pure function of the ball's state (unit-tested) |
+| `game/scenes/camera/director.ts` | The broadcast director: which shot is on air and its framing, as a pure function of the ball's state (unit-tested); `frameBetween` tilts and zooms a fixed camera to keep two points (the running bowler, the batter) in frame |
+| `game/match/toss.ts` | The toss: the coin's face from the seed, the computer captain's choice, and the coin's flight (pure, unit-tested) |
+| `game/scenes/TossView.tsx` | The toss scene: captains and referee on the pitch, the flicked coin, the toss cameras |
+| `game/scenes/rig/kits.ts` | Kits, models and skin tones for players (shared by the match and the toss) |
 | `game/scenes/Effects.tsx` | High-quality post-processing chain |
 | `scripts/avatars/` | Offline conversion of Rocketbox FBX avatars and clips to the runtime assets in `public/players/` |
 | `game/scenes/warmup.ts` | Compiles every shader and uploads every texture of a new match behind the loading screen, so nothing compiles mid-play |
@@ -68,7 +71,7 @@ Simulation (core, physics,        deterministic TypeScript — no React or three
 | `game/scenes/MatchView.tsx` | Per-frame driver, players posed from the simulation, bat, ball, markers, camera rig; orbiting menu camera when no match is on |
 | `game/scenes/Ground.tsx`, `Stadium.tsx`, `Stumps.tsx` | Field and pitch textures, stands, instanced crowd, instanced sponsor boards, floodlights, live scoreboard |
 | `game/quality.ts` | Graphics quality: detection (software renderer → Low) and persistence |
-| `state/game.ts` | zustand store: screens, match setup, match lifecycle (start, rematch, quit), pause, camera, sound, quality |
+| `state/game.ts` | zustand store: screens, match setup, the toss, match lifecycle (start, rematch, quit), pause, camera, sound, quality |
 | `ui/Menus.tsx` | Main menu, match setup, squad board, how to play |
 | `ui/Hud.tsx`, `ui/Scorecard.tsx` | Scoreboard strip, delivery panel, outcome banner, run prompt, bowler choice, bowling panel and meter, innings break, result, pause, help |
 | `game/debug.ts` | Read-only `window.__crease` handles for browser tests |

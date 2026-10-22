@@ -53,7 +53,7 @@ const DPR_SCALE = [1, 0.85, 0.72, 0.6];
  * browser's main thread and GPU are free for the menus.
  */
 function useLive(): boolean {
-  return useGame((s) => s.screen === 'menu' || (s.screen === 'match' && (!s.paused || s.warming)));
+  return useGame((s) => s.screen === 'menu' || s.screen === 'toss' || (s.screen === 'match' && (!s.paused || s.warming)));
 }
 
 /** Draws one more frame whenever the view stops being live, so it shows the latest state. */

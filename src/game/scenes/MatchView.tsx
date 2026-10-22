@@ -7,7 +7,7 @@ import { sound } from '../audio/sound.ts';
 import { keyboard } from '../input/keyboardInstance.ts';
 import { exposeDebug } from '../debug.ts';
 import { BOWLER_STUMPS_Z, FIELD, STRIKER_POPPING_Z, STRIKER_STUMPS_Z } from '../data/field.ts';
-import { type Team, kitColors } from '../data/teams.ts';
+import type { Team } from '../data/teams.ts';
 import { SHOTS } from '../batting/shots.ts';
 import type { Match } from '../match/match.ts';
 import { type Player, offSideSign } from '../model/player.ts';
@@ -18,7 +18,8 @@ import { Cricketer } from './rig/Cricketer.tsx';
 import { Stumps, type WicketHandle } from './Stumps.tsx';
 import { type ReplayKind, ReplayRecorder, replayVectors, restorePose } from './replay.ts';
 import { warmUp } from './warmup.ts';
-import { AVATARS, type AvatarId } from './rig/avatarAssets.ts';
+import { TossView } from './TossView.tsx';
+import { avatarFor, teamKit, toneFor } from './rig/kits.ts';
 import { type Shot, WIDE, direct } from './camera/director.ts';
 import { type ActionKind, THROW_SPAN, actionSpan, battingStance, bowlingAction, gait, gather, keeperStance, pickUp, readyStance, resetPose, throwAction } from './rig/motion.ts';
 import { type RunUp, runUpFor } from '../bowling/runUp.ts';
@@ -31,35 +32,10 @@ import { releasePoint } from '../bowling/execute.ts';
  * positions meshes imperatively. Nothing here changes the simulation.
  */
 
-const SKIN = ['#8d5a3b', '#c58c64', '#e3b48f', '#6b4128', '#b07a55', '#f1c9a5', '#5a3622', '#d9a07a'];
-const skinFor = (id: string) => SKIN[Math.abs(hash(id)) % SKIN.length] ?? '#c58c64';
-function hash(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return h;
-}
-
-const darken = (hex: string, k: number) => {
-  const n = parseInt(hex.slice(1), 16);
-  const r = Math.round(((n >> 16) & 255) * k);
-  const g = Math.round(((n >> 8) & 255) * k);
-  const b = Math.round((n & 255) * k);
-  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
-};
-
 function kitFor(match: Match, team: Team, player: Player, role: 'batter' | 'keeper' | 'fielder'): Kit {
   const home = match.config.home.team.id === team.id;
   const opponent = home ? match.config.away.team : match.config.home.team;
-  const colors = kitColors(team, opponent, home);
-  return {
-    shirt: colors.primary,
-    trim: colors.secondary,
-    trousers: colors.trousers ?? darken(colors.primary, 0.55),
-    skin: skinFor(player.id),
-    headwear: role === 'batter' ? 'helmet' : role === 'keeper' ? 'cap' : hash(player.id) % 4 === 0 ? 'hat' : 'cap',
-    pads: role !== 'fielder',
-    gloves: role === 'batter' ? 'batting' : role === 'keeper' ? 'keeping' : 'none',
-  };
+  return teamKit(team, opponent, home, player.id, role);
 }
 
 const DOWN = new Vector3(0, -1, 0);
@@ -69,10 +45,11 @@ const tmpQ = new Quaternion();
 
 export function MatchView() {
   const match = useGame((s) => s.match);
+  const tossing = useGame((s) => s.screen === 'toss' && s.toss !== undefined);
   if (!match)
     return (
       <>
-        <MenuCamera />
+        {tossing ? <TossView /> : <MenuCamera />}
         <Stumps z={STRIKER_STUMPS_Z} />
         <Stumps z={BOWLER_STUMPS_Z} />
       </>
@@ -296,8 +273,6 @@ const LOCOMOTION: readonly { name: ClipName; above: number; speed: number; durat
   { name: 'walk', above: 0, speed: 1.4, duration: 1.0667 },
 ];
 
-const avatarFor = (id: string): AvatarId => AVATARS[Math.abs(hash(id)) % AVATARS.length] ?? 'p1';
-const toneFor = (id: string): number => (avatarFor(id) === 'p3' ? 0 : (Math.abs(hash(`${id}tone`)) % 5) / 5);
 
 /** Moves towards (tx, tz) at no more than `speed` m/s. Returns the distance moved. */
 function approach(m: Motion, tx: number, tz: number, speed: number, dt: number): number {
@@ -413,6 +388,11 @@ function Players({ match, recorder, bowlerHand }: { match: Match; recorder: Repl
     // Everyone watches the ball (or, before it is bowled, the bowler).
     const ballPos = c?.play?.ball.position;
     const bowlerMotion = motions.get(match.bowler.id);
+    if (bowlerMotion) {
+      liveBowler.x = bowlerMotion.pos.x;
+      liveBowler.z = bowlerMotion.pos.z;
+      liveBowler.id = match.bowler.id;
+    }
     if (ballPos && c?.phase !== 'runUp') look.set(ballPos.x, ballPos.y, ballPos.z);
     else if (bowlerMotion) look.set(bowlerMotion.pos.x, 1.6, bowlerMotion.pos.z);
     // The ring walks in a pace or two as the bowler runs up.
@@ -1453,6 +1433,9 @@ function Markers({ match }: { match: Match }) {
 const BATTER_END = { pos: new Vector3(0, 2.1, STRIKER_STUMPS_Z + 7), target: new Vector3(0, 1.0, BOWLER_STUMPS_Z), fov: 40 };
 const HIGH = { pos: new Vector3(0, 48, BOWLER_STUMPS_Z - 40), target: new Vector3(0, 0, 8), fov: 45 };
 
+/** Where the bowler is on screen, for the camera operator to follow him in (written by the players each frame). */
+const liveBowler: { x: number; z: number; id: string | undefined } = { x: 0, z: 0, id: undefined };
+
 /** A camera pinned from the debug handle (close-up captures in tests). */
 let debugView: { pos: [number, number, number]; look: [number, number, number]; fov: number } | undefined;
 
@@ -1512,6 +1495,7 @@ function CameraRig({ match, recorder }: { match: Match; recorder: ReplayRecorder
         // Between balls (not during a replay or a card about to show one), the striker in close-up.
         subject: !live ? { x: -offSideSign(match.striker.battingHand) * 0.45, y: 0, z: STRIKER_POPPING_Z + 0.22 } : undefined,
         previousCam: lastCam.current,
+        bowler: live && liveBowler.id === match.bowler.id ? { x: liveBowler.x, y: 0, z: liveBowler.z } : undefined,
       });
       last.current = shot.name;
       lastCam.current = shot.cam;

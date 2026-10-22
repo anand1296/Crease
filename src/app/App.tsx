@@ -2,6 +2,7 @@ import { lazy, type ReactNode, Suspense, useState } from 'react';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
 import { Hud } from '../ui/Hud.tsx';
 import { MainMenu, MatchSetup, SquadPicker } from '../ui/Menus.tsx';
+import { TossPanel } from '../ui/Toss.tsx';
 import { useGameControls } from '../game/input/useGameControls.ts';
 import { useGame } from '../state/game.ts';
 
@@ -70,7 +71,9 @@ export function App() {
               <MatchSetup />
             ) : screen === 'squad' ? (
               <SquadPicker />
-            ) : warming ? null : (
+            ) : warming ? null : screen === 'toss' ? (
+              <TossPanel />
+            ) : (
               <Hud />
             )
           ) : null}

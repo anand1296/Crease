@@ -10,7 +10,7 @@ import type { PitchId } from '../game/data/pitches.ts';
 import { TEAMS, type Team } from '../game/data/teams.ts';
 import type { DeliveryTypeId } from '../game/bowling/deliveryTypes.ts';
 import { keyboard } from '../game/input/keyboardInstance.ts';
-import { type AimStep, type BowlingSetup, GAME_SPEEDS, type GameSpeed, Match, type MatchPhase, type Review, type MatchResult, type InningsState, type BattingCard, type BowlingCard, type SideId } from '../game/match/match.ts';
+import { type AimStep, type Autoplay, type BowlingSetup, GAME_SPEEDS, type GameSpeed, Match, type MatchPhase, type Review, type MatchResult, type InningsState, type BattingCard, type BowlingCard, type SideId } from '../game/match/match.ts';
 import { DELIVERY_TYPES } from '../game/bowling/deliveryTypes.ts';
 import { stockSpeed } from '../game/bowling/execute.ts';
 import type { FieldPreset } from '../game/fielding/presets.ts';
@@ -19,6 +19,7 @@ import type { DifficultyId } from '../game/model/difficulty.ts';
 import type { Hand, Player } from '../game/model/player.ts';
 import type { BallOutcome } from '../game/session/deliveryCycle.ts';
 import type { ContactResult } from '../game/batting/contact.ts';
+import { COIN_SETTLED, type CoinFace, type TossChoice, coinFor, computerChoice, flightTime, tossLine } from '../game/match/toss.ts';
 
 /**
  * App state. The match itself lives in a Match instance (outside React);
@@ -26,7 +27,32 @@ import type { ContactResult } from '../game/batting/contact.ts';
  * the match for the HUD (refreshed on match events), and UI flags. 3D
  * components read the Match directly every frame.
  */
-export type Screen = 'menu' | 'setup' | 'squad' | 'match';
+export type Screen = 'menu' | 'setup' | 'squad' | 'toss' | 'match';
+
+/**
+ * The toss, before the match: the player calls, the opposing captain spins
+ * the coin, and the winner chooses. The coin's face comes from the match
+ * seed; the scene shows it land.
+ */
+export interface TossState {
+  readonly seed: string;
+  /** call: waiting for heads or tails; flip: the coin is in the air; result: the winner chooses (or has chosen). */
+  readonly stage: 'call' | 'flip' | 'result';
+  readonly call: CoinFace | undefined;
+  readonly face: CoinFace;
+  readonly userWins: boolean | undefined;
+  /** The computer captain's choice when he wins. */
+  readonly computerChoice: TossChoice;
+  /** performance.now() of the flick (the coin leaves the hand), once called. */
+  readonly flickAt: number | undefined;
+}
+
+/** Height of the captain's hand when he flicks the coin, m. */
+export const TOSS_HAND_HEIGHT = 1.25;
+/** From the call to the flick (the captain sets himself), ms. */
+export const TOSS_WIND_UP = 450;
+/** From the flick to the result: the flight, the coin settling, and a look at it on the pitch, ms. */
+export const TOSS_REVEAL = (flightTime(TOSS_HAND_HEIGHT) + COIN_SETTLED + 1.6) * 1000;
 export type CameraMode = 'classic' | 'broadcast' | 'batter' | 'high';
 export type BatFirst = 'toss' | 'user' | 'opponent';
 
@@ -60,6 +86,11 @@ export interface MatchSnapshot {
   readonly ballsLeft: number | undefined;
   readonly userBatting: boolean;
   readonly userBowling: boolean;
+  /** Which side the human has in this innings (batting or bowling), on autoplay or not. */
+  readonly userSide: 'batting' | 'bowling' | undefined;
+  /** Autoplay asked for (the rest of the over or the innings), and whether the computer is playing this ball. */
+  readonly autoplay: Autoplay;
+  readonly autoplaying: boolean;
   readonly striker: { readonly id: string; readonly name: string; readonly hand: Hand; readonly card: BattingCard | undefined };
   readonly nonStriker: { readonly id: string; readonly name: string; readonly card: BattingCard | undefined };
   readonly bowler: { readonly name: string; readonly style: string; readonly card: BowlingCard | undefined; readonly fatigue: number };
@@ -101,6 +132,7 @@ export interface MatchSnapshot {
 export interface GameState {
   readonly screen: Screen;
   readonly setup: MatchSetup;
+  readonly toss: TossState | undefined;
   readonly match: Match | undefined;
   readonly snap: MatchSnapshot | undefined;
   readonly paused: boolean;
@@ -132,6 +164,9 @@ export interface GameState {
   goTo: (screen: Screen) => void;
   updateSetup: (patch: Partial<MatchSetup>) => void;
   startMatch: () => void;
+  /** At the toss: the player's call, then (if he won) his choice. */
+  callToss: (call: CoinFace) => void;
+  chooseAtToss: (choice?: TossChoice) => void;
   rematch: () => void;
   quitToMenu: () => void;
   setPaused: (paused: boolean) => void;
@@ -188,6 +223,9 @@ function snapshot(m: Match, toss: string): MatchSnapshot {
     ballsLeft: chase?.ballsLeft,
     userBatting: m.humanBatting,
     userBowling: m.humanBowling,
+    userSide: m.userSide,
+    autoplay: m.autoplay,
+    autoplaying: m.autoplaying,
     striker: { id: m.striker.id, name: m.striker.name, hand: m.striker.battingHand, card: card(m.striker) },
     nonStriker: { id: m.nonStriker.id, name: m.nonStriker.name, card: card(m.nonStriker) },
     bowler: {
@@ -260,14 +298,17 @@ function pick(team: Team, xiIds: readonly string[]): Player[] {
   return chosen.length === 11 ? chosen : defaultXi(team);
 }
 
-function createMatch(setup: MatchSetup, seed: string): { match: Match; toss: string } {
+function createMatch(setup: MatchSetup, seed: string, decided?: { battingFirst: SideId; toss: string }): { match: Match; toss: string } {
   const user = findTeam(setup.userTeamId);
   const opp = findTeam(setup.opponentId);
   const userXi = pick(user, setup.userXi);
   const oppXi = pick(opp, setup.opponentXi);
   let battingFirst: SideId;
   let toss: string;
-  if (setup.batFirst === 'toss') {
+  if (decided) {
+    battingFirst = decided.battingFirst;
+    toss = decided.toss;
+  } else if (setup.batFirst === 'toss') {
     const userWins = new Rng(`${seed}:toss`).chance(0.5);
     const winner = userWins ? user : opp;
     // The toss winner chooses to bat on a flat deck, bowl on a green one, otherwise a coin flip of preference.
@@ -291,6 +332,9 @@ function createMatch(setup: MatchSetup, seed: string): { match: Match; toss: str
   return { match, toss };
 }
 
+let tossTimer: ReturnType<typeof setTimeout> | undefined;
+const now = () => (typeof performance === 'undefined' ? Date.now() : performance.now());
+
 function readFlag(key: string, fallback: boolean): boolean {
   try {
     const v = localStorage.getItem(key);
@@ -312,13 +356,25 @@ export const useGame = create<GameState>()((set, get) => {
   const attach = (match: Match, toss: string) => {
     unsubscribe?.();
     unsubscribe = match.subscribe(() => set({ snap: snapshot(match, toss) }));
-    set({ match, snap: snapshot(match, toss), paused: false, meter: 0.5, screen: 'match', warming: true });
+    set({ match, snap: snapshot(match, toss), paused: false, meter: 0.5, screen: 'match', warming: true, toss: undefined });
     keyboard.enabled = true;
+  };
+  // Building a match (squads, AI, 24 skinned players) takes a moment: show the
+  // loading screen first, then build it once that has been painted.
+  const begin = (seed: string, decided?: { battingFirst: SideId; toss: string }) => {
+    const ticket = ++pendingStart;
+    set({ warming: true });
+    afterPaint(() => {
+      if (ticket !== pendingStart) return;
+      const { match, toss } = createMatch(get().setup, seed, decided);
+      attach(match, toss);
+    });
   };
 
   return {
     screen: 'menu',
     setup: DEFAULT_SETUP,
+    toss: undefined,
     match: undefined,
     snap: undefined,
     paused: false,
@@ -350,7 +406,8 @@ export const useGame = create<GameState>()((set, get) => {
     goTo: (screen) => {
       sound.unlock();
       keyboard.enabled = screen === 'match';
-      set({ screen });
+      if (screen !== 'toss') clearTimeout(tossTimer);
+      set({ screen, ...(screen !== 'toss' ? { toss: undefined } : {}) });
     },
     updateSetup: (patch) => {
       const s = get().setup;
@@ -363,27 +420,48 @@ export const useGame = create<GameState>()((set, get) => {
       };
       set({ setup: fixed });
     },
-    // Building a match (squads, AI, 24 skinned players) takes a moment: show the
-    // loading screen first, then build it once that has been painted.
+    // With "Toss for it", to the middle for the toss; otherwise straight to the match.
     startMatch: () => {
       sound.unlock();
-      const ticket = ++pendingStart;
-      set({ warming: true });
-      afterPaint(() => {
-        if (ticket !== pendingStart) return;
-        const { match, toss } = createMatch(get().setup, newSeed());
-        attach(match, toss);
-      });
+      const setup = get().setup;
+      if (setup.batFirst === 'toss') {
+        // To the middle for the toss first.
+        const seed = newSeed();
+        clearTimeout(tossTimer);
+        keyboard.enabled = false;
+        set({
+          screen: 'toss',
+          toss: { seed, stage: 'call', call: undefined, face: coinFor(seed), userWins: undefined, computerChoice: computerChoice(setup.pitch, seed), flickAt: undefined },
+        });
+        return;
+      }
+      begin(newSeed());
+    },
+    callToss: (call) => {
+      const t = get().toss;
+      if (!t || t.stage !== 'call') return;
+      sound.unlock();
+      set({ toss: { ...t, stage: 'flip', call, userWins: call === t.face, flickAt: now() + TOSS_WIND_UP } });
+      clearTimeout(tossTimer);
+      tossTimer = setTimeout(() => {
+        const cur = get().toss;
+        if (cur && cur.seed === t.seed && cur.stage === 'flip') set({ toss: { ...cur, stage: 'result' } });
+      }, TOSS_WIND_UP + TOSS_REVEAL);
+    },
+    chooseAtToss: (choice) => {
+      const t = get().toss;
+      if (!t || t.stage !== 'result') return;
+      const user = findTeam(get().setup.userTeamId);
+      const opp = findTeam(get().setup.opponentId);
+      const pick = t.userWins ? choice : t.computerChoice;
+      if (!pick) return;
+      // The user's side is 'home'.
+      const userBats = t.userWins ? pick === 'bat' : pick === 'bowl';
+      begin(t.seed, { battingFirst: userBats ? 'home' : 'away', toss: tossLine(t.userWins ? user.name : opp.name, pick) });
     },
     rematch: () => {
-      const ticket = ++pendingStart;
       hush();
-      set({ warming: true });
-      afterPaint(() => {
-        if (ticket !== pendingStart) return;
-        const { match, toss } = createMatch(get().setup, newSeed());
-        attach(match, toss);
-      });
+      get().startMatch();
     },
     quitToMenu: () => {
       pendingStart++;
@@ -391,7 +469,8 @@ export const useGame = create<GameState>()((set, get) => {
       unsubscribe = undefined;
       keyboard.enabled = false;
       hush();
-      set({ screen: 'menu', match: undefined, snap: undefined, paused: false, replaying: false, replayIds: [], warming: false });
+      clearTimeout(tossTimer);
+      set({ screen: 'menu', match: undefined, snap: undefined, toss: undefined, paused: false, replaying: false, replayIds: [], warming: false });
     },
     setPaused: (paused) => {
       get().match?.setPaused(paused);

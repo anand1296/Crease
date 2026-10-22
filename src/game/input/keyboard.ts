@@ -27,6 +27,8 @@ export const GAME_ACTIONS = [
   'help',
   'mute',
   'commentary',
+  'autoOver',
+  'autoInnings',
   'pick1',
   'pick2',
   'pick3',
@@ -66,6 +68,9 @@ export const DEFAULT_BINDINGS: Bindings = {
   help: ['KeyH'],
   mute: ['KeyM'],
   commentary: ['KeyV'],
+  // Autoplay: the computer plays the rest of the over (Y) or the innings (U) for you.
+  autoOver: ['KeyY'],
+  autoInnings: ['KeyU'],
   pick1: ['Digit1'],
   pick2: ['Digit2'],
   pick3: ['Digit3'],

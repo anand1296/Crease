@@ -4,11 +4,11 @@
 
 | | |
 | --- | --- |
-| Version | 0.9.0 (October 2026) |
+| Version | 0.10.0 (October 2026) |
 | Repository | https://github.com/anand1296/Crease |
 | Hosting | Vercel (static site, Git-integrated: every push to `main` deploys; pull requests get previews) |
 | Stack | TypeScript (strict) · React 19 · Three.js r180 via React Three Fiber 9 · Vite 7 · Zustand 5 · Vitest 3 · Playwright |
-| Size | ≈14,200 lines of application TypeScript, ≈2,000 lines of unit and simulation tests (150 tests), 3 browser tests |
+| Size | ≈15,100 lines of application TypeScript, ≈2,100 lines of unit and simulation tests (158 tests), 4 browser tests |
 | Backend | None. Everything — physics, AI, commentary, audio — runs in the player's browser |
 
 Companion documents: [README](../README.md) (running and playing), [GAME_DESIGN](../GAME_DESIGN.md) (rules and the simulation's numbers), [ARCHITECTURE](../ARCHITECTURE.md) (module summary), [CHANGELOG](../CHANGELOG.md), [batting report](batting-report.md).
@@ -61,6 +61,8 @@ Crease was built in vertical slices, each of which was playable, tested, documen
 | 0.4.0 | 22 Oct 2026 | Realism pass: skinned, motion-captured player models; classic and broadcast camera directors; physical sky, image-based lighting, post-processing; umpires; breakable stumps; physically modelled bat-on-ball sound |
 | 0.5.0 | 22 Oct 2026 | Real squads (India, Pakistan, Australia, England), national kits with clash rule, T20 batting AI |
 | 0.6.0 | 22 Oct 2026 | Game AI: learning bowling attack, AI captain with fielding restrictions, field-aware T20 batting, spoken commentary, coach |
+| 0.7.0–0.9.0 | 22 Oct 2026 | Match flow and replays; smoothness (shader warm-up, adaptive quality); bowling overhaul (three-step bowling, real actions, field presets); Cricket 07 batting, fielding throws, broadcast cameras |
+| 0.10.0 | 23 Oct 2026 | Run-up framed on the bowler, autoplay (over or innings), the toss in 3D |
 
 ### Working method
 
@@ -353,7 +355,7 @@ Every player has a hidden **control rig** (`Humanoid.tsx`, sized to the avatar's
 | Ball beyond 12 m | **Cut** to a high camera on the far side of the boundary, square to the ball's path, framing ball and chasing fielder (field of view computed to fit both and the ball's height) |
 | Stumps broken | **Cut** to a low stump camera |
 
-Since 0.9.0 the **broadcast** style is the default and modelled on television coverage: the main camera sits high in the stand behind the bowler (≈70 m back, 17 m up, 10° → 6° lens through the run-up), which gives the compressed broadcast look; after the stroke it stays on its tripod and pans and zooms out with the ball (as a camera operator does); then the director cuts to one of a set of **fixed cameras** on gantries at the front of the stands — square of the wicket on either side for balls hit square, at the keeper's end for balls hit straight, the main camera for balls behind square — and stays on it for the rest of the ball, framed tight on ball and chasing fielder. Between balls there is a long-lens close-up of the batter. The vignette was removed from the effect chain.
+Since 0.9.0 the **broadcast** style is the default and modelled on television coverage: the main camera sits high in the stand behind the bowler (≈70 m back, 17 m up), which gives the compressed broadcast look. Since 0.10.0 the run-up is **framed on the bowler**: `frameBetween(camera, low, high)` works out the tilt and the lens that put one point just above the foot of the frame and another just below the top, from the two points' angles below the camera; the low point is the bowler's feet (where the scene says he is this frame, a stride behind him for the trailing foot) and the high point the batter's head and the keeper. As he runs in, the angle between the two shrinks, so the shot tightens by itself — about 11° at the top of a fast bowler's 18 m run-up to about 6° at release — the way a camera operator tilts and zooms to hold a running bowler. (The earlier version eased along a fixed zoom from the wide shot, which left a fast bowler below the bottom of the frame for most of his run-up.) After the release the frame holds; after the stroke it stays on its tripod and pans and zooms out with the ball (as a camera operator does); then the director cuts to one of a set of **fixed cameras** on gantries at the front of the stands — square of the wicket on either side for balls hit square, at the keeper's end for balls hit straight, the main camera for balls behind square — and stays on it for the rest of the ball, framed tight on ball and chasing fielder. Between balls there is a long-lens close-up of the batter. The vignette was removed from the effect chain.
 
 The director has two styles. **Classic** (the default since 0.7.0) is Cricket 07's framing: the camera sits about 5 m up and 27 m behind the bowler's stumps with a 30° lens, and pushes in to 3.9 m up, 17 m back with a 19° lens — high enough that the line to the striker clears the umpire's hat. **TV** is the long-lens broadcast framing (46 m back, 15° → 9.5°). <kbd>C</kbd> cycles classic → broadcast → batter's view → high wide view.
 
@@ -370,9 +372,10 @@ All synthesised in the browser (`audio/sound.ts`), through a gentle limiter and 
 ## 12. UI, state and input
 
 - **Match HUD**: a scoreboard bar along the bottom (score, overs, batters, bowler and this over's balls, run rate, the chase, powerplay); a **controls panel** that shows the batting or bowling keys at all times, lights the keys held or just pressed (polled each animation frame from the keyboard state) and names the stroke the current direction + key will play (the same `shotFromInput` the match uses); the *Next ball* prompt and the over and wicket cards; the REPLAY badge.
-- **Screens**: main menu (over the live stadium, orbiting camera) → match setup (teams, overs 2/5/10/15/20, difficulty, pitch, toss/bat/bowl) → squad board (tick 11 of the squad, reorder, validation: exactly 11, warnings for no keeper, fewer than five bowlers, no spinner) → match (HUD) → innings break (scorecard, coach) → result (summary, top performers, both scorecards, coach, rematch).
+- **Screens**: main menu (over the live stadium, orbiting camera) → match setup (teams, overs 2/5/10/15/20, difficulty, pitch, toss/bat/bowl) → squad board (tick 11 of the squad, reorder, validation: exactly 11, warnings for no keeper, fewer than five bowlers, no spinner) → the toss (a 3D scene: captains and referee in the middle, call H/T, the coin flicked and shown landed close up, the winner chooses B/L; the store holds the toss state, `match/toss.ts` the coin's flight and face, `scenes/TossView.tsx` the scene) → match (HUD) → innings break (scorecard, coach) → result (summary, top performers, both scorecards, coach, rematch).
 - **Store**: `state/game.ts` (Zustand) holds the screen, setup, settings (sound, graphics, commentary — persisted in `localStorage`) and a **snapshot** of the match rebuilt on match events, so the HUD re-renders on events, not frames.
-- **Input**: bindings are data (`input/keyboard.ts`); the handler reads the current match from the store. Batting (Cricket 07 scheme): S front foot, W back foot, D use your feet, A leave, Shift lofted, screen-relative arrows (↓ straight), Space/R or D after the hit to run. Bowling: 1–9/Enter (choose bowler), 1–6 or Q/E (delivery), ↑/↓ amount, O side, F field, Space (marker, run in, lock pace), Backspace (back), arrows (marker). Fielding: hold ↑ (keeper's end) or ↓ (bowler's end) for power, release to throw. General: Enter/Space (next ball, continue, skip replay), P/Esc, C, M, V, H.
+- **Autoplay**: `Match.startAutoplay('over' | 'innings')` makes `humanBatting` and `humanBowling` false from the next ball, so every decision goes to the computer exactly as in a computer-v-computer match (shot choice, deliveries, bowler changes, fields) and no ball waits for a key; the clock runs at 2×. It ends at the over or innings end (`afterBall` hands back with the over card) or when called off. The HUD keeps showing the human's side (`userSide`).
+- **Input**: bindings are data (`input/keyboard.ts`); the handler reads the current match from the store. Batting (Cricket 07 scheme): S front foot, W back foot, D use your feet, A leave, Shift lofted, screen-relative arrows (↓ straight), Space/R or D after the hit to run. Bowling: 1–9/Enter (choose bowler), 1–6 or Q/E (delivery), ↑/↓ amount, O side, F field, Space (marker, run in, lock pace), Backspace (back), arrows (marker). Fielding: hold ↑ (keeper's end) or ↓ (bowler's end) for power, release to throw. General: Enter/Space (next ball, continue, skip replay), Y/U (autoplay the over/innings), P/Esc, C, M, V, H.
 - **Accessibility basics**: DOM UI with roles and labels, visible focus, `prefers-reduced-motion` respected, captions for every spoken line (the ticker).
 
 ## 13. Data: teams and squads

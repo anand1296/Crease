@@ -1895,3 +1895,150 @@ kbd.k.on {
   border-radius: 2px;
   background: #fff;
 }
+
+/* --- Autoplay ---------------------------------------------------------------------------- */
+
+.autoplay {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border-radius: 4px;
+  background: var(--glass);
+  border: 1px solid rgba(241, 238, 227, 0.08);
+  color: var(--chalk);
+  font: 600 15px var(--display);
+}
+
+.autoplay button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 3px;
+  border: 1px solid rgba(241, 238, 227, 0.22);
+  background: transparent;
+  color: var(--chalk);
+  font: inherit;
+  cursor: pointer;
+}
+
+.autoplay button:hover,
+.autoplay button:focus-visible {
+  border-color: var(--brass);
+  color: var(--brass);
+}
+
+.autoplay.on {
+  border-color: rgba(201, 164, 71, 0.5);
+}
+
+.autoplay-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brass);
+  animation: next-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .autoplay-dot {
+    animation: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .autoplay {
+    top: auto;
+    bottom: 140px;
+    font-size: 13px;
+  }
+}
+
+/* --- Toss -------------------------------------------------------------------------------- */
+
+.toss {
+  position: absolute;
+  left: 50%;
+  bottom: 40px;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 32px));
+  padding: 14px 18px 16px;
+  border-radius: 4px;
+  background: var(--glass);
+  border-top: 3px solid var(--brass);
+  color: var(--chalk);
+  text-align: center;
+}
+
+.toss-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.toss-title {
+  font: 700 26px var(--display);
+  letter-spacing: 0.02em;
+}
+
+.toss-chip {
+  min-width: 52px;
+  padding: 3px 8px;
+  border-radius: 2px;
+  font: 700 16px var(--display);
+}
+
+.toss-line,
+.toss-result {
+  margin: 10px 0 0;
+  font-size: 16px;
+  color: var(--chalk-dim);
+}
+
+.toss-result {
+  font: 600 22px var(--display);
+  color: var(--chalk);
+}
+
+.toss-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.toss-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-radius: 3px;
+  border: 1px solid rgba(241, 238, 227, 0.25);
+  background: transparent;
+  color: var(--chalk);
+  font: 600 18px var(--display);
+  cursor: pointer;
+}
+
+.toss-actions button.primary {
+  background: var(--brass);
+  border-color: var(--brass);
+  color: #1c1505;
+}
+
+.toss-actions button.primary kbd {
+  color: #1c1505;
+  border-color: rgba(28, 21, 5, 0.45);
+}
+
+.toss-actions button:hover,
+.toss-actions button:focus-visible {
+  outline: 2px solid var(--chalk);
+  outline-offset: 2px;
+}

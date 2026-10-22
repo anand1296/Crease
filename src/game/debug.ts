@@ -18,6 +18,8 @@ export interface CreaseDebug {
   /** Slows or speeds the simulation (tests and frame-by-frame captures only). */
   setSpeed?: (speed: number) => void;
   /** Pins the camera (tests and close-up captures only); undefined releases it. */
+  /** Holds the toss scene at this many seconds after the coin is flicked (undefined: live). */
+  pinToss?: (seconds: number | undefined) => void;
   setCamera?: (view: { pos: [number, number, number]; look: [number, number, number]; fov: number } | undefined) => void;
   /** Ball position, when one is in play or in the bowler's hand. */
   ballWorld?: () => [number, number, number] | undefined;

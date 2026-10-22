@@ -101,6 +101,21 @@ test.describe('gameplay', () => {
       await expect.poll(() => page.evaluate(() => window.__crease?.phase?.())).not.toBe('review');
     }
     expect(await page.evaluate(() => window.__crease?.renderInfo?.().programs)).toBe(programs);
+
+    // Autoplay: Y hands the rest of the over to the computer; it plays on without waiting, until Y takes it back.
+    await expect(page.getByTestId('autoplay')).toHaveAttribute('data-mode', 'off');
+    const before = await balls(page);
+    await page.keyboard.press('KeyY');
+    await expect(page.getByTestId('autoplay')).toHaveAttribute('data-mode', 'over');
+    await page.evaluate(() => window.__crease?.setSpeed?.(3));
+    // The ball under way is still the player's; from the next one the computer bats, so the batting keys go away.
+    await expect.poll(() => balls(page), { timeout: 180_000 }).toBeGreaterThan(before);
+    await expect(page.getByTestId('controls-panel')).toBeHidden({ timeout: 60_000 });
+    await expect.poll(() => balls(page), { timeout: 180_000 }).toBeGreaterThan(before + 1);
+    await page.keyboard.press('KeyY');
+    await expect.poll(() => page.evaluate(() => window.__crease?.phase?.()), { timeout: 180_000 }).toBe('review');
+    await page.evaluate(() => window.__crease?.setSpeed?.(1));
+    await expect(page.getByTestId('autoplay')).toHaveAttribute('data-mode', 'off');
     const score = await page.evaluate(() => window.__crease?.score?.());
     expect((score?.balls ?? 0) + 3).toBeGreaterThanOrEqual(3);
 
@@ -113,6 +128,34 @@ test.describe('gameplay', () => {
     await page.getByRole('button', { name: 'Quit to main menu' }).click();
     await expect(page.getByTestId('menu-play')).toBeVisible();
 
+    expect(errors).toEqual([]);
+  });
+
+  test('the toss: call it, see the coin land, and the winner chooses', async ({ page }) => {
+    const errors: string[] = [];
+    await ready(page, errors);
+    await page.getByTestId('menu-play').click();
+    await page.getByRole('button', { name: '2', exact: true }).click();
+    await page.getByRole('button', { name: 'Toss for it' }).click();
+    await page.getByTestId('start-match').click();
+    const toss = page.getByTestId('toss');
+    await expect(toss).toHaveAttribute('data-stage', 'call');
+    await page.keyboard.press('KeyT');
+    await expect(toss).toHaveAttribute('data-stage', 'flip');
+    await expect(toss).toHaveAttribute('data-stage', 'result', { timeout: 30_000 });
+    const result = (await page.getByTestId('toss-result').textContent()) ?? '';
+    expect(result).toMatch(/^(Heads|Tails)\. /);
+    let role = '';
+    if (result.includes('You won')) {
+      await page.keyboard.press('KeyL');
+      role = 'You are bowling';
+    } else {
+      role = result.includes('chose to bat') ? 'You are bowling' : 'You are batting';
+      await page.keyboard.press('Enter');
+    }
+    await takeTheField(page);
+    await expect(page.getByTestId('role')).toContainText(role);
+    await expect(page.getByTestId('review')).toBeVisible();
     expect(errors).toEqual([]);
   });
 

@@ -45,6 +45,12 @@ export function useGameControls(): void {
         if (action === 'confirm' || action === 'bowl' || action === 'run') g.skipReplay();
         return;
       }
+      // Autoplay: Y the over, U the innings; either again takes the controls back.
+      if (action === 'autoOver' || action === 'autoInnings') {
+        if (m.autoplay !== 'off') m.stopAutoplay();
+        else m.startAutoplay(action === 'autoOver' ? 'over' : 'innings');
+        return;
+      }
       // Between balls the game waits for the player: Enter or Space moves on.
       if (m.phase === 'review') {
         if (action === 'confirm' || action === 'bowl' || action === 'run') m.next();

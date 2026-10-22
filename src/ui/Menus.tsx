@@ -405,6 +405,12 @@ export function HowToPlay({ onClose }: { onClose: () => void }) {
           When your fielder has the ball and the batters are running, hold <kbd>↑</kbd> to throw to the keeper or <kbd>↓</kbd> to the
           bowler, and let go to throw. Green is quick and accurate; red is forced and wild. Hit the stumps and they may be run out.
         </p>
+        <h2>Autoplay and the toss</h2>
+        <p>
+          <kbd>Y</kbd> lets the computer play your side for the rest of the over, <kbd>U</kbd> for the rest of the innings; press it again to
+          take over from the next ball. At the toss, call <kbd>H</kbd> heads or <kbd>T</kbd> tails; win it and choose <kbd>B</kbd> bat or{' '}
+          <kbd>L</kbd> bowl.
+        </p>
         <p className="dim">
           <kbd>P</kbd> pause · <kbd>C</kbd> camera · <kbd>M</kbd> sound · <kbd>V</kbd> commentary · <kbd>H</kbd> help
         </p>

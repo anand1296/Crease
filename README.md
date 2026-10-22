@@ -31,6 +31,8 @@ Browser tests: to test a deployed build use `E2E_BASE_URL=https://… npm run te
 
 **Main menu → Play a match.** Choose your team and the opposition (India, Pakistan, Australia, England — each board's most recently announced men's T20I squad, 15–16 players), the number of overs, difficulty, pitch and who bats first (or toss for it). **Choose playing XI** opens the squad board: tick eleven players, reorder the batting order with ↑/↓, and the board warns you if the side has no keeper, fewer than five bowlers or no spinner. Then **Start match**.
 
+**The toss** (with *Toss for it*): the two captains meet the match referee on the pitch. Call <kbd>H</kbd> heads or <kbd>T</kbd> tails, watch the coin come down, and if you win choose <kbd>B</kbd> bat or <kbd>L</kbd> bowl; if you lose, the other captain decides.
+
 **Pace of play**: after each ball the game waits for <kbd>Enter</kbd> / <kbd>Space</kbd> (*Next ball*). At the end of every over you get an over summary with the scorecard, and after every wicket a dismissal card (how out, fall of wicket, partnership, next batter) with the scorecard. Wickets and boundaries are replayed in slow motion first (<kbd>Enter</kbd> skips; *Replays* can be switched off in the menus). **Game speed** in match setup: Relaxed, Normal (default, 0.8×) or Real time. The controls panel on the left of the screen shows the keys at all times, lights them as you press them, and names the stroke you are about to play.
 
 Each bowler may bowl at most a fifth of the overs (rounded up) and never two overs in a row. Out of overs, all out, or the target reached ends an innings; the result screen shows the margin, top performers and both scorecards. <kbd>H</kbd> shows the controls in the game.
@@ -72,11 +74,13 @@ The same ball again is <kbd>Space</kbd>, <kbd>Space</kbd>, <kbd>Space</kbd>.
 
 ### General
 
+**Autoplay**: <kbd>Y</kbd> lets the computer play your side (batting or bowling) for the rest of the over — or the next over, between overs — and <kbd>U</kbd> for the rest of the innings, at twice the pace and without stopping between balls. Press the key again, or *Take over*, and you have the controls back from the next ball. The buttons are at the top left of the screen.
+
 <kbd>P</kbd> / <kbd>Esc</kbd> pause (resume, sound, commentary, restart, quit to menu) · <kbd>Enter</kbd> / <kbd>Space</kbd> next ball, continue past a card, skip a replay · <kbd>C</kbd> camera · <kbd>M</kbd> sound on/off · <kbd>V</kbd> commentary on/off · <kbd>H</kbd> help. The game pauses itself when the window loses focus.
 
 **Graphics** (main menu): *High* adds soft shadows, image-based lighting, the crowd, ambient occlusion, bloom, filmic tone mapping and up to 1.5× resolution; *Low* drops them for machines without a capable GPU. Low is chosen automatically when the browser reports a software renderer; your choice is remembered. On top of that the game watches its own frame rate: below ≈45 fps it lowers the resolution step by step (and on High turns off ambient occlusion), and raises it again when there is headroom.
 
-**Camera**: the default *broadcast* coverage works like television: the main camera is high in the stand behind the bowler on a long lens, zooming in through the run-up; after the stroke it pans and zooms out with the ball, then the director cuts to fixed cameras at the front of the stands (square on either side, or at the keeper's end for straight hits) framed on ball and fielder; between balls, a long-lens close-up of the batter. <kbd>C</kbd> cycles to the *classic* Cricket 07-style camera (low and close behind the bowler), the view from behind the striker and a high wide view.
+**Camera**: the default *broadcast* coverage works like television: the main camera is high in the stand behind the bowler on a long lens; as the bowler sets off it is framed with him at the foot of the picture and the batter at the top, and it tilts and zooms in with him so that by release the two fill the frame; after the stroke it pans and zooms out with the ball, then the director cuts to fixed cameras at the front of the stands (square on either side, or at the keeper's end for straight hits) framed on ball and fielder; between balls, a long-lens close-up of the batter. <kbd>C</kbd> cycles to the *classic* Cricket 07-style camera (low and close behind the bowler), the view from behind the striker and a high wide view.
 
 ## The AI opposition
 

@@ -128,6 +128,9 @@ export interface BowlingSetup {
  */
 export type AimStep = 'type' | 'target';
 
+/** Autoplay: off, the rest of the over, or the rest of the innings. */
+export type Autoplay = 'off' | 'over' | 'innings';
+
 export type MatchPhase = 'between' | 'review' | 'chooseBowler' | 'aiming' | 'delivery' | 'inningsBreak' | 'complete';
 
 /**
@@ -272,12 +275,86 @@ export class Match {
     return this.fatigue.get(this.bowler.id) ?? 0;
   }
 
+  /** A human is batting (and not handing the controls to the computer on autoplay). */
   get humanBatting(): boolean {
-    return this.battingSide.controller === 'human';
+    return !this.autoplayActive && this.battingSide.controller === 'human';
   }
 
+  /** A human is bowling (and not handing the controls to the computer on autoplay). */
   get humanBowling(): boolean {
-    return this.bowlingSide.controller === 'human';
+    return !this.autoplayActive && this.bowlingSide.controller === 'human';
+  }
+
+  /** The human's side is batting or bowling in this innings (whether or not on autoplay). */
+  get userSide(): 'batting' | 'bowling' | undefined {
+    if (this.battingSide.controller === 'human') return 'batting';
+    if (this.bowlingSide.controller === 'human') return 'bowling';
+    return undefined;
+  }
+
+  // --- Autoplay ------------------------------------------------------------------------
+
+  private autoplayMode: Autoplay = 'off';
+  /** The computer is playing the human's side for the current ball. */
+  private autoplayActive = false;
+  /** Autoplay of an over stops when this many legal balls of the innings have been bowled. */
+  private autoplayUntil = 0;
+  private autoplayInnings = 0;
+
+  /** What the computer has been asked to play for the human: nothing, the rest of the over, or the innings. */
+  get autoplay(): Autoplay {
+    return this.autoplayMode;
+  }
+
+  /** Whether the computer is playing the current ball for the human. */
+  get autoplaying(): boolean {
+    return this.autoplayActive;
+  }
+
+  /**
+   * Hand the human's side to the computer for the rest of this over (or the
+   * next over, between overs) or for the rest of the innings. It takes over
+   * from the next ball; one in progress is finished by the player.
+   */
+  startAutoplay(mode: Exclude<Autoplay, 'off'>): boolean {
+    if (!this.userSide || this.phase === 'inningsBreak' || this.phase === 'complete') return false;
+    const balls = this.current.balls;
+    // Mid-over: to the end of it. Between overs (or before the first ball): the whole next over.
+    const midOver = this.ballsThisOver > 0;
+    this.autoplayMode = mode;
+    this.autoplayInnings = this.inningsIndex;
+    this.autoplayUntil = mode === 'over' ? balls + (midOver ? 6 - this.ballsThisOver : 6) : Number.POSITIVE_INFINITY;
+    if (this.phase === 'review') {
+      this.review = undefined;
+      this.enterBetween();
+    } else if (this.phase === 'aiming' || this.phase === 'chooseBowler') {
+      // The human was setting up a ball: the computer bowls it instead.
+      this.beginBall();
+    } else {
+      this.emit();
+    }
+    return true;
+  }
+
+  /** Take the controls back: the computer finishes the ball in progress, the player has the next. */
+  stopAutoplay(): void {
+    if (this.autoplayMode === 'off') return;
+    this.autoplayMode = 'off';
+    this.emit();
+  }
+
+  /** At the start of each ball: whether the computer plays it for the human. */
+  private updateAutoplay(): void {
+    const wasActive = this.autoplayActive;
+    if (this.autoplayMode !== 'off' && (this.inningsIndex !== this.autoplayInnings || this.current.balls >= this.autoplayUntil)) this.autoplayMode = 'off';
+    this.autoplayActive = this.autoplayMode !== 'off';
+    // Back in control of the ball: start from the current bowler's stock ball.
+    if (wasActive && !this.autoplayActive && this.humanBowling) this.setup = defaultSetup(this.bowler);
+  }
+
+  private endAutoplay(): void {
+    this.autoplayMode = 'off';
+    this.autoplayActive = false;
   }
 
   /** Runs still needed and balls left, in the chase. */
@@ -349,7 +426,8 @@ export class Match {
 
   advance(frameSeconds: number): number {
     if (this.paused) return 0;
-    const steps = this.clock.advance(frameSeconds * this.speed);
+    // On autoplay the game moves along at twice the pace.
+    const steps = this.clock.advance(frameSeconds * this.speed * (this.autoplayActive ? 2 : 1));
     for (let i = 0; i < steps; i++) this.step(this.clock.stepSeconds);
     return steps;
   }
@@ -626,6 +704,7 @@ export class Match {
   }
 
   private beginBall(): void {
+    this.updateAutoplay();
     if (this.humanBowling) {
       // A new over (or innings): the human captain chooses the bowler. Each ball starts by choosing
       // the delivery (the last one is kept, so the same again is Space, Space).
@@ -887,6 +966,11 @@ export class Match {
       // Figures after the over is closed, so a maiden is counted.
       over = { number: Math.floor(this.current.balls / 6), bowler: bowler.name, figures: this.card(bowler), balls, runs };
     }
+    // Autoplay done (or called off): the player is back in control, and the game waits for him.
+    if (this.autoplayActive && (this.autoplayMode === 'off' || this.current.balls >= this.autoplayUntil)) {
+      this.endAutoplay();
+      if (this.humanBowling) this.setup = defaultSetup(this.bowler);
+    }
     if (!this.humanInvolved) {
       this.enterBetween();
       return;
@@ -952,6 +1036,8 @@ export class Match {
     else if (inn.balls >= total) reason = 'overs';
     if (!reason) return false;
     this.innings[this.innings.length - 1] = { ...inn, endReason: reason };
+    // Autoplay stops with the innings: the player takes the break and the next innings.
+    this.endAutoplay();
     if (this.innings.length === 1) {
       this.phase = 'inningsBreak';
       this.phaseTimer = AUTO_BREAK;
@@ -999,11 +1085,9 @@ export class Match {
       if (p.id !== this.bowlerId) this.fatigue.set(p.id, fatigueAfterRest(this.fatigue.get(p.id) ?? 0));
     }
     this.recent = [];
-    if (this.humanBowling) {
-      this.needsBowlerChoice = true;
-    } else {
-      this.bowlerId = this.suggestedBowler().id;
-    }
+    // The human captain picks the next bowler (when he is back in control); on autoplay, the computer's pick stands meanwhile.
+    if (this.bowlingSide.controller === 'human') this.needsBowlerChoice = true;
+    if (!this.humanBowling) this.bowlerId = this.suggestedBowler().id;
   }
 
   private swapStrike(): void {

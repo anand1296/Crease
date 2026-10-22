@@ -221,6 +221,63 @@ describe('Match (human)', () => {
   });
 });
 
+describe('Autoplay', () => {
+  const dt = 1 / 240;
+
+  it('plays the rest of the over for the batter without stopping, then hands back with the over card', () => {
+    const m = new Match(config({ home: side(team(0), 'human'), seed: 'auto-over', overs: 5 }));
+    expect(m.phase).toBe('review');
+    expect(m.startAutoplay('over')).toBe(true);
+    expect(m.autoplay).toBe('over');
+    let reviews = 0;
+    while (m.phase !== 'review' && m.phase !== 'inningsBreak' && m.time < 2000) {
+      tick(m, dt);
+      if (m.phase === 'delivery') expect(m.humanBatting).toBe(false);
+    }
+    if (m.phase === 'review') reviews += 1;
+    expect(reviews).toBe(1);
+    expect(m.current.balls).toBe(6);
+    expect(m.autoplay).toBe('off');
+    expect(m.humanBatting).toBe(true);
+    expect(m.review?.kind === 'over' || m.review?.kind === 'wicket').toBe(true);
+  });
+
+  it('mid-over, plays only to the end of that over', () => {
+    const m = new Match(config({ home: side(team(0), 'human'), seed: 'auto-mid', overs: 5 }));
+    m.next();
+    while (m.current.balls < 2 && m.time < 2000) {
+      tick(m, dt);
+      if (m.phase === 'review') m.next();
+    }
+    while (m.phase !== 'review') tick(m, dt);
+    expect(m.startAutoplay('over')).toBe(true);
+    while (m.phase !== 'review' && m.phase !== 'inningsBreak' && m.time < 2000) tick(m, dt);
+    expect(m.current.balls).toBe(6);
+  });
+
+  it('bowls the whole innings for the human captain, stops at the break, and can be called off', () => {
+    const m = new Match(config({ home: side(team(0), 'human'), battingFirst: 'away', seed: 'auto-inn', overs: 3 }));
+    expect(m.startAutoplay('innings')).toBe(true);
+    while (m.phase !== 'inningsBreak' && m.phase !== 'complete' && m.time < 5000) {
+      tick(m, dt);
+      expect(m.phase === 'review' || m.phase === 'chooseBowler' || m.phase === 'aiming').toBe(false);
+    }
+    expect(m.phase).toBe('inningsBreak');
+    expect(m.autoplay).toBe('off');
+    // Every over had a different bowler from the one before.
+    expect(m.innings[0]?.bowlingCards.length ?? 0).toBeGreaterThanOrEqual(2);
+    m.continueAfterBreak();
+    expect(m.phase).toBe('review');
+    expect(m.startAutoplay('innings')).toBe(true);
+    while (m.history.length < 9 + 2 && m.time < 8000) tick(m, dt);
+    m.stopAutoplay();
+    expect(m.autoplay).toBe('off');
+    // The ball in progress is finished by the computer; then the player has the controls.
+    while (m.phase !== 'review' && m.time < 8000) tick(m, dt);
+    expect(m.humanBatting).toBe(true);
+  });
+});
+
 describe('Human bowling: delivery, landing marker, run-up', () => {
   const dt = 1 / 240;
   const toAiming = (seed: string, overs = 5) => {
