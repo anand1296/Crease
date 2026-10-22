@@ -161,7 +161,7 @@ export class AvatarRig {
       }
       this.source = key;
     }
-    this.fade = Math.min(1, this.fade + dt / FADE);
+    this.fade = Math.min(1, this.fade + dt / (pose.fade ?? FADE));
 
     let targetRootY: number;
     if (pose.clip) {

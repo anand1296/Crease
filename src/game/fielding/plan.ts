@@ -124,6 +124,107 @@ export function buildField(fielders: readonly Player[], positions: readonly Fiel
   });
 }
 
+/**
+ * Re-sets a field the way a captain does: each new position is filled by the
+ * nearest fielder who is free, so a change of field moves people a few
+ * metres rather than sending them across the ground. Close catching
+ * positions (slips, gully, short leg) still go to the best catchers.
+ * `previous` is where each fielder stood in the last field; anyone without
+ * one falls back to `buildField`'s catching order.
+ */
+export function rebuildField(
+  fielders: readonly Player[],
+  positions: readonly FieldPosition[],
+  batterHand: Hand,
+  previous: ReadonlyMap<string, { readonly x: number; readonly z: number }>,
+): Fielder[] {
+  const first = buildField(fielders, positions, batterHand);
+  // The first field of the innings: nobody is anywhere yet. (Someone new to the field — last
+  // over's bowler — counts as standing mid-pitch, where he finished his over.)
+  if (!fielders.some((p) => previous.has(p.id))) return first;
+  const left = batterHand === 'left';
+  const slots = positions.slice(0, fielders.length).map((position) => ({ position, xz: fieldPositionXZ(position, left), close: position.distance < 14 }));
+  const taken = new Set<string>();
+  const out = new Map<number, Fielder>();
+  // Close catchers first, by catching ability (as in buildField's order).
+  slots.forEach((slot, j) => {
+    if (!slot.close) return;
+    const best = fielders.filter((p) => !taken.has(p.id)).sort((a, b) => b.fielding.catching - a.fielding.catching)[0];
+    if (!best) return;
+    taken.add(best.id);
+    out.set(j, { player: best, position: slot.position, start: slot.xz, keeper: false });
+  });
+  // Everyone else: the assignment with the least total squared distance (so nobody makes a long run
+  // to save others a short one), found exactly with the Hungarian algorithm.
+  const free = fielders.filter((p) => !taken.has(p.id));
+  const open = slots.map((slot, j) => ({ slot, j })).filter(({ j }) => !out.has(j));
+  const cost = free.map((p) => {
+    const from = previous.get(p.id) ?? { x: 0, z: 0 };
+    return open.map(({ slot }) => (from.x - slot.xz.x) ** 2 + (from.z - slot.xz.z) ** 2);
+  });
+  const match = hungarian(cost);
+  match.forEach((col, row) => {
+    const player = free[row];
+    const target = open[col];
+    if (player && target) out.set(target.j, { player, position: target.slot.position, start: target.slot.xz, keeper: false });
+  });
+  return slots.map((_, j) => out.get(j) ?? first[j]).filter((f): f is Fielder => f !== undefined);
+}
+
+/**
+ * Minimum-cost assignment of rows to columns (Kuhn–Munkres, O(n³)) for a
+ * square or wide matrix; returns the column assigned to each row.
+ */
+export function hungarian(cost: readonly (readonly number[])[]): number[] {
+  const n = cost.length;
+  const m = Math.max(n, ...cost.map((r) => r.length));
+  const INF = Number.POSITIVE_INFINITY;
+  const c = (i: number, j: number) => cost[i - 1]?.[j - 1] ?? 0;
+  const u = new Array<number>(n + 1).fill(0);
+  const v = new Array<number>(m + 1).fill(0);
+  const p = new Array<number>(m + 1).fill(0);
+  const way = new Array<number>(m + 1).fill(0);
+  for (let i = 1; i <= n; i++) {
+    p[0] = i;
+    let j0 = 0;
+    const minv = new Array<number>(m + 1).fill(INF);
+    const used = new Array<boolean>(m + 1).fill(false);
+    do {
+      used[j0] = true;
+      const i0 = p[j0] ?? 0;
+      let delta = INF;
+      let j1 = 0;
+      for (let j = 1; j <= m; j++) {
+        if (used[j]) continue;
+        const cur = c(i0, j) - (u[i0] ?? 0) - (v[j] ?? 0);
+        if (cur < (minv[j] ?? INF)) {
+          minv[j] = cur;
+          way[j] = j0;
+        }
+        if ((minv[j] ?? INF) < delta) {
+          delta = minv[j] ?? INF;
+          j1 = j;
+        }
+      }
+      for (let j = 0; j <= m; j++) {
+        if (used[j]) {
+          u[p[j] ?? 0] = (u[p[j] ?? 0] ?? 0) + delta;
+          v[j] = (v[j] ?? 0) - delta;
+        } else minv[j] = (minv[j] ?? INF) - delta;
+      }
+      j0 = j1;
+    } while ((p[j0] ?? 0) !== 0);
+    do {
+      const j1 = way[j0] ?? 0;
+      p[j0] = p[j1] ?? 0;
+      j0 = j1;
+    } while (j0 !== 0);
+  }
+  const assignment = new Array<number>(n).fill(-1);
+  for (let j = 1; j <= m; j++) if ((p[j] ?? 0) > 0) assignment[(p[j] ?? 1) - 1] = j - 1;
+  return assignment;
+}
+
 interface Reach {
   readonly fielder: number;
   readonly sample: PathSample;

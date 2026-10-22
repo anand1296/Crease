@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.8.0 — Bowling: a real action, a marker you can see, swing and spin you control (2026-10-22)
+
+- **Bowling in three steps.** (1) *Delivery*: pace — stock, inswinger, outswinger, in-cutter, out-cutter, slower ball; spin — the stock ball and the bowler's variations (arm ball, top-spinner, doosra; googly, slider). Set how much it swings, cuts or spins (↑/↓), over or around the wicket (O), and the field (F). (2) *Landing spot*: move the marker to where the ball should pitch and lock it (Space). (3) *Run-up*: lock the pace on the meter (Space) — further right is quicker, the red zone is flat out and costs control and risks a no-ball — and still change the amount until he lets go. Same again is Space, Space, Space.
+- **The landing marker** is large, drawn above the pitch, with a crosshair and length bands (yorker, full, good, back of a length, short) while placing it; it turns green when locked. A new aiming camera rises behind the bowler to frame the whole pitch while you set up the ball. The marker is now where the ball *pitches* (it used to be the line at the stumps).
+- **Ten T20 field presets**: powerplay two slips / standard / save the boundary, catchers in, spin bat-pad, middle overs balanced, spin squeeze, boundary riders, death yorkers, death short-and-leg-side — attacking, balanced or defensive. Only presets with two outside the circle are offered in the powerplay; five may be out after it (T20 law). A field change moves each fielder to the nearest new position (an optimal assignment), and they jog there.
+- **Real bowling actions.** Keyframed delivery strides for pace, medium pace, off-spin and leg-spin: the bound with the ball at the chin, back foot landing side-on, the arm turning backwards-over the top through a full circle and releasing just past vertical as the front leg braces, then the follow-through across the body and off the pitch. The hand is where the physics releases the ball (within a few centimetres). The previous action turned the arm the wrong way round.
+- **Run-ups by style**: fast bowlers off ≈18 m, fast-medium 15 m, medium 11 m, spinners off ≈5 m (a few paces).
+- **Over or around the wicket**: a different release point (≈0.25 m or ≈0.65 m from middle stump) and angle; the non-striker and umpire stand on the other side.
+- **Physics**: swing amount (0.4×–1.2× the bowler's natural swing, capped at a realistic ≈0.7 m of curve); cutters deviate off the pitch in the chosen direction (≈10–25 cm); more revolutions mean more turn and a slower, loopier ball; effort changes pace (−10% to +3%) and control; release heights match the players' reach.
+- **The seam**: a raised, stitched seam ring. Pace: upright and steady, angled towards slip or fine leg by the swing. Spin: turns about the real spin axis, so the seam visibly rotates. The ball sits in the bowler's hand until release.
+- **Bowler changes are instant**: the new bowler is at his mark and the old one in his fielding position the moment you choose (he used to run in from the field while the old bowler stood at the mark). The bowler hands over his cap.
+- **Overs**: 2, 5, 10, 15 or 20 a side (50 removed).
+- The computer's pace bowlers use cutters too.
+
 ## 0.7.1 — Smoothness and responsiveness (2026-10-22)
 
 Profiled in the browser (CPU profiles, long-animation-frame and event-timing entries) and fixed what was stalling the game:

@@ -2,16 +2,19 @@ import { FixedStepClock } from '../core/fixedStep.ts';
 import { Rng } from '../core/rng.ts';
 import { BOWLER_FOLLOW_THROUGH, STANDARD_FIELD } from '../data/fieldPositions.ts';
 import { AdaptiveBowling, ballReward } from '../ai/adaptiveBowling.ts';
-import { fieldingPhase, setField, type WagonShot } from '../ai/captain.ts';
+import { fieldingPhase, maxOutside, setField, type WagonShot } from '../ai/captain.ts';
 import { type BallRecord, type CoachNote, battingNotes, bowlingNotes } from '../ai/coach.ts';
 import { Commentator, type CommentaryLine } from '../ai/commentary.ts';
 import { SHOTS, type ShotAttempt } from '../batting/shots.ts';
 import { PITCHES, type PitchId } from '../data/pitches.ts';
 import type { Team } from '../data/teams.ts';
 import { chooseDelivery } from '../ai/bowlingAi.ts';
-import { DELIVERY_TYPES, type DeliveryTypeId, LENGTHS, deliveriesFor } from '../bowling/deliveryTypes.ts';
+import { DELIVERY_TYPES, type DeliveryTypeId, LENGTHS, humanDeliveries } from '../bowling/deliveryTypes.ts';
+import type { DeliveryPlan } from '../bowling/execute.ts';
+import type { BowlingSide } from '../bowling/runUp.ts';
+import { type FieldPreset, findPreset, legalPresets } from '../fielding/presets.ts';
 import { fatigueAfterBall, fatigueAfterRest } from '../bowling/fatigue.ts';
-import { type Fielder, buildField } from '../fielding/plan.ts';
+import { type Fielder, buildField, rebuildField } from '../fielding/plan.ts';
 import { DIFFICULTIES, type DifficultyId } from '../model/difficulty.ts';
 import { type Player, isSpinner } from '../model/player.ts';
 import { type BallOutcome, DeliveryCycle, type WicketKind } from '../session/deliveryCycle.ts';
@@ -104,11 +107,26 @@ export interface MatchResult {
   readonly summary: string;
 }
 
+/**
+ * The human bowler's choices for the next ball: the delivery, where it
+ * should land (the marker: metres from middle stump towards the batter's off
+ * side, and metres in front of the striker's stumps), the side of the
+ * wicket, and how much swing / cut / spin.
+ */
 export interface BowlingSetup {
   readonly type: DeliveryTypeId;
   readonly line: number;
   readonly length: number;
+  readonly side: BowlingSide;
+  readonly amount: number;
 }
+
+/**
+ * Steps of bowling a ball as a human: pick the delivery, then place and
+ * lock the landing marker; the run-up follows, where the pace is locked on
+ * the meter and the amount can still be changed.
+ */
+export type AimStep = 'type' | 'target';
 
 export type MatchPhase = 'between' | 'review' | 'chooseBowler' | 'aiming' | 'delivery' | 'inningsBreak' | 'complete';
 
@@ -144,7 +162,7 @@ export interface OverSummary {
 export const GAME_SPEEDS = { relaxed: 0.65, normal: 0.8, real: 1 } as const;
 export type GameSpeed = keyof typeof GAME_SPEEDS;
 
-export const LINE_RANGE = { min: -0.6, max: 1.0 } as const;
+export const LINE_RANGE = { min: -0.75, max: 1.1 } as const;
 export const LENGTH_RANGE = { min: 0.3, max: 12.5 } as const;
 const BETWEEN_BALLS = 0.9;
 const AUTO_BREAK = 3;
@@ -164,6 +182,10 @@ export class Match {
   recent: string[] = [];
   readonly history: BallOutcome[] = [];
   setup: BowlingSetup;
+  /** Which step of setting up the ball the human bowler is on (phase 'aiming'). */
+  aimStep: AimStep = 'type';
+  /** The human captain's field: a preset id, or 'auto' for the AI captain's field. */
+  fieldPreset = 'auto';
   /** Set while phase is 'review'. */
   review: Review | undefined;
   /** Real-time multiplier (see GAME_SPEEDS). */
@@ -265,19 +287,27 @@ export class Match {
     return { needed: Math.max(0, t - this.current.runs), ballsLeft: this.config.overs * 6 - this.current.balls };
   }
 
-  /** The human bowler's accuracy meter, 0–1 (0.5 perfect), a triangle wave during the run-up. */
+  /**
+   * The human bowler's pace meter during the run-up, 0–1: rises and falls
+   * (a triangle wave) until Space locks it. Higher is faster; above 0.9 is
+   * flat out, which costs control.
+   */
   get meter(): number {
     const c = this.cycle;
-    if (!c || c.phase !== 'runUp') return 0.5;
-    const period = 0.9;
+    if (!c || c.phase !== 'runUp') return 0;
+    const period = 1.15;
     const x = (c.time % period) / period;
     return x < 0.5 ? x * 2 : 2 - x * 2;
   }
 
+  /** The deliveries the human can choose from for the current bowler (keys 1–6). */
   get availableDeliveries(): DeliveryTypeId[] {
-    return deliveriesFor(this.bowler.bowlingStyle)
-      .map((d) => d.id)
-      .filter((id) => id !== 'fullToss');
+    return humanDeliveries(this.bowler.bowlingStyle);
+  }
+
+  /** Field presets allowed now (the powerplay allows only two outside the circle). */
+  get availablePresets(): FieldPreset[] {
+    return legalPresets(maxOutside(fieldingPhase(this.config.overs, this.current.balls), this.config.overs));
   }
 
   /** Bowlers allowed to bowl the next over: not the last over's bowler, under the limit. */
@@ -376,16 +406,51 @@ export class Match {
     return ok;
   }
 
+  /**
+   * Space / Enter while bowling: confirm the delivery, then lock the marker
+   * (the bowler starts his run-up), then lock the pace on the meter.
+   */
   bowlButton(): void {
     if (!this.humanBowling || this.paused) return;
     if (this.phase === 'aiming') {
-      this.startCycle({ type: this.setup.type, line: this.setup.line, length: this.setup.length });
+      this.confirmAim();
       return;
     }
-    const c = this.cycle;
-    if (this.phase === 'delivery' && c && c.phase === 'runUp' && !c.releaseLocked) {
-      c.setReleaseQuality(1 - Math.abs(this.meter - 0.5) * 2);
+    this.lockPace();
+  }
+
+  /** Delivery chosen → place the marker; marker placed → run in. */
+  confirmAim(): void {
+    if (!this.humanBowling || this.paused || this.phase !== 'aiming') return;
+    if (this.aimStep === 'type') {
+      this.aimStep = 'target';
+      this.emit();
+      return;
     }
+    const s = this.setup;
+    this.startCycle({ type: s.type, line: s.line, length: s.length, pitchLine: s.line, side: s.side, amount: s.amount });
+  }
+
+  /** Back from placing the marker to choosing the delivery. */
+  aimBack(): void {
+    if (!this.humanBowling || this.phase !== 'aiming' || this.aimStep !== 'target') return;
+    this.aimStep = 'type';
+    this.emit();
+  }
+
+  /** During the run-up: lock the pace where the meter is now. */
+  lockPace(): boolean {
+    const c = this.cycle;
+    if (!this.humanBowling || this.paused || this.phase !== 'delivery' || !c || c.phase !== 'runUp') return false;
+    const ok = c.lockPace(this.meter);
+    if (ok) this.emit();
+    return ok;
+  }
+
+  /** The pace locked for this ball (0–1), if it has been. */
+  get lockedPace(): number | undefined {
+    const c = this.cycle;
+    return c?.releaseLocked ? c.plan.effort : undefined;
   }
 
   /** Human captain picks the bowler for the next over. */
@@ -395,13 +460,15 @@ export class Match {
     if (!p) return false;
     this.bowlerId = p.id;
     this.setup = defaultSetup(p);
+    this.aimStep = 'type';
     this.phase = 'aiming';
     this.emit();
     return true;
   }
 
+  /** Moves the landing marker (only while placing it). */
   adjustTarget(dLine: number, dLength: number): void {
-    if (!this.humanBowling) return;
+    if (!this.humanBowling || this.phase !== 'aiming' || this.aimStep !== 'target') return;
     const s = this.setup;
     this.setup = {
       ...s,
@@ -411,16 +478,61 @@ export class Match {
     this.emit();
   }
 
+  /** Picks a delivery by menu position or id (while choosing it). */
+  selectDelivery(type: DeliveryTypeId): boolean {
+    if (!this.humanBowling || this.phase !== 'aiming' || !this.availableDeliveries.includes(type)) return false;
+    this.setup = { ...this.setup, type };
+    this.aimStep = 'type';
+    this.emit();
+    return true;
+  }
+
   cycleDelivery(direction: 1 | -1): void {
-    if (!this.humanBowling) return;
+    if (!this.humanBowling || this.phase !== 'aiming') return;
     const options = this.availableDeliveries;
     const i = options.indexOf(this.setup.type);
     const next = options[(i + direction + options.length) % options.length] ?? options[0];
     if (!next) return;
-    const def = DELIVERY_TYPES[next];
-    const length = def.lengths ? clamp(this.setup.length, def.lengths.min, def.lengths.max) : this.setup.length;
-    this.setup = { ...this.setup, type: next, length };
+    this.setup = { ...this.setup, type: next };
     this.emit();
+  }
+
+  /** Over or around the wicket (before the run-up). */
+  toggleSide(): void {
+    if (!this.humanBowling || this.phase !== 'aiming') return;
+    this.setup = { ...this.setup, side: this.setup.side === 'over' ? 'around' : 'over' };
+    this.emit();
+  }
+
+  /** More or less swing / cut / spin: while setting up the ball or during the run-up. */
+  adjustAmount(delta: number): void {
+    if (!this.humanBowling || this.paused) return;
+    const c = this.cycle;
+    const running = this.phase === 'delivery' && c?.phase === 'runUp';
+    if (this.phase !== 'aiming' && !running) return;
+    if (DELIVERY_TYPES[this.setup.type].variable === 'none') return;
+    const amount = clamp(Math.round((this.setup.amount + delta) * 20) / 20, 0, 1);
+    if (amount === this.setup.amount) return;
+    this.setup = { ...this.setup, amount };
+    if (running) c?.setAmount(amount);
+    this.emit();
+  }
+
+  /** The human captain's field: a preset, or 'auto' for the AI captain. Cycles through the legal ones. */
+  cycleFieldPreset(direction: 1 | -1): void {
+    if (!this.humanBowling || (this.phase !== 'aiming' && this.phase !== 'chooseBowler')) return;
+    const ids = ['auto', ...this.availablePresets.map((p) => p.id)];
+    const i = Math.max(0, ids.indexOf(this.fieldPreset));
+    this.fieldPreset = ids[(i + direction + ids.length) % ids.length] ?? 'auto';
+    this.emit();
+  }
+
+  setFieldPreset(id: string): boolean {
+    if (!this.humanBowling || (this.phase !== 'aiming' && this.phase !== 'chooseBowler')) return false;
+    if (id !== 'auto' && !this.availablePresets.some((p) => p.id === id)) return false;
+    this.fieldPreset = id;
+    this.emit();
+    return true;
   }
 
   /**
@@ -489,6 +601,7 @@ export class Match {
     this.lastOverBowlerId = '';
     this.fatigue.clear();
     this.recent = [];
+    this.fieldPreset = 'auto';
     this.bowlerId = this.suggestedBowler().id;
   }
 
@@ -500,7 +613,9 @@ export class Match {
 
   private beginBall(): void {
     if (this.humanBowling) {
-      // A new over (or innings): the human captain chooses the bowler.
+      // A new over (or innings): the human captain chooses the bowler. Each ball starts by choosing
+      // the delivery (the last one is kept, so the same again is Space, Space).
+      this.aimStep = 'type';
       this.phase = this.ballsThisOver === 0 && this.needsBowlerChoice ? 'chooseBowler' : 'aiming';
       this.needsBowlerChoice = false;
       this.cycle = undefined;
@@ -523,7 +638,7 @@ export class Match {
 
   private needsBowlerChoice = true;
 
-  private startCycle(plan: BowlingSetup, releaseQuality?: number): void {
+  private startCycle(plan: DeliveryPlan, releaseQuality?: number): void {
     const bowler = this.bowler;
     const overNumber = this.innings.length * 1000 + Math.floor(this.current.balls / 6);
     if (this.ballsThisOver === 0 && this.announcedOver !== overNumber) {
@@ -900,6 +1015,14 @@ export class Match {
     const hand = this.striker.battingHand;
     // The AI captain sets the field for this batter and bowler, reviewing it at the start of each
     // over and when a new batter comes in — not every ball, so fielders are not forever moving.
+    // The human captain's preset, if one is set and allowed now.
+    const preset = this.humanBowling && this.fieldPreset !== 'auto' ? findPreset(this.fieldPreset) : undefined;
+    if (preset && this.availablePresets.includes(preset)) {
+      const [wk] = buildField([keeper], STANDARD_FIELD.filter((p) => p.id === 'wk'), hand);
+      const ring = this.place(others, preset.positions, hand);
+      const [bowlerSpot] = buildField([bowler], [BOWLER_FOLLOW_THROUGH], hand);
+      return [...(wk ? [wk] : []), ...ring, ...(bowlerSpot ? [bowlerSpot] : [])];
+    }
     const key = `${this.innings.length}-${Math.floor(this.current.balls / 6)}-${this.striker.id}-${bowler.id}`;
     let decision = this.fieldCache?.key === key ? this.fieldCache.decision : undefined;
     if (!decision) {
@@ -916,9 +1039,18 @@ export class Match {
       this.fieldChange = decision.protecting;
     }
     const [wk] = buildField([keeper], STANDARD_FIELD.filter((p) => p.id === 'wk'), hand);
-    const ring = buildField(others, decision.positions, hand);
+    const ring = this.place(others, decision.positions, hand);
     const [bowlerSpot] = buildField([bowler], [BOWLER_FOLLOW_THROUGH], hand);
     return [...(wk ? [wk] : []), ...ring, ...(bowlerSpot ? [bowlerSpot] : [])];
+  }
+
+  /** Where each fielder stood in the last field set, so a new field moves people as little as possible. */
+  private readonly lastSpots = new Map<string, { x: number; z: number }>();
+
+  private place(players: readonly Player[], positions: Parameters<typeof buildField>[1], hand: Player['battingHand']): Fielder[] {
+    const field = rebuildField(players, positions, hand, this.lastSpots);
+    for (const f of field) this.lastSpots.set(f.player.id, f.start);
+    return field;
   }
 
   private emit(): void {
@@ -926,10 +1058,11 @@ export class Match {
   }
 }
 
+/** A new bowler starts with his stock ball, over the wicket, on a good length just outside off. */
 function defaultSetup(bowler: Player): BowlingSetup {
   const spinner = isSpinner(bowler.bowlingStyle);
-  const type: DeliveryTypeId = spinner ? (bowler.bowlingStyle === 'offSpin' ? 'offBreak' : 'legBreak') : 'fast';
-  return { type, line: 0.12, length: spinner ? 4.3 : LENGTHS.good };
+  const type: DeliveryTypeId = humanDeliveries(bowler.bowlingStyle)[0] ?? 'fast';
+  return { type, line: 0.15, length: spinner ? 4.3 : LENGTHS.good, side: 'over', amount: 0.5 };
 }
 
 export const oversText = (balls: number): string => `${Math.floor(balls / 6)}.${balls % 6}`;

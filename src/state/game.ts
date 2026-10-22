@@ -10,7 +10,10 @@ import type { PitchId } from '../game/data/pitches.ts';
 import { TEAMS, type Team } from '../game/data/teams.ts';
 import type { DeliveryTypeId } from '../game/bowling/deliveryTypes.ts';
 import { keyboard } from '../game/input/keyboardInstance.ts';
-import { type BowlingSetup, GAME_SPEEDS, type GameSpeed, Match, type MatchPhase, type Review, type MatchResult, type InningsState, type BattingCard, type BowlingCard, type SideId } from '../game/match/match.ts';
+import { type AimStep, type BowlingSetup, GAME_SPEEDS, type GameSpeed, Match, type MatchPhase, type Review, type MatchResult, type InningsState, type BattingCard, type BowlingCard, type SideId } from '../game/match/match.ts';
+import { DELIVERY_TYPES } from '../game/bowling/deliveryTypes.ts';
+import { stockSpeed } from '../game/bowling/execute.ts';
+import type { FieldPreset } from '../game/fielding/presets.ts';
 import { defaultXi, keeperFor } from '../game/match/squad.ts';
 import type { DifficultyId } from '../game/model/difficulty.ts';
 import type { Hand, Player } from '../game/model/player.ts';
@@ -74,6 +77,15 @@ export interface MatchSnapshot {
   readonly setup: BowlingSetup;
   readonly deliveries: readonly DeliveryTypeId[];
   readonly releaseLocked: boolean;
+  /** Human bowling: the step of setting up the ball, the field, and the pace locked in the run-up. */
+  readonly aimStep: AimStep;
+  readonly fieldPreset: string;
+  readonly presets: readonly FieldPreset[];
+  readonly lockedPace: number | undefined;
+  /** Stock speed of the chosen delivery at 75% effort, km/h (the HUD scales it by the locked pace). */
+  readonly deliveryKph: number;
+  /** Where the fielders stand (world x/z) and which is the keeper, for the field map. */
+  readonly fieldMap: readonly { readonly x: number; readonly z: number; readonly role: 'keeper' | 'bowler' | 'fielder' }[];
   readonly eligibleBowlers: readonly { readonly player: Player; readonly overs: string }[];
   readonly suggestedBowlerId: string;
   readonly runsCalled: number;
@@ -190,6 +202,14 @@ function snapshot(m: Match, toss: string): MatchSnapshot {
     setup: m.setup,
     deliveries: m.availableDeliveries,
     releaseLocked: m.cycle?.releaseLocked ?? false,
+    aimStep: m.aimStep,
+    fieldPreset: m.fieldPreset,
+    presets: m.humanBowling ? m.availablePresets : [],
+    lockedPace: m.lockedPace,
+    deliveryKph: stockSpeed(bowler.bowlingStyle, bowler.bowling.pace) * DELIVERY_TYPES[m.setup.type].speedFactor * 3.6,
+    fieldMap: m.humanBowling
+      ? m.field.map((f) => ({ x: f.start.x, z: f.start.z, role: f.keeper ? ('keeper' as const) : f.position.id === 'bowler' ? ('bowler' as const) : ('fielder' as const) }))
+      : [],
     eligibleBowlers: humanBowlingChoice ? m.eligibleBowlers().map((player) => ({ player, overs: m.oversBowledBy(player) })) : [],
     suggestedBowlerId: humanBowlingChoice ? m.suggestedBowler().id : '',
     runsCalled: m.cycle?.runStarts.length ?? 0,

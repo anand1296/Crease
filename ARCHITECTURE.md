@@ -32,9 +32,11 @@ Simulation (core, physics,        deterministic TypeScript — no React or three
 | `game/physics/ball.ts` | Ball flight, drag, swing, spin, Coulomb bounce, seam/turn, rolling, rest |
 | `game/data/` | Ground dimensions, pitch presets, fielding positions, the four national T20 squads and kit-clash rule (`teams.ts`), fictional fixture sides for the physics tests (`sampleTeams.ts`) |
 | `game/model/` | Player and difficulty types |
-| `game/bowling/deliveryTypes.ts` | The 12 delivery recipes |
+| `game/bowling/deliveryTypes.ts` | The 16 delivery recipes, and which six (pace) or four (spin) the human chooses from |
+| `game/bowling/runUp.ts` | Run-up length and duration by style (shared by the simulation and the renderer) |
 | `game/bowling/solver.ts` | Shooting-method launch solver; flight sampling |
-| `game/bowling/execute.ts` | Plan → executed delivery (intended vs actual movement, error, no-balls) |
+| `game/bowling/execute.ts` | Plan → executed delivery (landing spot or line, side, amount, effort; intended vs actual movement, error, no-balls) |
+| `game/fielding/presets.ts` | Ten T20 field presets and their legality under the fielding restrictions |
 | `game/bowling/fatigue.ts` | Fatigue build-up and recovery |
 | `game/batting/shots.ts` | The 16 strokes (+ push) as physical intentions |
 | `game/batting/body.ts` | Contact plane by footwork and length; pads and body boxes |

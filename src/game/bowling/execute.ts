@@ -6,6 +6,7 @@ import { type BowlingStyle, type Hand, type Player, offSideSign } from '../model
 import { type BallMovement, SPIN } from '../physics/ball.ts';
 import { DELIVERY_TYPES, type DeliveryTypeDef, type DeliveryTypeId } from './deliveryTypes.ts';
 import { type FlightSample, sampleFlight, solveLaunch } from './solver.ts';
+import type { BowlingSide } from './runUp.ts';
 
 /** What the bowler is trying to do. Lateral values are relative to the batter. */
 export interface DeliveryPlan {
@@ -14,6 +15,19 @@ export interface DeliveryPlan {
   readonly line: number;
   /** Where the ball should pitch: metres in front of the striker's stumps. Ignored for full tosses. */
   readonly length: number;
+  /**
+   * Aim at a pitching spot instead of a line at the stumps (the human's
+   * landing marker): metres from middle stump towards the batter's off side
+   * where the ball should land. Swing bends the path to the spot; seam,
+   * cut and turn take it on from there.
+   */
+  readonly pitchLine?: number;
+  /** Over or around the wicket (default over). */
+  readonly side?: BowlingSide;
+  /** How much swing / cut / spin the bowler puts on it, 0–1 (default 0.5). */
+  readonly amount?: number;
+  /** Effort: 0 (rolled out) … 1 (flat out). Faster with effort, but control suffers near the top. Default 0.75. */
+  readonly effort?: number;
 }
 
 export interface ExecutionContext {
@@ -76,12 +90,25 @@ export function stockTurnSign(style: BowlingStyle, arm: Hand): number {
   return arm === 'right' ? base : -base;
 }
 
-/** Release point for an over-the-wicket delivery. */
-export function releasePoint(bowler: Player): Vec3 {
+/**
+ * Release point. Over the wicket the bowling hand passes close to the
+ * stumps (≈0.25 m from middle); around the wicket the bowler runs in on the
+ * other side and the hand is wider (≈0.65 m), which angles the ball in.
+ * World x: a right-armer bowling over the wicket releases at +x.
+ */
+export function releasePoint(bowler: Player, side: BowlingSide = 'over'): Vec3 {
   const spinner = bowler.bowlingStyle === 'offSpin' || bowler.bowlingStyle === 'legSpin';
-  const x = bowler.bowlingArm === 'right' ? 0.22 : -0.22;
-  return vec3(x, spinner ? 2.0 : 2.15, RELEASE_Z);
+  const arm = bowler.bowlingArm === 'right' ? 1 : -1;
+  const x = side === 'over' ? arm * 0.25 : -arm * 0.65;
+  // Heights as the player models reach them at release (arm vertical, hand above the head).
+  return vec3(x, spinner ? 2.0 : 2.02, RELEASE_Z);
 }
+
+/** Speed multiplier for effort: 0.75 is the stock ball; flat out adds ≈3%, rolled out loses ≈10%. */
+export const effortSpeed = (effort: number): number => 0.895 + 0.14 * clamp(effort, 0, 1);
+
+/** Control lost when bowling flat out (above 85% effort). */
+export const effortError = (effort: number): number => 1 + Math.max(0, clamp(effort, 0, 1) - 0.85) * 3;
 
 export function canBowl(bowler: Player, type: DeliveryTypeId): boolean {
   return DELIVERY_TYPES[type].styles.includes(bowler.bowlingStyle);
@@ -94,11 +121,20 @@ export function errorScale(ctx: Pick<ExecutionContext, 'bowler' | 'fatigue' | 'r
 }
 
 /** Movement the bowler intends (used for aiming) — seam is unknowable, so it is excluded. */
-function intendedMovement(def: DeliveryTypeDef, ctx: ExecutionContext, speed: number): BallMovement {
+/**
+ * Movement the bowler intends (used for aiming) — seam is unknowable, so it
+ * is excluded. `amount` (0–1) scales whatever the delivery varies: swing
+ * (0.4×–1.2× the bowler's natural swing, capped at a realistic 6.5 m/s²,
+ * i.e. up to ≈0.7 m of curve at 135 km/h), revolutions (0.65×–1.35×), or
+ * the cut off the pitch (see executeDelivery).
+ */
+function intendedMovement(def: DeliveryTypeDef, ctx: ExecutionContext, speed: number, amount: number): BallMovement {
   const b = ctx.bowler.bowling;
   const offSign = offSideSign(ctx.batterHand);
-  const swingAccel = def.swing * offSign * (1.6 + 3.4 * (b.swing / 100)) * ctx.pitch.swingConditions * Math.min(1, speed / 34);
-  const revs = isSpinStyle(ctx.bowler.bowlingStyle) ? 17 + 15 * (b.spin / 100) : 0;
+  const swingScale = def.variable === 'swing' ? 0.4 + 0.8 * amount : 1;
+  const swingAccel = clamp(def.swing * offSign * (1.6 + 3.4 * (b.swing / 100)) * ctx.pitch.swingConditions * Math.min(1, speed / 34) * swingScale, -6.5, 6.5);
+  const spinScale = def.variable === 'spin' ? 0.65 + 0.7 * amount : 1;
+  const revs = isSpinStyle(ctx.bowler.bowlingStyle) ? (17 + 15 * (b.spin / 100)) * spinScale : 0;
   const turnSign = stockTurnSign(ctx.bowler.bowlingStyle, ctx.bowler.bowlingArm) * def.turn;
   const spinSide = revs * def.sideSpinShare * turnSign;
   const spinTop = revs * (1 - def.sideSpinShare) - (def.backspin ?? 0) * 12;
@@ -126,11 +162,16 @@ export function executeDelivery(plan: DeliveryPlan, ctx: ExecutionContext): Exec
   const spinner = isSpinStyle(ctx.bowler.bowlingStyle);
 
   const length = def.lengths ? clamp(plan.length, def.lengths.min, def.lengths.max) : plan.length;
-  const intendedSpeed = stockSpeed(ctx.bowler.bowlingStyle, b.pace) * def.speedFactor * (1 - 0.06 * ctx.fatigue);
-  const intendedMove = intendedMovement(def, ctx, intendedSpeed);
+  const amount = clamp(plan.amount ?? 0.5, 0, 1);
+  const effort = clamp(plan.effort ?? 0.75, 0, 1);
+  // More revolutions mean more flight: a big-spinning delivery is a touch slower through the air.
+  const flight = def.variable === 'spin' ? 1.04 - 0.08 * amount : 1;
+  const intendedSpeed = stockSpeed(ctx.bowler.bowlingStyle, b.pace) * def.speedFactor * effortSpeed(effort) * flight * (1 - 0.06 * ctx.fatigue);
+  const intendedMove = intendedMovement(def, ctx, intendedSpeed, amount);
 
   // --- Execution error (bounded, skill- and fatigue-dependent) ---
-  const scale = errorScale(ctx, def);
+  // Trying to move it a lot, or bowling flat out, costs control.
+  const scale = errorScale(ctx, def) * effortError(effort) * (def.variable === 'none' ? 1 : 0.85 + 0.3 * amount);
   const lineErr = rng.boundedNormal(0.085 * scale);
   const lengthErr = rng.boundedNormal((spinner ? 0.35 : 0.45) * scale);
   const speed = intendedSpeed + rng.boundedNormal(0.5 + 0.4 * scale);
@@ -139,8 +180,13 @@ export function executeDelivery(plan: DeliveryPlan, ctx: ExecutionContext): Exec
     // Swing is never exactly what was intended; sometimes it barely happens.
     swingAccel: intendedMove.swingAccel * clamp(1 + rng.boundedNormal(0.3), 0.1, 1.6) +
       (def.swing === 0 && !spinner ? rng.boundedNormal(0.6 * (b.swing / 100)) : 0),
-    // Seam direction is random: the bowler cannot control which way it goes.
-    seamDeltaV: spinner ? rng.boundedNormal(0.08) : rng.boundedNormal(def.seam * (0.1 + 0.3 * (b.swing / 100))),
+    // Seam direction is random: the bowler cannot control which way it goes — except with a
+    // cutter, where the fingers drag down one side of the ball and it grips and deviates that way
+    // (0.5–1.8 m/s sideways off the pitch, ≈10–25 cm by the time it reaches the batter).
+    seamDeltaV: spinner
+      ? rng.boundedNormal(0.08)
+      : (def.cut ?? 0) * offSign * (0.5 + 1.3 * amount) * (0.6 + 0.4 * (b.swing / 100)) * clamp(1 + rng.boundedNormal(0.25), 0.3, 1.5) +
+        rng.boundedNormal(def.seam * (0.1 + 0.3 * (b.swing / 100))),
     spinSide: intendedMove.spinSide * clamp(1 + rng.boundedNormal(0.15), 0.5, 1.4),
     spinTop: intendedMove.spinTop * clamp(1 + rng.boundedNormal(0.15), 0.5, 1.4),
     bounceFactor: 1 + rng.boundedNormal(ctx.pitch.bounceVariability),
@@ -148,9 +194,13 @@ export function executeDelivery(plan: DeliveryPlan, ctx: ExecutionContext): Exec
 
   // --- Aim: where the ball must pitch so that, with intended movement, it passes at `line` ---
   const lineX = plan.line * offSign;
-  const release = releasePoint(ctx.bowler);
+  const release = releasePoint(ctx.bowler, plan.side);
   let velocity: Vec3;
-  if (def.fullToss) {
+  if (plan.pitchLine !== undefined && !def.fullToss) {
+    // The human's landing marker: aim straight at the spot (swing included in the aim).
+    const pitchZ = STRIKER_STUMPS_Z - Math.max(0.2, length + lengthErr);
+    velocity = solveLaunch(release, { x: plan.pitchLine * offSign + lineErr, z: pitchZ }, speed, intendedMove, ground);
+  } else if (def.fullToss) {
     const height = 0.75 + rng.boundedNormal(0.12 * scale);
     velocity = solveLaunch(release, { x: lineX + lineErr, z: STRIKER_STUMPS_Z, fullTossHeight: height }, speed, intendedMove, ground);
   } else {
@@ -176,7 +226,8 @@ export function executeDelivery(plan: DeliveryPlan, ctx: ExecutionContext): Exec
   }
 
   const acc = b.accuracy / 100;
-  const noBall = rng.chance(0.004 + 0.025 * (1 - acc) * (0.5 + ctx.fatigue));
+  // Overstepping: more likely when tired, inaccurate, or bowling flat out.
+  const noBall = rng.chance(0.004 + 0.025 * (1 - acc) * (0.5 + ctx.fatigue) + Math.max(0, effort - 0.9) * 0.25);
   const actual = sampleFlight(release, velocity, actualMove, ground);
   const releaseSpeed = Math.hypot(velocity.x, velocity.y, velocity.z);
 
@@ -188,7 +239,7 @@ export function executeDelivery(plan: DeliveryPlan, ctx: ExecutionContext): Exec
     movement: actualMove,
     releaseSpeedKph: releaseSpeed * 3.6,
     noBall,
-    intended: { line: plan.line, length, speed: intendedSpeed },
+    intended: { line: plan.pitchLine ?? plan.line, length, speed: intendedSpeed },
     actual,
   };
 }

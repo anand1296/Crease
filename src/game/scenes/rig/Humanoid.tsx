@@ -59,6 +59,8 @@ export interface Pose {
   look?: Vector3 | undefined;
   /** Curl of the fingers, 0 open … 1 gripping (bat, ball). */
   grip?: number | undefined;
+  /** Seconds to cross-fade into this pose from a different source (default 0.25). */
+  fade?: number | undefined;
 }
 
 export type ClipName = 'sprint' | 'run' | 'jog' | 'walk' | 'idle' | 'breathe' | 'cheer' | 'cheer2' | 'clap' | 'crouch';
@@ -77,6 +79,8 @@ export interface HumanoidHandle {
   apply(pose: Pose): void;
   /** World position of the right (or left) hand, written into `out`. */
   handWorld(side: 'L' | 'R', out: Vector3): Vector3;
+  /** Shows or hides the cap or hat (a bowler hands his to the umpire). */
+  headwear?(visible: boolean): void;
 }
 
 /** The control rig's joints in the character's own space (root = origin, facing +z), after `apply`. */

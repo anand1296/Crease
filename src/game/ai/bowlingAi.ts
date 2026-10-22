@@ -19,7 +19,7 @@ export interface BowlingDecision {
 }
 
 const PACE_WEIGHTS: Partial<Record<DeliveryTypeId, number>> = {
-  fast: 34, outswinger: 18, inswinger: 14, yorker: 9, bouncer: 11, slower: 12, fullToss: 0,
+  fast: 30, outswinger: 17, inswinger: 13, yorker: 9, bouncer: 10, slower: 11, inCutter: 3, outCutter: 3, fullToss: 0,
 };
 const SPIN_WEIGHTS: Partial<Record<DeliveryTypeId, number>> = {
   offBreak: 62, legBreak: 62, topSpinner: 16, doosra: 12, googly: 12, fullToss: 0,
@@ -27,8 +27,8 @@ const SPIN_WEIGHTS: Partial<Record<DeliveryTypeId, number>> = {
 
 /** Typical target length for each delivery, metres in front of the stumps. */
 const TARGET_LENGTH: Partial<Record<DeliveryTypeId, [mean: number, spread: number]>> = {
-  fast: [5.6, 1.2], outswinger: [4.6, 1], inswinger: [4.8, 1], yorker: [0.9, 0.2], bouncer: [10.5, 0.8],
-  slower: [5, 1.2], offBreak: [4.3, 0.9], legBreak: [4.6, 1], topSpinner: [4.6, 0.8], doosra: [4.4, 0.8], googly: [4.6, 0.8],
+  fast: [5.6, 1.2], outswinger: [4.6, 1], inswinger: [4.8, 1], yorker: [0.9, 0.2], bouncer: [11, 0.8],
+  slower: [5, 1.2], inCutter: [5.4, 1], outCutter: [5.4, 1], offBreak: [4.3, 0.9], legBreak: [4.6, 1], topSpinner: [4.6, 0.8], doosra: [4.4, 0.8], googly: [4.6, 0.8],
   fullToss: [0, 0],
 };
 

@@ -77,7 +77,7 @@ export const Cricketer = forwardRef<HumanoidHandle, CricketerProps>(function Cri
     }
     model.updateMatrixWorld(true);
     addProps(model, kit);
-    return { model, rig: new AvatarRig(model, clips) };
+    return { model, rig: new AvatarRig(model, clips), headwear: model.getObjectByName('headwear') };
   }, [gltf, textures, clips, kit, tone]);
 
   const frames = useMemo(newRigFrames, []);
@@ -99,6 +99,9 @@ export const Cricketer = forwardRef<HumanoidHandle, CricketerProps>(function Cri
         if (!r) return out.set(0, 0, 0);
         built.rig.hand(side, out);
         return r.localToWorld(out);
+      },
+      headwear(visible: boolean) {
+        if (built.headwear && built.headwear.visible !== visible) built.headwear.visible = visible;
       },
     }),
     [built, frames],
@@ -291,12 +294,14 @@ function addProps(model: Object3D, kit: Kit): void {
     crown.scale.set(1, 0.85, 1.08);
     g.add(crown);
     g.add(part(geo.brim, cloth, 0, 0.4, 13, 0.12));
+    g.name = 'headwear';
     attach(model, 'Bip01_Head', g, new Vector3(head.x, head.y + 12.4, head.z + 0.4));
   } else {
     const g = new Group();
     const cloth = mat('#f1ede0', 0.9);
     g.add(part(geo.hatCrown, cloth, 0, 4, 0));
     g.add(part(geo.hatBrim, cloth, 0, 0, 0));
+    g.name = 'headwear';
     attach(model, 'Bip01_Head', g, new Vector3(head.x, head.y + 13.5, head.z + 0.5));
   }
 

@@ -64,6 +64,7 @@ export function useGameControls(): void {
         const eligible = m.eligibleBowlers();
         if (i >= 0 && eligible[i]) m.chooseBowler(eligible[i].id);
         else if (action === 'confirm' || action === 'bowl') m.chooseBowler(m.suggestedBowler().id);
+        else if (action === 'field') m.cycleFieldPreset(keyboard.isHeld('backFoot') ? -1 : 1);
         return;
       }
       if (m.humanBatting) {
@@ -75,9 +76,19 @@ export function useGameControls(): void {
         return;
       }
       if (m.humanBowling) {
-        if (action === 'bowl') m.bowlButton();
+        // 1 choose the delivery → 2 place the landing marker → 3 run in: lock the pace, vary the amount.
+        const placing = m.phase === 'aiming' && m.aimStep === 'target';
+        const pick = PICKS.indexOf(action);
+        if (action === 'bowl' || action === 'confirm') m.bowlButton();
         else if (action === 'nextDelivery') m.cycleDelivery(1);
         else if (action === 'prevDelivery') m.cycleDelivery(-1);
+        else if (pick >= 0) {
+          const type = m.availableDeliveries[pick];
+          if (type) m.selectDelivery(type);
+        } else if (action === 'field') m.cycleFieldPreset(keyboard.isHeld('backFoot') ? -1 : 1);
+        else if (action === 'side') m.toggleSide();
+        else if (action === 'back') m.aimBack();
+        else if ((action === 'up' || action === 'down') && !placing) m.adjustAmount(action === 'up' ? 0.1 : -0.1);
       }
     };
     const detach = keyboard.attach(window);

@@ -15,6 +15,21 @@ export interface CreaseDebug {
   /** Total runs and wickets. */
   score?: () => { runs: number; wickets: number; balls: number };
   lastHeadline?: () => string | undefined;
+  /** Slows or speeds the simulation (tests and frame-by-frame captures only). */
+  setSpeed?: (speed: number) => void;
+  /** Pins the camera (tests and close-up captures only); undefined releases it. */
+  setCamera?: (view: { pos: [number, number, number]; look: [number, number, number]; fov: number } | undefined) => void;
+  /** Ball position, when one is in play or in the bowler's hand. */
+  ballWorld?: () => [number, number, number] | undefined;
+  /** The bowler's bowling hand (x, y, z) and seconds from release. */
+  bowlerHand?: () => [number, number, number, number] | undefined;
+  /** Where every player is drawn, the bowler, his mark, and where the field says each should stand. */
+  players?: () => {
+    bowler: string;
+    mark: { x: number; z: number };
+    at: { id: string; x: number; z: number }[];
+    field: { id: string; x: number; z: number; role: string }[];
+  };
   /** Renderer statistics: draw calls, programs, textures, scene objects, pixel ratio, adaptive level. */
   renderInfo?: () => { calls: number; triangles: number; programs: number; textures: number; geometries: number; objects: number; dpr: number; perf: number };
 }

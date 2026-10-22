@@ -143,6 +143,8 @@ describe('Match (human)', () => {
     const phase = () => m.phase;
     for (let ball = 0; ball < 6; ball++) {
       while (phase() !== 'aiming') tick(m, dt);
+      // Delivery chosen → marker placed → run in.
+      m.bowlButton();
       m.bowlButton();
       while (phase() === 'delivery') tick(m, dt);
       if (m.current.balls >= 6) break;
@@ -195,9 +197,9 @@ describe('Match (human)', () => {
     expect(kinds.has('ball')).toBe(true);
     // Overs are summarised (on their own, or on the wicket card when the last ball took a wicket).
     expect(overSummaries).toBeGreaterThanOrEqual(2);
-    // Every wicket got a wicket card.
+    // Every wicket got a wicket card — except one that ends the innings, which goes to the innings break.
     const wickets = m.history.filter((o) => o.wicket).length;
-    expect(wicketCards).toBe(wickets);
+    expect(wicketCards).toBe(wickets - (m.current.wickets >= 10 ? 1 : 0));
   });
 
   it('runs at the chosen speed without changing what happens', () => {
@@ -216,5 +218,81 @@ describe('Match (human)', () => {
     }
     expect(b.result?.summary).toBe(a.result?.summary);
     expect(fb / fa).toBeCloseTo(1 / 0.65, 1);
+  });
+});
+
+describe('Human bowling: delivery, landing marker, run-up', () => {
+  const dt = 1 / 240;
+  const toAiming = (seed: string, overs = 5) => {
+    const m = new Match(config({ home: side(team(0), 'human'), battingFirst: 'away', seed, overs }));
+    while (m.phase !== 'chooseBowler') tick(m, dt);
+    const pace = m.eligibleBowlers().find((p) => p.bowlingStyle === 'fast' || p.bowlingStyle === 'fastMedium');
+    if (!pace) throw new Error('no pace bowler');
+    m.chooseBowler(pace.id);
+    return m;
+  };
+
+  it('goes delivery → landing spot → run-up, and the marker only moves while it is being placed', () => {
+    const m = toAiming('steps');
+    expect(m.aimStep).toBe('type');
+    expect(m.availableDeliveries).toEqual(['fast', 'inswinger', 'outswinger', 'inCutter', 'outCutter', 'slower']);
+    expect(m.selectDelivery('outCutter')).toBe(true);
+    const before = { ...m.setup };
+    m.adjustTarget(0.3, -1);
+    expect(m.setup.line).toBe(before.line);
+    m.bowlButton();
+    expect(m.aimStep).toBe('target');
+    m.adjustTarget(0.3, -1);
+    expect(m.setup.line).toBeCloseTo(before.line + 0.3, 5);
+    expect(m.setup.length).toBeCloseTo(before.length - 1, 5);
+    m.aimBack();
+    expect(m.aimStep).toBe('type');
+    m.bowlButton();
+    m.bowlButton();
+    expect(m.phase).toBe('delivery');
+    expect(m.cycle?.phase).toBe('runUp');
+    expect(m.cycle?.plan.pitchLine).toBeCloseTo(m.setup.line, 5);
+  });
+
+  it('locks the pace from the meter during the run-up, and the amount can still change until release', () => {
+    const m = toAiming('pace');
+    m.selectDelivery('outswinger');
+    m.bowlButton();
+    m.bowlButton();
+    while (m.meter < 0.7) m.step(dt);
+    const meter = m.meter;
+    m.adjustAmount(0.3);
+    expect(m.lockPace()).toBe(true);
+    expect(m.lockedPace).toBeCloseTo(meter, 5);
+    expect(m.lockPace()).toBe(false);
+    expect(m.cycle?.plan.amount).toBeCloseTo(0.8, 5);
+    while (m.cycle?.phase === 'runUp') m.step(dt);
+    expect(m.cycle?.delivery?.plan.effort).toBeCloseTo(meter, 5);
+  });
+
+  it('switches over and around the wicket, which moves the release point', () => {
+    const m = toAiming('side');
+    expect(m.setup.side).toBe('over');
+    m.toggleSide();
+    expect(m.setup.side).toBe('around');
+    m.bowlButton();
+    m.bowlButton();
+    expect(m.lockPace()).toBe(true);
+    while (m.cycle?.phase === 'runUp') m.step(dt);
+    const x = m.cycle?.delivery?.release.x ?? 0;
+    // Around the wicket a right-armer releases on the −x side, wide of the stumps.
+    expect(m.bowler.bowlingArm === 'right' ? x < -0.4 : x > 0.4).toBe(true);
+  });
+
+  it('offers only two-out field presets in the powerplay, and uses the chosen one', () => {
+    const m = toAiming('field', 20);
+    const legal = m.availablePresets;
+    expect(legal.length).toBeGreaterThanOrEqual(4);
+    for (const p of legal) expect(p.positions.filter((x) => x.distance > 27.43).length).toBeLessThanOrEqual(2);
+    expect(m.setFieldPreset('death-yorkers')).toBe(false);
+    expect(m.setFieldPreset('pp-slips')).toBe(true);
+    const ids = m.field.map((f) => f.position.id);
+    expect(ids).toContain('slip2');
+    expect(ids).toContain('thirdman');
   });
 });

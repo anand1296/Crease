@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { type Camera, CanvasTexture, type Group, type Mesh, PerspectiveCamera, Quaternion, SRGBColorSpace, Vector3 } from 'three';
+import { type Camera, CanvasTexture, type Group, type Mesh, MeshBasicMaterial, PerspectiveCamera, Quaternion, SRGBColorSpace, Vector3 } from 'three';
 import { Rng } from '../core/rng.ts';
 import { useGame } from '../../state/game.ts';
 import { sound } from '../audio/sound.ts';
@@ -21,7 +21,9 @@ import { type ReplayKind, ReplayRecorder, replayVectors, restorePose } from './r
 import { warmUp } from './warmup.ts';
 import { AVATARS, type AvatarId } from './rig/avatarAssets.ts';
 import { type Shot, WIDE, direct } from './camera/director.ts';
-import { battingStance, bowlingAction, gait, gather, keeperStance, readyStance, resetPose, throwing } from './rig/motion.ts';
+import { type ActionKind, actionSpan, battingStance, bowlingAction, gait, gather, keeperStance, readyStance, resetPose, throwing } from './rig/motion.ts';
+import { type RunUp, runUpFor } from '../bowling/runUp.ts';
+import { releasePoint } from '../bowling/execute.ts';
 
 /**
  * Everything that moves. The match (simulation) is advanced once per frame
@@ -82,6 +84,7 @@ export function MatchView() {
 function MatchScene({ match }: { match: Match }) {
   const inningsIndex = useGame((s) => s.snap?.inningsIndex ?? 0);
   const recorder = useMemo(() => new ReplayRecorder(), []);
+  const bowlerHand = useMemo<HandSpot>(() => ({ pos: new Vector3(), ok: false }), []);
   useEffect(() => {
     const g = useGame.getState();
     const skip = () => {
@@ -101,8 +104,8 @@ function MatchScene({ match }: { match: Match }) {
       <group>
         <Driver match={match} recorder={recorder} />
         {/* Re-mount the players when the sides swap at the innings break. */}
-        <Players key={inningsIndex} match={match} recorder={recorder} />
-        <BallView match={match} recorder={recorder} />
+        <Players key={inningsIndex} match={match} recorder={recorder} bowlerHand={bowlerHand} />
+        <BallView match={match} recorder={recorder} bowlerHand={bowlerHand} />
         <Wickets match={match} recorder={recorder} />
         <Umpires match={match} recorder={recorder} />
         <Markers match={match} />
@@ -171,6 +174,12 @@ function Driver({ match, recorder }: { match: Match; recorder: ReplayRecorder })
         balls: () => match.history.length,
         score: () => ({ runs: match.current.runs, wickets: match.current.wickets, balls: match.current.balls }),
         lastHeadline: () => match.lastOutcome?.headline,
+        setSpeed: (speed: number) => {
+          match.speed = speed;
+        },
+        setCamera: (view) => {
+          debugView = view;
+        },
       }),
     [match],
   );
@@ -314,7 +323,13 @@ const SWEET_SPOT = 0.7;
 const RUN_LANE = 1.25;
 const END_Z = STRIKER_POPPING_Z + 0.35;
 
-function Players({ match, recorder }: { match: Match; recorder: ReplayRecorder }) {
+/** Where the bowler's bowling hand is this frame (written by Players, read by BallView). */
+interface HandSpot {
+  readonly pos: Vector3;
+  ok: boolean;
+}
+
+function Players({ match, recorder, bowlerHand }: { match: Match; recorder: ReplayRecorder; bowlerHand: HandSpot }) {
   const fielding = match.bowlingSide;
   const batting = match.battingSide;
   const handles = useRef(new Map<string, HumanoidHandle | null>());
@@ -324,7 +339,20 @@ function Players({ match, recorder }: { match: Match; recorder: ReplayRecorder }
   const batState = useMemo(() => ({ body: new Vector3(), hands: new Vector3(), dir: new Vector3(0, -1, 0) }), []);
   const look = useMemo(() => new Vector3(), []);
   const lastCycle = useRef<unknown>(null);
+  const lastBowler = useRef('');
   const scratch = useMemo(() => ({ pose: neutralPose(), vectors: replayVectors() }), []);
+  useEffect(
+    () =>
+      exposeDebug({
+        players: () => ({
+          bowler: match.bowler.id,
+          mark: bowlerMark(match),
+          at: [...motions].map(([id, m]) => ({ id, x: m.pos.x, z: m.pos.z })),
+          field: match.field.map((f) => ({ id: f.player.id, x: f.start.x, z: f.start.z, role: f.position.id })),
+        }),
+      }),
+    [match, motions],
+  );
 
   useFrame((_, dtRaw) => {
     // Action replay: draw the recorded frame instead of the live match.
@@ -354,8 +382,12 @@ function Players({ match, recorder }: { match: Match; recorder: ReplayRecorder }
     const field = c?.opts.field ?? match.field;
     // When a ball ends (and when the next begins) the director cuts to the wide shot; under that
     // cut everyone is put back in their place, as on television — nobody wanders back across the screen.
-    const reset = c !== lastCycle.current;
+    // The same when the bowler changes: the new one is at his mark, the old one in his fielding spot.
+    const bowlerChanged = match.bowler.id !== lastBowler.current;
+    const reset = c !== lastCycle.current || bowlerChanged;
     lastCycle.current = c;
+    lastBowler.current = match.bowler.id;
+    const geometry = bowlerGeometry(match);
     const wicket = c?.phase === 'dead' && c.outcome?.wicket !== undefined;
     const keeper = match.keeperOf(match.current.bowling);
     // Everyone watches the ball (or, before it is bowled, the bowler).
@@ -376,7 +408,10 @@ function Players({ match, recorder }: { match: Match; recorder: ReplayRecorder }
         motions.set(f.player.id, m);
       }
       const p = m.pose;
+      p.fade = undefined;
       const isBowler = f.position.id === 'bowler';
+      // The bowler hands his cap to the umpire.
+      h.headwear?.(!isBowler);
       if (reset && !isBowler) {
         m.pos.set(f.start.x, 0, f.start.z);
         m.facing = f.player.id === keeper.id ? Math.PI : Math.atan2(0 - f.start.x, STRIKER_STUMPS_Z - f.start.z);
@@ -406,9 +441,11 @@ function Players({ match, recorder }: { match: Match; recorder: ReplayRecorder }
         const inBy = toBat > 12 ? 1.2 * walkIn : 0;
         const homeX = f.start.x + ((0 - f.start.x) / Math.max(1, toBat)) * inBy;
         const homeZ = f.start.z + ((STRIKER_STUMPS_Z - f.start.z) / Math.max(1, toBat)) * inBy;
-        // Between balls everyone stands still; during the delivery the ring walks in slowly; once the
-        // ball is hit, only the fielders the simulation moves (chaser, backer-up) go anywhere.
-        const moved = live ? approach(m, live.x, live.z, 9, dt) : c ? approach(m, homeX, homeZ, 0.9, dt) : 0;
+        // Between balls everyone stands still — unless the captain has just moved them, when they jog
+        // to their new places; during the delivery the ring walks in slowly; once the ball is hit,
+        // only the fielders the simulation moves (chaser, backer-up) go anywhere.
+        const away = !c && Math.hypot(m.pos.x - f.start.x, m.pos.z - f.start.z) > 0.3;
+        const moved = live ? approach(m, live.x, live.z, 9, dt) : c ? approach(m, homeX, homeZ, 0.9, dt) : away ? approach(m, f.start.x, f.start.z, 6.5, dt) : 0;
         if (moved > 0.004) stride(m, moved, dt, 8);
         else if (c && c.phase !== 'runUp') {
           readyStance(p, t + i);
@@ -432,6 +469,11 @@ function Players({ match, recorder }: { match: Match; recorder: ReplayRecorder }
       p.z = m.pos.z;
       p.facing = m.facing;
       h.apply(p);
+      // The ball sits in the bowler's hand until it is released.
+      if (isBowler) {
+        h.handWorld(geometry.right ? 'R' : 'L', bowlerHand.pos);
+        bowlerHand.ok = true;
+      }
       recorder.pose(f.player.id, p);
     });
 
@@ -461,7 +503,7 @@ function Players({ match, recorder }: { match: Match; recorder: ReplayRecorder }
       const p = m.pose;
       if (reset && !running) {
         if (id === strikerId) m.pos.set(-off * 0.45, 0, STRIKER_POPPING_Z + 0.22);
-        else m.pos.set((match.bowler.bowlingArm === 'right' ? -1 : 1) * 1.3, 0, BOWLER_STUMPS_Z + 1.0);
+        else m.pos.set(geometry.nonStrikerX, 0, BOWLER_STUMPS_Z + 1.0);
         m.facing = id === strikerId ? (off > 0 ? Math.PI / 2 : -Math.PI / 2) : 0;
       }
       if (running) {
@@ -476,10 +518,9 @@ function Players({ match, recorder }: { match: Match; recorder: ReplayRecorder }
         p.grip = 1;
         p.look = look;
       } else {
-        // Non-striker backs up as the bowler runs in.
-        const side = match.bowler.bowlingArm === 'right' ? -1 : 1;
+        // Non-striker backs up as the bowler runs in, on the side away from his run.
         const backing = c?.phase === 'runUp' ? Math.min(1, c.time / c.releaseTime) : c ? 1 : 0;
-        const moved = approach(m, side * 1.3, BOWLER_STUMPS_Z + 1.0 + backing * 1.2, 3, dt);
+        const moved = approach(m, geometry.nonStrikerX, BOWLER_STUMPS_Z + 1.0 + backing * 1.2, 3, dt);
         if (moved > 0.004) stride(m, moved, dt, 7.5);
         else {
           idle(m, t + 3, 'breathe');
@@ -606,61 +647,118 @@ function carryBat(bat: Group, h: HumanoidHandle, facing: number): void {
   bat.quaternion.copy(tmpQ);
 }
 
-/** Where the bowler stands before running in. */
-function bowlerMark(match: Match): { x: number; z: number } {
-  const bowler = match.bowler;
-  const right = bowler.bowlingArm === 'right';
-  const c = match.cycle;
-  const runLength = c ? (c.releaseTime > 1.5 ? 14 : 6) : bowler.bowlingStyle === 'offSpin' || bowler.bowlingStyle === 'legSpin' ? 6 : 14;
-  return { x: right ? 1.0 : -1.0, z: BOWLER_STUMPS_Z - runLength };
+/** Which action a bowler uses. */
+function actionKind(p: Player): ActionKind {
+  switch (p.bowlingStyle) {
+    case 'fast':
+    case 'fastMedium':
+      return 'pace';
+    case 'offSpin':
+      return 'offSpin';
+    case 'legSpin':
+      return 'legSpin';
+    default:
+      return 'medium';
+  }
 }
 
-function poseBowler(match: Match, m: Motion, dt: number, t: number): void {
-  const c = match.cycle;
+/**
+ * Where the bowler runs: his mark, the line of his run, where his body is at
+ * release (so the hand is over the release point the physics uses, over or
+ * around the wicket), and which side the non-striker stands to keep out of
+ * his way.
+ */
+function bowlerGeometry(match: Match): {
+  kind: ActionKind;
+  right: boolean;
+  run: RunUp;
+  mark: { x: number; z: number };
+  release: { x: number; z: number };
+  nonStrikerX: number;
+} {
   const bowler = match.bowler;
   const right = bowler.bowlingArm === 'right';
+  const run = runUpFor(bowler.bowlingStyle);
+  const side = match.cycle?.plan.side ?? (match.humanBowling ? match.setup.side : 'over');
+  const hand = releasePoint(bowler, side);
+  // At release the arm is over the head (the trunk leans away from it), so the body is
+  // only a little to the non-bowling side of the hand.
+  const bodyX = hand.x + (right ? 0.06 : -0.06);
+  const away = Math.sign(bodyX) || 1;
+  return {
+    kind: actionKind(bowler),
+    right,
+    run,
+    mark: { x: bodyX + away * (0.6 + run.distance * 0.03), z: BOWLER_STUMPS_Z - run.distance },
+    release: { x: bodyX, z: BOWLER_STUMPS_Z + 0.95 },
+    nonStrikerX: -away * 1.3,
+  };
+}
+
+/** Where the bowler stands before running in. */
+function bowlerMark(match: Match): { x: number; z: number } {
+  return bowlerGeometry(match).mark;
+}
+
+/**
+ * The bowler: back to his mark between balls; the run-up (accelerating
+ * strides from motion capture); the delivery stride and follow-through
+ * (bowlingAction, keyed to the release time); then off to field.
+ */
+function poseBowler(match: Match, m: Motion, dt: number, t: number): void {
+  const c = match.cycle;
+  const g = bowlerGeometry(match);
   const p = m.pose;
-  const runLength = c ? (c.releaseTime > 1.5 ? 14 : 6) : bowler.bowlingStyle === 'offSpin' || bowler.bowlingStyle === 'legSpin' ? 6 : 14;
-  const crease = { x: right ? 0.42 : -0.42, z: BOWLER_STUMPS_Z + 0.9 };
-  const mark = { x: right ? 1.0 : -1.0, z: BOWLER_STUMPS_Z - runLength };
   if (!c || match.phase !== 'delivery') {
     // Back to the mark between balls.
-    const moved = approach(m, mark.x, mark.z, 2.6, dt);
+    const moved = approach(m, g.mark.x, g.mark.z, 2.6, dt);
     if (moved > 0.004) stride(m, moved, dt, 7);
     else {
       idle(m, t, 'breathe');
       m.facing = turnTowards(m.facing, 0, dt * 3);
     }
-  } else if (c.phase === 'runUp') {
-    const strideStart = c.releaseTime - 0.42;
-    if (c.time < strideStart) {
-      const u = Math.min(1, c.time / strideStart);
-      const s = u * u * 0.55 + u * 0.45;
-      const prev = m.pos.clone();
-      m.pos.set(mark.x + (crease.x - mark.x) * s, 0, mark.z + (crease.z - 0.9 - mark.z) * s);
-      m.facing = 0;
-      stride(m, prev.distanceTo(m.pos), dt, 7);
-    } else {
-      const u = (c.time - strideStart) / 0.56;
-      m.pos.x += (crease.x - m.pos.x) * Math.min(1, dt * 8);
-      m.pos.z = Math.min(crease.z, m.pos.z + 3.5 * dt);
-      m.facing = 0;
-      bowlingAction(p, u, right);
-    }
-  } else {
-    // Follow-through, then fielding wherever the plan sends him.
-    const idx = c.opts.field.findIndex((f) => f.position.id === 'bowler');
-    const target = c.fielderPos[idx];
-    if (c.flightTime < 0.35) {
-      bowlingAction(p, 0.75 + c.flightTime / 1.4, right);
-      m.pos.z += 2.5 * dt;
-    } else if (target) {
-      const moved = approach(m, target.x, target.z, c.phase === 'inFlight' ? 3 : 8, dt);
-      if (moved > 0.004) stride(m, moved, dt, 8);
-      else readyStance(p, t);
-    }
-    if (c.carrier === idx) gather(p);
+    return;
   }
+  const tau = c.time - c.releaseTime;
+  const span = actionSpan(g.kind);
+  // Distance covered in the delivery stride (bound + stride): pace bowlers travel further.
+  const strideLen = g.kind === 'pace' ? 2.6 : g.kind === 'medium' ? 2.2 : 1.4;
+  if (tau < span.start) {
+    // Run-up: from the mark to the start of the delivery stride, accelerating.
+    const u = Math.min(1, Math.max(0, c.time / Math.max(0.1, c.releaseTime + span.start)));
+    const s = g.kind === 'offSpin' || g.kind === 'legSpin' ? u : u * u * 0.45 + u * 0.55;
+    const prev = tmpB.copy(m.pos);
+    const startZ = g.release.z - strideLen;
+    m.pos.set(g.mark.x + (g.release.x - g.mark.x) * s, 0, g.mark.z + (startZ - g.mark.z) * s);
+    m.facing = Math.atan2(g.release.x - g.mark.x, startZ - g.mark.z) * 0.6;
+    stride(m, prev.distanceTo(m.pos), dt, g.kind === 'pace' ? 8 : 6.5);
+    return;
+  }
+  if (tau <= span.end) {
+    // The delivery stride and follow-through, positioned along the release line.
+    const k = Math.min(1, (tau - span.start) / -span.start);
+    const z0 = g.release.z - strideLen;
+    const zRelease = g.release.z;
+    const follow = Math.max(0, tau) / span.end;
+    m.pos.z = tau <= 0 ? z0 + (zRelease - z0) * k : zRelease + (g.kind === 'pace' ? 3.2 : 1.6) * (1 - (1 - follow) * (1 - follow));
+    // After release, veer off the pitch (away from the danger area), as bowlers must.
+    const veer = Math.sign(g.release.x) || 1;
+    m.pos.x = g.release.x + (tau > 0 ? veer * 0.9 * follow * follow : 0);
+    m.facing = turnTowards(m.facing, tau > 0 ? veer * 0.25 * follow : 0, dt * 10);
+    bowlingAction(p, tau, g.kind, g.right);
+    // Faster transition from the running clip into the action than the default cross-fade.
+    p.fade = 0.12;
+    return;
+  }
+  // Fielding wherever the plan sends him.
+  const idx = c.opts.field.findIndex((f) => f.position.id === 'bowler');
+  const target = c.fielderPos[idx];
+  if (target) {
+    const moved = approach(m, target.x, target.z, c.phase === 'inFlight' ? 3 : 8, dt);
+    if (moved > 0.004) stride(m, moved, dt, 8);
+    else readyStance(p, t);
+  }
+  if (c.carrier === idx) gather(p);
 }
 
 /**
@@ -875,10 +973,10 @@ function Umpires({ match, recorder }: { match: Match; recorder: ReplayRecorder }
     lastCycle.current = c;
     const t = match.time;
     const off = offSideSign(match.striker.battingHand);
-    const leftArm = match.bowler.bowlingArm === 'left';
+    const runSide = Math.sign(bowlerGeometry(match).release.x) || 1;
     const spots = [
-      // Just behind the stumps, a little to the side away from the bowler's run.
-      { x: leftArm ? 0.3 : -0.3, z: BOWLER_STUMPS_Z - 2.1, facing: 0 },
+      // Just behind the stumps, a little to the side away from the bowler's run (over or around).
+      { x: -runSide * 0.3, z: BOWLER_STUMPS_Z - 2.1, facing: 0 },
       { x: -off * 21, z: STRIKER_POPPING_Z, facing: off > 0 ? Math.PI / 2 : -Math.PI / 2 },
     ];
     const sig = c?.phase === 'dead' ? signalFor(match) : undefined;
@@ -976,22 +1074,94 @@ function ballTexture(): CanvasTexture {
   return tex;
 }
 
-function BallView({ match, recorder }: { match: Match; recorder: ReplayRecorder }) {
-  const ref = useRef<Mesh>(null);
+/** Ball orientation: seam normal and spin, set at release from the delivery. */
+interface BallSpin {
+  readonly q: Quaternion;
+  readonly axis: Vector3;
+  rate: number;
+  cycle: unknown;
+  released: boolean;
+}
+
+const Y_AXIS = new Vector3(0, 1, 0);
+const tmpAxis = new Vector3();
+const tmpN = new Vector3();
+const tmpDQ = new Quaternion();
+
+/**
+ * Sets the seam and spin at release, from the delivery as bowled:
+ *  - pace: seam upright and still (the ball backspins about the seam's own
+ *    axis), angled towards slip or fine leg by the swing it carries;
+ *  - spin: the ball turns about its real spin axis (side spin along the
+ *    line of flight, top spin across it), and the seam, set at an angle to
+ *    that axis as a spinner's fingers leave it, visibly rotates;
+ *  - the slower ball: a tumbling seam.
+ * Rates are slowed for the eye (real revolutions alias at 60 fps).
+ */
+function releaseSpin(spin: BallSpin, c: NonNullable<Match['cycle']>): void {
+  const d = c.delivery;
+  spin.released = true;
+  spin.cycle = c;
+  if (!d) return;
+  const mv = d.movement;
+  const spinner = Math.abs(mv.spinSide) + Math.abs(mv.spinTop) > 6 && d.type.variable === 'spin';
+  if (spinner) {
+    // ω = top spin about +x, side spin about the line of flight (−side spin turns towards +x).
+    spin.axis.set(mv.spinTop, 0, -mv.spinSide).normalize();
+    if (spin.axis.lengthSq() < 0.5) spin.axis.set(1, 0, 0);
+    const perp = tmpAxis.crossVectors(spin.axis, Y_AXIS);
+    if (perp.lengthSq() < 1e-4) perp.set(0, 0, 1);
+    perp.normalize();
+    tmpN.copy(spin.axis).applyQuaternion(tmpDQ.setFromAxisAngle(perp, 0.65));
+    spin.q.setFromUnitVectors(Y_AXIS, tmpN);
+    spin.rate = 2.6;
+    return;
+  }
+  if (d.type.id === 'slower') {
+    spin.axis.set(0.8, 0.5, 0.35).normalize();
+    spin.q.setFromUnitVectors(Y_AXIS, tmpN.set(1, 0, 0));
+    spin.rate = 1.6;
+    return;
+  }
+  // Seam angled to where it swings: φ up to ≈20°.
+  const phi = Math.sign(mv.swingAccel) * Math.min(0.35, Math.abs(mv.swingAccel) * 0.07);
+  tmpN.set(Math.cos(phi), 0, -Math.sin(phi));
+  spin.q.setFromUnitVectors(Y_AXIS, tmpN);
+  // Backspin about the seam's own axis: the seam stays put, the stitching blurs.
+  spin.axis.copy(tmpN).negate();
+  spin.rate = 7;
+}
+
+function BallView({ match, recorder, bowlerHand }: { match: Match; recorder: ReplayRecorder; bowlerHand: HandSpot }) {
+  const ref = useRef<Group>(null);
+  const orient = useRef<Group>(null);
   const out = useMemo(() => ({ x: 0, y: 0, z: 0 }), []);
   const texture = useMemo(ballTexture, []);
   useEffect(() => () => texture.dispose(), [texture]);
-  const spin = useRef(0);
-  useFrame((_, dt) => {
+  const spin = useMemo<BallSpin>(() => ({ q: new Quaternion(), axis: new Vector3(1, 0, 0), rate: 0, cycle: undefined, released: false }), []);
+  const fromHand = useMemo(() => new Vector3(), []);
+  useEffect(
+    () =>
+      exposeDebug({
+        bowlerHand: () => (bowlerHand.ok ? [bowlerHand.pos.x, bowlerHand.pos.y, bowlerHand.pos.z, match.cycle ? match.cycle.time - match.cycle.releaseTime : NaN] : undefined),
+        ballWorld: () => {
+          const m = ref.current;
+          return m && m.visible ? [m.position.x, m.position.y, m.position.z] : undefined;
+        },
+      }),
+    [bowlerHand, match],
+  );
+  useFrame((_, dtRaw) => {
     const mesh = ref.current;
-    if (!mesh) return;
+    const o = orient.current;
+    if (!mesh || !o) return;
+    const dt = Math.min(0.1, dtRaw);
     if (recorder.playing) {
       const fr = recorder.frameAt(recorder.playT);
       if (fr) {
         mesh.position.set(fr.ball[0] ?? 0, fr.ball[1] ?? 0, fr.ball[2] ?? 0);
         mesh.visible = fr.ballVisible;
-        spin.current += dt * 8;
-        mesh.rotation.set(spin.current, 0, Math.PI / 2);
+        if (fr.ball.length >= 7) o.quaternion.set(fr.ball[3] ?? 0, fr.ball[4] ?? 0, fr.ball[5] ?? 0, fr.ball[6] ?? 1);
       }
       return;
     }
@@ -999,87 +1169,155 @@ function BallView({ match, recorder }: { match: Match; recorder: ReplayRecorder 
     const rec = () => {
       const fr = recorder.current;
       if (fr) {
-        fr.ball = mesh.position.toArray();
+        fr.ball = [...mesh.position.toArray(), ...o.quaternion.toArray()];
         fr.ballVisible = mesh.visible;
       }
     };
     queueMicrotask(rec);
-    // Seam upright, backspin while it travels.
-    const v = match.cycle?.play?.ball.velocity;
-    if (v) spin.current += Math.min(0.1, dt) * Math.hypot(v.x, v.y, v.z) * 3;
-    mesh.rotation.set(spin.current, 0, Math.PI / 2);
     const c = match.cycle;
     if (!c || c.phase === 'runUp') {
-      // In the bowler's hand: follows the bowling arm through the action.
-      const right = match.bowler.bowlingArm === 'right';
-      const u = c ? Math.max(0, (c.time - (c.releaseTime - 0.42)) / 0.56) : 0;
-      const armAngle = -0.6 + Math.min(1, u) * 4.6;
-      const t = c ? Math.min(1, c.time / c.releaseTime) : 0;
-      const runLength = c && c.releaseTime > 1.5 ? 14 : 6;
-      const x0 = right ? 1.0 : -1.0;
-      const x1 = right ? 0.42 : -0.42;
-      const z = BOWLER_STUMPS_Z - runLength + (runLength + 0.9) * Math.min(1, t * t * 0.55 + t * 0.45);
-      const side = right ? -0.2 : 0.2;
-      mesh.position.set(x0 + (x1 - x0) * t + side, 1.35 - Math.cos(armAngle) * 0.6, Math.min(z, BOWLER_STUMPS_Z + 0.9) + Math.sin(armAngle) * 0.35);
-      mesh.visible = c !== undefined;
+      // In the bowler's hand, seam upright down the pitch, until he lets it go.
+      mesh.visible = c !== undefined && bowlerHand.ok;
+      if (bowlerHand.ok) mesh.position.copy(bowlerHand.pos);
+      spin.q.setFromUnitVectors(Y_AXIS, tmpN.set(1, 0, 0));
+      o.quaternion.copy(spin.q);
+      spin.released = false;
+      fromHand.copy(mesh.position);
       return;
     }
+    if (!spin.released || spin.cycle !== c) releaseSpin(spin, c);
     mesh.visible = true;
     const play = c.play;
+    // Once it has been hit, or is rolling, it simply rolls along its path.
+    const v = play?.ball.velocity;
+    if (v && (c.phase !== 'inFlight' || c.contact !== undefined)) {
+      const speed = Math.hypot(v.x, v.z);
+      if (speed > 0.2) {
+        spin.axis.crossVectors(Y_AXIS, tmpAxis.set(v.x, 0, v.z)).normalize();
+        spin.rate = Math.min(9, speed * 0.5);
+      } else spin.rate = 0;
+    }
+    if (spin.rate > 0) {
+      spin.q.premultiply(tmpDQ.setFromAxisAngle(spin.axis, spin.rate * Math.PI * 2 * dt));
+      o.quaternion.copy(spin.q);
+    }
     if (play && c.carrier === undefined && c.phase !== 'dead') {
       const a = match.clock.alpha;
       const p0 = play.previous;
       const p1 = play.ball.position;
       mesh.position.set(p0.x + (p1.x - p0.x) * a, p0.y + (p1.y - p0.y) * a, p0.z + (p1.z - p0.z) * a);
+      // Leaving the hand: ease from where the hand was to the physics' release point.
+      const since = c.flightTime;
+      if (since < 0.07 && bowlerHand.ok) mesh.position.lerp(fromHand, 1 - since / 0.07);
       return;
     }
     c.ballPosition(out);
     mesh.position.set(out.x, out.y, out.z);
   });
+  // Drawn larger than life (as most cricket games do) so it can be followed from the broadcast camera.
+  const r = FIELD.ballRadius * 1.35;
   return (
-    <mesh ref={ref} castShadow>
-      {/* Drawn larger than life (as most cricket games do) so it can be followed from the broadcast camera. */}
-      <sphereGeometry args={[FIELD.ballRadius * 1.35, 32, 20]} />
-      <meshPhysicalMaterial map={texture} roughness={0.42} clearcoat={0.7} clearcoatRoughness={0.25} />
-    </mesh>
+    <group ref={ref}>
+      <group ref={orient}>
+        <mesh castShadow>
+          <sphereGeometry args={[r, 32, 20]} />
+          <meshPhysicalMaterial map={texture} roughness={0.42} clearcoat={0.7} clearcoatRoughness={0.25} />
+        </mesh>
+        {/* The seam: a raised, stitched ring, exaggerated so it reads at broadcast distance. */}
+        <mesh rotation-x={Math.PI / 2}>
+          <torusGeometry args={[r * 1.005, r * 0.13, 6, 40]} />
+          <meshStandardMaterial color="#f3ead0" roughness={0.55} emissive="#3a2f1a" emissiveIntensity={0.25} />
+        </mesh>
+      </group>
+    </group>
   );
 }
 
 // --- Markers ---------------------------------------------------------------------------------
 
+/** Length bands drawn on the pitch while placing the marker: [from, to] metres from the stumps. */
+const LENGTH_BANDS: readonly (readonly [number, number, string])[] = [
+  [0.3, 1.3, '#ef7b6b'],
+  [1.3, 3.2, '#e3c062'],
+  [3.2, 6.5, '#7fd49b'],
+  [6.5, 8.8, '#e3c062'],
+  [8.8, 12.5, '#ef7b6b'],
+];
+
+/**
+ * The landing marker for a human bowler: a ring with a crosshair where the
+ * ball should pitch, drawn above the pitch so nothing hides it. Dim while
+ * the delivery is chosen, bright and pulsing while it is placed (with the
+ * length bands shown), green once locked for the run-up. After the ball
+ * pitches, a scuff marks where it actually landed.
+ */
 function Markers({ match }: { match: Match }) {
   const pitchMark = useRef<Mesh>(null);
-  const target = useRef<Mesh>(null);
-  useFrame(() => {
+  const target = useRef<Group>(null);
+  const bands = useRef<Group>(null);
+  const mats = useMemo(
+    () => ({
+      ring: new MeshBasicMaterial({ color: '#ffd23f', transparent: true, depthWrite: false, toneMapped: false }),
+      cross: new MeshBasicMaterial({ color: '#ffffff', transparent: true, depthWrite: false, toneMapped: false }),
+    }),
+    [],
+  );
+  useEffect(() => () => Object.values(mats).forEach((m) => m.dispose()), [mats]);
+  useFrame((state) => {
     const c = match.cycle;
     const pm = pitchMark.current;
     if (pm) {
       const bounce = c?.events.find((e) => e.type === 'bounce' && !e.struck);
       if (bounce && bounce.type === 'bounce') {
         pm.visible = true;
-        pm.position.set(bounce.x, 0.012, bounce.z);
+        pm.position.set(bounce.x, 0.018, bounce.z);
       } else pm.visible = false;
     }
     const tm = target.current;
-    if (tm) {
-      const show = match.humanBowling && (match.phase === 'aiming' || (c?.phase === 'runUp' && match.phase === 'delivery'));
-      tm.visible = show;
-      if (show) {
-        const off = offSideSign(match.striker.battingHand);
-        tm.position.set(match.setup.line * off, 0.014, STRIKER_STUMPS_Z - match.setup.length);
-      }
-    }
+    const bandGroup = bands.current;
+    if (!tm || !bandGroup) return;
+    const aiming = match.humanBowling && match.phase === 'aiming';
+    const running = match.humanBowling && match.phase === 'delivery' && c?.phase === 'runUp';
+    tm.visible = aiming || running;
+    const placing = aiming && match.aimStep === 'target';
+    bandGroup.visible = placing;
+    if (!tm.visible) return;
+    const off = offSideSign(match.striker.battingHand);
+    tm.position.set(match.setup.line * off, 0.02, STRIKER_STUMPS_Z - match.setup.length);
+    const pulse = placing ? 1 + Math.sin(state.clock.elapsedTime * 6) * 0.08 : 1;
+    tm.scale.setScalar(pulse);
+    mats.ring.color.set(running ? '#7fd49b' : '#ffd23f');
+    mats.ring.opacity = aiming && !placing ? 0.55 : 0.95;
+    mats.cross.opacity = aiming && !placing ? 0.35 : 0.85;
   });
   return (
     <group>
-      <mesh ref={pitchMark} rotation-x={-Math.PI / 2} visible={false}>
-        <circleGeometry args={[0.07, 20]} />
-        <meshBasicMaterial color="#5a3b1c" transparent opacity={0.7} />
+      <mesh ref={pitchMark} rotation-x={-Math.PI / 2} visible={false} renderOrder={2}>
+        <circleGeometry args={[0.09, 20]} />
+        <meshBasicMaterial color="#4a2f14" transparent opacity={0.75} depthWrite={false} />
       </mesh>
-      <mesh ref={target} rotation-x={-Math.PI / 2} visible={false}>
-        <ringGeometry args={[0.11, 0.16, 32]} />
-        <meshBasicMaterial color="#ffd23f" />
-      </mesh>
+      <group ref={target} visible={false}>
+        <mesh rotation-x={-Math.PI / 2} material={mats.ring} renderOrder={3}>
+          <ringGeometry args={[0.27, 0.4, 48]} />
+        </mesh>
+        <mesh rotation-x={-Math.PI / 2} material={mats.ring} renderOrder={3}>
+          <circleGeometry args={[0.07, 16]} />
+        </mesh>
+        <mesh rotation-x={-Math.PI / 2} material={mats.cross} renderOrder={3}>
+          <planeGeometry args={[1.2, 0.035]} />
+        </mesh>
+        <mesh rotation-x={-Math.PI / 2} rotation-z={Math.PI / 2} material={mats.cross} renderOrder={3}>
+          <planeGeometry args={[1.2, 0.035]} />
+        </mesh>
+      </group>
+      <group ref={bands} visible={false}>
+        {LENGTH_BANDS.map(([from, to, color]) => (
+          <mesh key={from} rotation-x={-Math.PI / 2} position={[0, 0.012, STRIKER_STUMPS_Z - (from + to) / 2]} renderOrder={1}>
+            <planeGeometry args={[FIELD.pitchWidth * 0.98, to - from - 0.04]} />
+            <meshBasicMaterial color={color} transparent opacity={0.13} depthWrite={false} toneMapped={false} />
+          </mesh>
+        ))}
+      </group>
     </group>
   );
 }
@@ -1089,6 +1327,9 @@ function Markers({ match }: { match: Match }) {
 // The alternative views (C cycles): from behind the striker, and a high wide view.
 const BATTER_END = { pos: new Vector3(0, 2.1, STRIKER_STUMPS_Z + 7), target: new Vector3(0, 1.0, BOWLER_STUMPS_Z), fov: 40 };
 const HIGH = { pos: new Vector3(0, 48, BOWLER_STUMPS_Z - 40), target: new Vector3(0, 0, 8), fov: 45 };
+
+/** A camera pinned from the debug handle (close-up captures in tests). */
+let debugView: { pos: [number, number, number]; look: [number, number, number]; fov: number } | undefined;
 
 function CameraRig({ match, recorder }: { match: Match; recorder: ReplayRecorder }) {
   const camera = useThree((s) => s.camera);
@@ -1100,6 +1341,15 @@ function CameraRig({ match, recorder }: { match: Match; recorder: ReplayRecorder
   const lastMode = useRef(mode);
   const replayWas = useRef(false);
   useFrame((state, dt) => {
+    if (debugView) {
+      camera.position.set(...debugView.pos);
+      camera.lookAt(...debugView.look);
+      if (camera instanceof PerspectiveCamera) {
+        camera.fov = debugView.fov;
+        camera.updateProjectionMatrix();
+      }
+      return;
+    }
     if (recorder.playing) {
       replayCamera(recorder, camera, pos, look, !replayWas.current, dt);
       replayWas.current = true;
@@ -1132,6 +1382,7 @@ function CameraRig({ match, recorder }: { match: Match; recorder: ReplayRecorder
         ball: ball ? { x: ball.x, y: ball.y, z: ball.z } : undefined,
         chaser: chaser ? { x: chaser.x, y: 0, z: chaser.z } : undefined,
         previous: last.current,
+        humanBowling: match.humanBowling,
       });
       last.current = shot.name;
       wantPos.set(shot.pos.x, shot.pos.y, shot.pos.z);

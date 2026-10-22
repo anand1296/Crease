@@ -115,7 +115,7 @@ test.describe('gameplay', () => {
     expect(errors).toEqual([]);
   });
 
-  test('bowl: choose the bowler, pick a delivery, aim, run in and release', async ({ page }) => {
+  test('bowl: choose the bowler and field, pick a delivery and side, place the marker, run in and lock the pace', async ({ page }) => {
     const errors: string[] = [];
     await ready(page, errors);
     await page.getByTestId('menu-play').click();
@@ -131,18 +131,36 @@ test.describe('gameplay', () => {
     await page.keyboard.press('Digit2');
     await expect(page.getByTestId('bowler-choice')).toBeHidden();
     await expect.poll(() => page.evaluate(() => window.__crease?.phase?.())).toBe('aiming');
-    await expect(page.getByTestId('bowling-panel')).toBeVisible();
-    await page.keyboard.press('KeyE');
+
+    // Step 1: the delivery, the side of the wicket, the field.
+    const panel = page.getByTestId('bowling-panel');
+    await expect(panel).toBeVisible();
+    await expect(panel).toHaveAttribute('data-step', 'Delivery');
+    await page.keyboard.press('Digit2');
+    await expect(panel.getByRole('option', { selected: true })).toContainText(/Inswinger|Googly|Arm ball/);
+    await page.keyboard.press('KeyO');
+    await expect(page.getByTestId('bowl-side')).toContainText('Around the wicket');
+    await page.keyboard.press('KeyF');
+    await expect(page.getByTestId('field-preset')).not.toContainText('auto');
+
+    // Step 2: place the landing marker.
+    await page.keyboard.press('Space');
+    await expect(panel).toHaveAttribute('data-step', 'Landing spot');
     await page.keyboard.down('ArrowUp');
     await page.waitForTimeout(150);
     await page.keyboard.up('ArrowUp');
+
+    // Step 3: run in and lock the pace.
     await page.keyboard.press('Space');
     await expect.poll(() => page.evaluate(() => window.__crease?.ballPhase?.())).toBe('runUp');
-    await page.waitForTimeout(400);
+    await expect(panel).toHaveAttribute('data-step', 'Run-up');
+    await page.waitForTimeout(300);
     await page.keyboard.press('Space');
+    await expect(panel).toContainText('Locked at');
     await expect.poll(() => balls(page), { timeout: 90_000 }).toBe(1);
     await expect(page.getByTestId('banner')).toBeVisible();
 
     expect(errors).toEqual([]);
   });
+
 });

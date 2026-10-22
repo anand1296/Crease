@@ -45,7 +45,7 @@ const PACE_PLANS: readonly BowlingPlan[] = [
   { id: 'outswing', label: 'full outswingers', type: 'outswinger', line: 0.14, length: 4.4, prior: [-0.9, -1.2, -1.8] },
   { id: 'inswing', label: 'inswingers at the pads', type: 'inswinger', line: 0.02, length: 4.6, prior: [-1.0, -1.2, -1.8] },
   { id: 'hard-length', label: 'back of a length', type: 'fast', line: 0.1, length: 8.2, prior: [-1.3, -1.1, -1.4] },
-  { id: 'bouncer', label: 'the bouncer', type: 'bouncer', line: 0.12, length: 10.6, prior: [-1.5, -1.4, -1.5] },
+  { id: 'bouncer', label: 'the bouncer', type: 'bouncer', line: 0.12, length: 11, prior: [-1.5, -1.4, -1.5] },
   { id: 'yorker', label: 'yorkers at the stumps', type: 'yorker', line: 0.0, length: 0.9, prior: [-1.6, -1.4, -0.9] },
   { id: 'wide-yorker', label: 'wide yorkers', type: 'yorker', line: 0.58, length: 0.9, prior: [-1.8, -1.5, -1.0] },
   { id: 'slower-full', label: 'slower balls, full', type: 'slower', line: 0.12, length: 3.6, prior: [-1.5, -1.3, -1.1] },

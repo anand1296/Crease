@@ -109,7 +109,7 @@ describe('delivery types behave differently', () => {
 
   it('a yorker pitches near the crease and a bouncer is head-high at the stumps', () => {
     expect(avg('yorker', pitchLength)).toBeLessThan(1.6);
-    const bouncerHeight = avg('bouncer', (d) => d.actual.atStumps?.y ?? 0, {}, 0, 10.5);
+    const bouncerHeight = avg('bouncer', (d) => d.actual.atStumps?.y ?? 0, {}, 0, 11);
     const goodHeight = avg('fast', (d) => d.actual.atStumps?.y ?? 0, {}, 0, 5.5);
     expect(bouncerHeight).toBeGreaterThan(1.3);
     expect(bouncerHeight).toBeGreaterThan(goodHeight + 0.5);
@@ -154,5 +154,69 @@ describe('delivery types behave differently', () => {
   it('the aimed line holds despite planned turn (bowlers allow for their spin)', () => {
     const line = avg('legBreak', (d) => d.actual.atStumps?.x ?? 0, { bowler: withAccuracy(leggie, 95) }, 0.1, 5);
     expect(Math.abs(line - 0.1)).toBeLessThan(0.12);
+  });
+});
+
+describe('the human bowler’s controls: landing spot, amount, effort, side', () => {
+  const plan = (p: Partial<DeliveryPlan>): DeliveryPlan => ({ type: 'fast', line: 0.2, length: 5, ...p });
+  const avgOf = (p: Partial<DeliveryPlan>, f: (d: ExecutedDelivery) => number, o: Opts = {}) => mean(many(40, plan(p), o).map(f));
+  const afterPitch = (d: ExecutedDelivery) => (d.actual.atStumps?.x ?? 0) - (d.actual.pitch?.x ?? 0);
+
+  it('an accurate bowler lands the ball on the marker (swing included in the aim)', () => {
+    const accurate = withAccuracy(quick, 95);
+    for (const type of ['fast', 'outswinger', 'inswinger'] as const) {
+      const ds = many(40, plan({ type, pitchLine: 0.3, length: 4.5 }), { bowler: accurate });
+      expect(Math.abs(mean(ds.map((d) => d.actual.pitch?.x ?? 0)) - 0.3)).toBeLessThan(0.06);
+      expect(Math.abs(mean(ds.map(pitchLength)) - 4.5)).toBeLessThan(0.3);
+    }
+  });
+
+  it('cutters deviate off the pitch the chosen way: the in-cutter in to the batter, the out-cutter away', () => {
+    // Right-hander: the off side is +x.
+    const inC = avgOf({ type: 'inCutter', pitchLine: 0.1 }, afterPitch, { pitch: 'green' });
+    const outC = avgOf({ type: 'outCutter', pitchLine: 0.1 }, afterPitch, { pitch: 'green' });
+    expect(inC).toBeLessThan(-0.04);
+    expect(outC).toBeGreaterThan(0.04);
+    // Realistic: a cutter moves centimetres, not half the pitch.
+    expect(Math.abs(outC)).toBeLessThan(0.4);
+    // More cut, more movement.
+    expect(avgOf({ type: 'outCutter', pitchLine: 0.1, amount: 1 }, afterPitch, { pitch: 'green' })).toBeGreaterThan(
+      avgOf({ type: 'outCutter', pitchLine: 0.1, amount: 0 }, afterPitch, { pitch: 'green' }) + 0.03,
+    );
+  });
+
+  it('the amount control: more swing curves more (within a realistic 0.8 m); more revolutions turn more and fly slower', () => {
+    const swing = (amount: number) => Math.abs(avgOf({ type: 'outswinger', amount }, (d) => d.movement.swingAccel));
+    expect(swing(1)).toBeGreaterThan(swing(0) * 2);
+    expect(swing(1)).toBeLessThanOrEqual(6.5);
+    const turn = (amount: number) => Math.abs(avgOf({ type: 'offBreak', amount }, afterPitch, { bowler: offie, pitch: 'dry' }));
+    expect(turn(1)).toBeGreaterThan(turn(0) * 1.4);
+    const kph = (amount: number) => avgOf({ type: 'offBreak', amount }, (d) => d.releaseSpeedKph, { bowler: offie });
+    expect(kph(1)).toBeLessThan(kph(0) - 3);
+  });
+
+  it('effort: flat out is quicker than a controlled ball, and wilder', () => {
+    const fast = many(40, plan({ effort: 1 }));
+    const steady = many(40, plan({ effort: 0.6 }));
+    expect(mean(fast.map((d) => d.releaseSpeedKph))).toBeGreaterThan(mean(steady.map((d) => d.releaseSpeedKph)) + 8);
+    expect(sd(fast.map(pitchLength))).toBeGreaterThan(sd(steady.map(pitchLength)));
+  });
+
+  it('around the wicket releases wide of the stumps and angles the ball in', () => {
+    const over = bowl(plan({ side: 'over', pitchLine: 0 }));
+    const around = bowl(plan({ side: 'around', pitchLine: 0 }));
+    expect(over.release.x).toBeGreaterThan(0.15);
+    expect(around.release.x).toBeLessThan(-0.5);
+    // From around the wicket the ball travels from −x towards the stumps: positive lateral velocity.
+    expect(around.velocity.x).toBeGreaterThan(over.velocity.x);
+  });
+});
+
+describe('run-ups', () => {
+  it('spinners run in off a few paces; fast bowlers off a long run', async () => {
+    const { runUpFor } = await import('./runUp.ts');
+    expect(runUpFor('offSpin').distance).toBeLessThan(7);
+    expect(runUpFor('fast').distance).toBeGreaterThan(15);
+    expect(runUpFor('legSpin').duration).toBeLessThan(runUpFor('fast').duration - 0.6);
   });
 });

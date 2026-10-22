@@ -54,7 +54,16 @@ Bounces are resolved at the exact contact point within the step (sub-step interp
 
 `src/game/bowling/`.
 
-**Delivery types** (12) are physical recipes: speed relative to the bowler's stock ball, swing direction, seam factor, side/top spin split, backspin, length constraints, execution difficulty and physical effort. Fast, slower ball, inswinger, outswinger, yorker (pitches 0.4–1.3 m from the stumps), full toss (does not pitch), bouncer (9.5–12.5 m), off-break, leg-break, top-spinner, doosra and googly. A bowler can only bowl the types for their style.
+**Delivery types** (16) are physical recipes: speed relative to the bowler's stock ball, swing direction, seam factor, cut direction, side/top spin split, backspin, length constraints, execution difficulty, physical effort, and what the "amount" control varies (swing, cut, spin or nothing). Fast, slower ball, inswinger, outswinger, in-cutter, out-cutter, yorker (pitches 0.4–1.3 m from the stumps), full toss (does not pitch), bouncer (10–13 m), off-break, arm ball, leg-break, top-spinner, doosra, googly and slider. A bowler can only bowl the types for their style. The human chooses from six (pace) or four (spin); yorkers and bouncers are simply lengths for the landing marker.
+
+**The human's controls** (`DeliveryPlan`):
+
+- *Landing spot* (`pitchLine`, `length`): the ball is aimed at the marker directly, with intended swing included in the aim.
+- *Amount* 0–1: swing × 0.4–1.2 (capped at 6.5 m/s², ≈0.7 m of curve at 135 km/h); cut 0.5–1.8 m/s sideways off the pitch in the chosen direction (≈10–25 cm at the batter); revolutions × 0.65–1.35, with speed × 1.04–0.96 (more spin, more flight). Error × 0.85–1.15.
+- *Effort* 0–1 from the pace meter: speed × (0.895 + 0.14 × effort), so 75% is the stock ball, flat out +3%, rolled out −10%. Above 85% the error grows (× up to 1.45) and above 90% so does the no-ball chance (up to +2.5%). Release quality is perfect up to 90% effort and falls to 0.5 flat out; never locking the pace gives a 55%-effort, poorly controlled ball.
+- *Side*: over the wicket the hand is ≈0.25 m from middle stump, around it ≈0.65 m on the other side.
+
+**Run-ups** (`runUp.ts`): fast 18 m in 2.35 s, fast-medium 15 m, medium 11 m, spin 5 m in 1.45 s. Release height 2.02 m (pace) and 2.0 m (spin), where the models' hands are at release.
 
 **Stock speed** comes from style and the pace attribute: fast 34–42 m/s (122–151 km/h), fast-medium 31–37.5, medium 28–33, spin 20–24.
 
@@ -68,7 +77,7 @@ Bounces are resolved at the exact contact point within the step (sub-step interp
 
 **Error scale** = (0.4 + 1.1 × (1 − accuracy)) × delivery difficulty × (1 + 0.8 × fatigue) × (1 + 1.5 × (1 − release quality)). Line σ ≈ 8.5 cm, length σ ≈ 45 cm (spin 35 cm) at scale 1.
 
-**Release quality** comes from the human's accuracy meter, or the computer's execution roll.
+**Release quality** comes from the human's pace meter (see above), or the computer's execution roll.
 
 **Fatigue** builds each ball, faster for low stamina and high-effort deliveries. It recovers 0.09 per over rested, costs up to 6% pace and widens error by up to 80%.
 
@@ -193,6 +202,7 @@ Computer v computer at Normal, measured over 400 balls on three seeds: 3.5–5.1
 - **Umpires** stand behind the bowler's stumps and at square leg, and signal out (LBW and caught), four, six, wide and no-ball; the square-leg umpire gives run-outs.
 - **Wickets** break: the stumps go back and the bails fly.
 - **Pace of play**: the match waits for the player after every ball; overs end with a summary card and wickets with a dismissal card, each with the scorecard. The simulation runs at a chosen fraction of real time (0.65×, 0.8× by default, or 1×); only the clock rate changes, never the physics step, so results are identical at every speed.
+- **Field presets** (`fielding/presets.ts`): ten common T20 fields from attacking to defensive. Fielding restrictions: two outside the 30-yard circle in the powerplay, five after it in T20 (the one-day rule — four in the middle overs — remains in the engine). A field change assigns fielders to the new positions by minimum total squared distance (Hungarian algorithm), close catchers excepted, so nobody crosses the ground for a small change.
 - **Fielding movement**: after a stroke only the chaser, one backing-up fielder, the keeper and the bowler move; the rest hold their positions (the ring walks in a step as the bowler runs in). Fields are reset under the camera cut between balls.
 - **Replays**: every rendered frame of a ball is recorded (ball, poses, bats, stumps), and wickets and boundaries are played back at 0.45× with a replay camera.
 - **Camera** (classic, default): low and close behind the bowler's arm. (Broadcast): wide behind the bowler between balls; a slow push-in and zoom through the run-up to a tight frame on the striker at release; after a stroke, a moment from the bowler's end and then a cut to a high side-on camera framing the ball and the chasing fielder; a low stump camera when the wicket is broken.

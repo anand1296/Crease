@@ -6,8 +6,9 @@ import { type BattingAiOptions, decideStroke, deepGaps } from '../ai/battingAi.t
 import type { ContactResult } from '../batting/contact.ts';
 import { SHOTS, type ShotAttempt } from '../batting/shots.ts';
 import { type DeliveryPlan, type ExecutedDelivery, executeDelivery } from '../bowling/execute.ts';
+import { runUpFor } from '../bowling/runUp.ts';
 import { type Fielder, type FieldingPlan, RUN, fielderReaction, fielderSpeed, planFielding } from '../fielding/plan.ts';
-import { type Player, isSpinner, offSideSign } from '../model/player.ts';
+import { type Player, offSideSign } from '../model/player.ts';
 import type { GroundModel } from '../physics/ball.ts';
 import { type BallEvent, BallInPlay } from '../simulation/ballInPlay.ts';
 
@@ -95,6 +96,8 @@ export class DeliveryCycle {
   throwTo: 'striker' | 'bowler' = 'striker';
   readonly events: BallEvent[] = [];
   private releaseQuality: number | undefined;
+  /** Changes a human bowler makes during the run-up (amount of swing/spin/cut, the pace they lock). */
+  private planChanges: { amount?: number; effort?: number } = {};
   /** Cycle time of bat contact, if the ball was struck. */
   contact: number | undefined;
   private contactTime?: number;
@@ -108,7 +111,7 @@ export class DeliveryCycle {
     this.ground = groundFor(opts.pitch);
     this.rng = opts.rng;
     this.releaseQuality = opts.releaseQuality;
-    this.releaseTime = isSpinner(opts.bowler.bowlingStyle) ? 1.1 : 1.7;
+    this.releaseTime = runUpFor(opts.bowler.bowlingStyle).duration;
     this.fielderPos = opts.field.map((f) => ({ ...f.start }));
   }
 
@@ -128,6 +131,26 @@ export class DeliveryCycle {
 
   get releaseLocked(): boolean {
     return this.releaseQuality !== undefined;
+  }
+
+  /** The plan as it will be bowled, including changes made during the run-up. */
+  get plan(): DeliveryPlan {
+    return { ...this.opts.plan, ...this.planChanges };
+  }
+
+  /** Human bowler, during the run-up: more or less swing / spin / cut. */
+  setAmount(amount: number): void {
+    if (this.phase === 'runUp') this.planChanges = { ...this.planChanges, amount: Math.min(1, Math.max(0, amount)) };
+  }
+
+  /** Human bowler, during the run-up: lock the pace (effort 0–1) and with it the release quality. */
+  lockPace(effort: number): boolean {
+    if (this.phase !== 'runUp' || this.releaseQuality !== undefined) return false;
+    const e = Math.min(1, Math.max(0, effort));
+    this.planChanges = { ...this.planChanges, effort: e };
+    // Anything up to 90% effort is controlled; flat out costs accuracy.
+    this.releaseQuality = e <= 0.9 ? 1 : 1 - (e - 0.9) * 5;
+    return true;
   }
 
   /** Human batter commits to a stroke now. Ignored before release or once committed. */
@@ -156,7 +179,10 @@ export class DeliveryCycle {
 
   private release(): void {
     const o = this.opts;
-    const delivery = executeDelivery(o.plan, {
+    // A human who never locked the pace gets a half-hearted, poorly timed release.
+    const unlocked = this.releaseQuality === undefined;
+    const plan = unlocked ? { ...this.plan, effort: this.plan.effort ?? 0.55 } : this.plan;
+    const delivery = executeDelivery(plan, {
       bowler: o.bowler,
       batterHand: o.striker.battingHand,
       pitch: o.pitch,

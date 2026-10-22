@@ -53,7 +53,8 @@ export function MainMenu() {
   );
 }
 
-const OVERS = [2, 5, 10, 20, 50];
+/** T20 and shorter: twenty overs a side at most. */
+const OVERS = [2, 5, 10, 15, 20];
 
 function TeamTile({ team, selected, disabled, onSelect }: { team: Team; selected: boolean; disabled: boolean; onSelect: () => void }) {
   return (
@@ -374,10 +375,34 @@ export function HowToPlay({ onClose }: { onClose: () => void }) {
         </table>
         <h2>Bowling</h2>
         <p>
-          At the start of each over pick your bowler with the number keys (Enter takes the suggestion). <kbd>Q</kbd>/<kbd>E</kbd>{' '}
-          choose the delivery, arrows move the target on the pitch, <kbd>Space</kbd> runs in, and <kbd>Space</kbd> again while the
-          needle is in the gold gives an accurate release.
+          At the start of each over pick your bowler with the number keys (Enter takes the suggestion). Then every ball has three steps:
         </p>
+        <table className="keys">
+          <tbody>
+            <tr>
+              <td><kbd>1</kbd>–<kbd>6</kbd></td>
+              <td>
+                <strong>Delivery.</strong> Pace: stock, inswinger, outswinger, in-cutter, out-cutter, slower ball. Spin: stock, the variations, the
+                wrong&apos;un. <kbd>↑</kbd>/<kbd>↓</kbd> how much it swings, cuts or spins. <kbd>O</kbd> over or around the wicket.{' '}
+                <kbd>F</kbd> field (Shift+F back). <kbd>Space</kbd> next.
+              </td>
+            </tr>
+            <tr>
+              <td><kbd>Arrows</kbd></td>
+              <td>
+                <strong>Landing spot.</strong> Move the marker to where the ball should pitch. <kbd>Space</kbd> locks it and the bowler runs in;{' '}
+                <kbd>Backspace</kbd> goes back.
+              </td>
+            </tr>
+            <tr>
+              <td><kbd>Space</kbd></td>
+              <td>
+                <strong>Run-up.</strong> Lock the pace on the meter: higher is quicker, the red zone is flat out and costs control (and risks a
+                no-ball). <kbd>↑</kbd>/<kbd>↓</kbd> still change the swing, cut or spin until he lets go.
+              </td>
+            </tr>
+          </tbody>
+        </table>
         <p className="dim">
           <kbd>P</kbd> pause · <kbd>C</kbd> camera · <kbd>M</kbd> sound · <kbd>V</kbd> commentary · <kbd>H</kbd> help
         </p>

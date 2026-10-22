@@ -4,11 +4,11 @@
 
 | | |
 | --- | --- |
-| Version | 0.7.1 (October 2026) |
+| Version | 0.8.0 (October 2026) |
 | Repository | https://github.com/anand1296/Crease |
 | Hosting | Vercel (static site, Git-integrated: every push to `main` deploys; pull requests get previews) |
 | Stack | TypeScript (strict) · React 19 · Three.js r180 via React Three Fiber 9 · Vite 7 · Zustand 5 · Vitest 3 · Playwright |
-| Size | ≈11,900 lines of application TypeScript, ≈1,550 lines of unit and simulation tests (119 tests), 3 browser tests |
+| Size | ≈13,400 lines of application TypeScript, ≈1,800 lines of unit and simulation tests (136 tests), 3 browser tests |
 | Backend | None. Everything — physics, AI, commentary, audio — runs in the player's browser |
 
 Companion documents: [README](../README.md) (running and playing), [GAME_DESIGN](../GAME_DESIGN.md) (rules and the simulation's numbers), [ARCHITECTURE](../ARCHITECTURE.md) (module summary), [CHANGELOG](../CHANGELOG.md), [batting report](batting-report.md).
@@ -172,7 +172,7 @@ Semi-implicit Euler at 240 Hz with gravity, quadratic air drag (Cd 0.45), swing 
 
 ### Bowling (`bowling/`)
 
-A delivery is a **plan** (type, line, length) and an **execution**. Twelve delivery types are physical recipes. The bowler aims using the movement they *intend*; a **shooting-method solver** finds the launch velocity (with drag and swing) that pitches the ball on the aiming point; then the ball gets the movement it *actually* has — swing ±30%, uncontrollable seam, spin ±15%, bounce variation, and line/length/speed error scaled by accuracy, delivery difficulty, fatigue and release quality (the human's accuracy meter, or the computer's execution roll). Fatigue builds per ball and recovers between overs.
+A delivery is a **plan** (type, line or landing spot, length, side of the wicket, amount of swing/cut/spin, effort) and an **execution**. Sixteen delivery types are physical recipes; cutters deviate off the pitch in a chosen direction. The human bowls in three steps — choose the delivery (and amount, side and field preset), place and lock the landing marker, then lock the pace on a meter during the run-up while still varying the amount — and the ball is aimed at the marker with intended swing included. Effort trades pace for control; the run-up length comes from the bowler's style (`runUp.ts`), shared by simulation and renderer. The bowler aims using the movement they *intend*; a **shooting-method solver** finds the launch velocity (with drag and swing) that pitches the ball on the aiming point; then the ball gets the movement it *actually* has — swing ±30%, uncontrollable seam, spin ±15%, bounce variation, and line/length/speed error scaled by accuracy, delivery difficulty, fatigue and release quality (the human's accuracy meter, or the computer's execution roll). Fatigue builds per ball and recovers between overs.
 
 ### Batting (`batting/`, `simulation/ballInPlay.ts`)
 
@@ -330,8 +330,9 @@ The body material is a `MeshStandardMaterial` patched at compile time (`onBefore
 
 ### Animation: motion capture plus a procedural control rig
 
-Every player has a hidden **control rig** (`Humanoid.tsx`, sized to the avatar's measured proportions) that the procedural motion library poses — batting stance, backlift, stroke and follow-through timed to the simulated contact; the bowling gather, delivery stride and follow-through; the keeper's crouch; fielders' ready position, gather and throw; umpire signals. `AvatarRig` then drives the visible skeleton from one of two sources, cross-fading over 0.25 s when the source changes:
+Every player has a hidden **control rig** (`Humanoid.tsx`, sized to the avatar's measured proportions) that the procedural motion library poses — batting stance, backlift, stroke and follow-through timed to the simulated contact; the bowling actions (keyframed tracks per action — pace, medium, off-spin, leg-spin — against time from release: bound, back-foot contact side-on, the arm turning backwards-over a full circle to release just past vertical with the front leg braced, follow-through across the body; unit tests check the arm never turns the wrong way and is high at release, and the hand is measured to be within a few centimetres of the physics' release point); the keeper's crouch; fielders' ready position, gather and throw; umpire signals. `AvatarRig` then drives the visible skeleton from one of two sources, cross-fading over 0.25 s when the source changes:
 
+- The ball is held in the bowler's measured hand until release, then eased onto the physics' path over 70 ms. Its seam is a raised ring: for pace it is upright and steady (the ball backspins about the seam's axis), angled by the swing; for spin the ball turns about the real spin axis (top spin about x, side spin along the flight) with the seam set at an angle to it, so the seam visibly rotates.
 - **Motion capture** for running, jogging, walking (clip chosen by speed, advanced by distance actually covered so feet don't slide), idling, breathing and celebrating.
 - **Retargeting** of the control rig: each limb bone gets a constant correction `R0` mapping its A-pose bind orientation to "hanging down" (the rig's zero pose), so its orientation is the rig segment's orientation × `R0`; the torso's rotation is shared over three vertebrae; the head is steadied and turned towards the ball (yaw-limited); arms holding the bat are solved with **two-bone IK on the model itself** (elbow pole from the rig) so the gloves land exactly on the handle; fingers curl to grip.
 
@@ -342,6 +343,7 @@ Every player has a hidden **control rig** (`Humanoid.tsx`, sized to the avatar's
 | When | Shot |
 | --- | --- |
 | Between balls | Wide, behind the bowler's arm (whole pitch and close field) |
+| Human bowling, setting up the ball | **Aim**: high behind the bowler's arm, the whole pitch and the landing marker in frame; the run-up pushes in from here |
 | Run-up | Slow push-in and zoom (smoothstep), arriving tight on the striker a beat before release; a slight hand-held drift |
 | Ball left, missed or padded | Hold the tight frame |
 | After the stroke | 0.45 s from the bowler's end, widening and panning with the ball |
@@ -363,7 +365,7 @@ All synthesised in the browser (`audio/sound.ts`), through a gentle limiter and 
 ## 12. UI, state and input
 
 - **Match HUD**: a scoreboard bar along the bottom (score, overs, batters, bowler and this over's balls, run rate, the chase, powerplay); a **controls panel** that shows the batting or bowling keys at all times, lights the keys held or just pressed (polled each animation frame from the keyboard state) and names the stroke the current direction + key will play (the same `shotFromInput` the match uses); the *Next ball* prompt and the over and wicket cards; the REPLAY badge.
-- **Screens**: main menu (over the live stadium, orbiting camera) → match setup (teams, overs 2/5/10/20/50, difficulty, pitch, toss/bat/bowl) → squad board (tick 11 of the squad, reorder, validation: exactly 11, warnings for no keeper, fewer than five bowlers, no spinner) → match (HUD) → innings break (scorecard, coach) → result (summary, top performers, both scorecards, coach, rematch).
+- **Screens**: main menu (over the live stadium, orbiting camera) → match setup (teams, overs 2/5/10/15/20, difficulty, pitch, toss/bat/bowl) → squad board (tick 11 of the squad, reorder, validation: exactly 11, warnings for no keeper, fewer than five bowlers, no spinner) → match (HUD) → innings break (scorecard, coach) → result (summary, top performers, both scorecards, coach, rematch).
 - **Store**: `state/game.ts` (Zustand) holds the screen, setup, settings (sound, graphics, commentary — persisted in `localStorage`) and a **snapshot** of the match rebuilt on match events, so the HUD re-renders on events, not frames.
 - **Input**: bindings are data (`input/keyboard.ts`); the handler reads the current match from the store. Batting: arrows for direction + D (ground), A (lofted), S (defend/push), W (sweep), X (leave), Shift (back foot), Space/R (run). Bowling: 1–9/Enter (choose bowler), Q/E (delivery), arrows (target), Space (run in, release on the meter). General: Enter/Space (next ball, continue, skip replay), P/Esc, C, M, V, H.
 - **Accessibility basics**: DOM UI with roles and labels, visible focus, `prefers-reduced-motion` respected, captions for every spoken line (the ticker).
@@ -438,7 +440,7 @@ docs/             This document, batting report
 
 ## 17. Feature inventory
 
-**Cricket**: full limited-overs matches (2–50 overs); toss; two innings; targets and results; full scorecards with fall of wickets, extras, maidens and economy; bowled, caught, LBW (Law 36 projection), run out; wides and no-balls; called running; bowler quotas and no consecutive overs; fatigue; four pitch types; three difficulty levels; fielding restrictions.
+**Cricket**: limited-overs matches of 2–20 overs a side (the engine also plays one-day games); toss; two innings; targets and results; full scorecards with fall of wickets, extras, maidens and economy; bowled, caught, LBW (Law 36 projection), run out; wides and no-balls; called running; bowler quotas and no consecutive overs; fatigue; four pitch types; three difficulty levels; fielding restrictions.
 
 **Batting**: 16 strokes plus the push, front/back foot, timing measured in milliseconds, edges, plays-and-misses, perception-limited bat line, physics contact.
 

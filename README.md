@@ -2,7 +2,7 @@
 
 A browser-based 3D cricket game, built with React, TypeScript and Three.js. Inspired by the depth and replayability of classic cricket games: batting that rewards timing and shot selection, bowling with real variation, and an opponent that plays the ball rather than the dice.
 
-> **Status: alpha (0.7.1).** Play a full limited-overs match against the computer: pick India, Pakistan, Australia or England with their current T20I squads, choose your playing XI and batting order, set the overs (2–50), difficulty and pitch, toss, bat and bowl both innings, and finish with a result and full scorecards. The game waits for you between balls, sums up every over and wicket with the scorecard, replays wickets and boundaries, and runs at a speed you choose. Real ball physics, sixteen strokes, twelve delivery types, LBW, wides, run-outs and bowler quotas; motion-captured, skinned player models in team kits; umpires who signal; a broadcast-style camera; post-processed graphics; and synthesised sound, including a physically modelled bat-on-ball crack. Game AI throughout: a bowling attack that learns your weaknesses, an AI captain that sets fields to where you score (within powerplay restrictions), T20-minded computer batters that read the field, spoken ball-by-ball commentary, and a coach that reviews your innings. See [Roadmap](#roadmap).
+> **Status: alpha (0.8.0).** Play a full limited-overs match against the computer: pick India, Pakistan, Australia or England with their current T20I squads, choose your playing XI and batting order, set the overs (2–20), difficulty and pitch, toss, bat and bowl both innings, and finish with a result and full scorecards. The game waits for you between balls, sums up every over and wicket with the scorecard, replays wickets and boundaries, and runs at a speed you choose. Real ball physics, sixteen strokes, sixteen delivery types with swing, cut and spin you control, ten T20 field presets, over or around the wicket, realistic bowling actions, LBW, wides, run-outs and bowler quotas; motion-captured, skinned player models in team kits; umpires who signal; a broadcast-style camera; post-processed graphics; and synthesised sound, including a physically modelled bat-on-ball crack. Game AI throughout: a bowling attack that learns your weaknesses, an AI captain that sets fields to where you score (within powerplay restrictions), T20-minded computer batters that read the field, spoken ball-by-ball commentary, and a coach that reviews your innings. See [Roadmap](#roadmap).
 
 ## Running locally
 
@@ -54,9 +54,20 @@ Hold an arrow for direction, then press a stroke key **as the ball arrives**. Th
 | Key | Action |
 | --- | --- |
 | <kbd>1</kbd>–<kbd>9</kbd> / <kbd>Enter</kbd> | At the start of each over: pick the bowler from the eligible list, or take the suggestion |
-| <kbd>Q</kbd> / <kbd>E</kbd> | Previous / next delivery type (the bowler's own repertoire) |
-| Arrows | Move the gold target: line (left/right) and length (up/down) |
-| <kbd>Space</kbd> | Run in; press again while the accuracy needle is in the gold for a clean release |
+| **1. Delivery** | |
+| <kbd>1</kbd>–<kbd>6</kbd> (or <kbd>Q</kbd>/<kbd>E</kbd>) | Pace: stock, inswinger, outswinger, in-cutter, out-cutter, slower ball. Spin: stock ball and the bowler's variations |
+| <kbd>↑</kbd> / <kbd>↓</kbd> | How much it swings, cuts or spins |
+| <kbd>O</kbd> | Over or around the wicket |
+| <kbd>F</kbd> (<kbd>Shift</kbd>+<kbd>F</kbd> back) | Field: the captain's own, or one of ten T20 presets (only powerplay-legal ones in the powerplay) |
+| <kbd>Space</kbd> | Next: the landing spot |
+| **2. Landing spot** | |
+| Arrows | Move the marker to where the ball should pitch (↑ fuller, ↓ shorter) |
+| <kbd>Space</kbd> / <kbd>Backspace</kbd> | Lock it and run in / back to the delivery |
+| **3. Run-up** | |
+| <kbd>Space</kbd> | Lock the pace on the meter: further right is quicker; the red zone is flat out and costs control |
+| <kbd>↑</kbd> / <kbd>↓</kbd> | Still change the swing, cut or spin until he lets go |
+
+The same ball again is <kbd>Space</kbd>, <kbd>Space</kbd>, <kbd>Space</kbd>.
 
 ### General
 

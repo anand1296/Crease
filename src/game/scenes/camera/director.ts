@@ -22,7 +22,7 @@ export interface Vec {
 }
 
 export interface Shot {
-  readonly name: 'wide' | 'runUp' | 'delivery' | 'stroke' | 'chase' | 'stumps' | 'hold';
+  readonly name: 'wide' | 'aim' | 'runUp' | 'delivery' | 'stroke' | 'chase' | 'stumps' | 'hold';
   readonly pos: Vec;
   readonly look: Vec;
   /** Vertical field of view, degrees. */
@@ -49,6 +49,12 @@ export interface DirectorInput {
   readonly chaser: Vec | undefined;
   /** Seconds since the director's previous shot started (for holding a cut). */
   readonly previous: Shot['name'] | undefined;
+  /**
+   * A human is bowling: between balls the camera rises behind the bowler to
+   * frame the whole pitch and the landing marker, and the run-up pushes in
+   * from there.
+   */
+  readonly humanBowling?: boolean;
 }
 
 const smooth = (u: number) => {
@@ -83,17 +89,32 @@ export const CLASSIC_TIGHT: Readonly<{ pos: Vec; look: Vec; fov: number }> = {
   fov: 19,
 };
 
+/** The bowler's view while setting up a ball: high behind the bowler's arm, the whole pitch in frame. */
+export const AIM: Readonly<{ pos: Vec; look: Vec; fov: number }> = {
+  pos: { x: 0, y: 7.8, z: BOWLER_STUMPS_Z - 13 },
+  look: { x: 0, y: 0.2, z: STRIKER_STUMPS_Z - 5 },
+  fov: 30,
+};
+
 /** How long the stroke is shown from the bowler's end before the chase camera takes over. */
 export const STROKE_HOLD = 0.45;
 
 export function direct(input: DirectorInput): Shot {
   const { phase, time, releaseTime, ball } = input;
   const classic = input.style === 'classic';
-  const WIDE_ = classic ? CLASSIC_WIDE : WIDE;
+  const WIDE_ = input.humanBowling ? AIM : classic ? CLASSIC_WIDE : WIDE;
   const TIGHT_ = classic ? CLASSIC_TIGHT : TIGHT;
 
   if (phase === undefined) {
-    return { name: 'wide', pos: { ...WIDE_.pos }, look: { ...WIDE_.look }, fov: WIDE_.fov, cut: input.previous !== 'wide' && input.previous !== 'runUp' && input.previous !== undefined, ease: 1.5 };
+    const name = input.humanBowling ? 'aim' : 'wide';
+    return {
+      name,
+      pos: { ...WIDE_.pos },
+      look: { ...WIDE_.look },
+      fov: WIDE_.fov,
+      cut: input.previous !== name && input.previous !== 'runUp' && input.previous !== undefined && input.previous !== 'wide' && input.previous !== 'aim',
+      ease: 1.5,
+    };
   }
 
   if (phase === 'runUp' || (phase === 'inFlight' && input.contactTime === undefined && input.stumpsTime === undefined)) {

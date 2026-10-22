@@ -96,9 +96,15 @@ export function fieldingPhase(overs: number, ballsBowled: number): FieldDecision
   return 'middle';
 }
 
-/** Fielders allowed outside the 30-yard circle. */
-export function maxOutside(phase: FieldDecision['phase']): number {
-  return phase === 'powerplay' ? 2 : phase === 'middle' ? 4 : 5;
+/**
+ * Fielders allowed outside the 30-yard circle: two in the powerplay; then
+ * five in T20 cricket (20 overs or fewer), four in the middle overs and five
+ * at the death of a one-day game.
+ */
+export function maxOutside(phase: FieldDecision['phase'], overs = 20): number {
+  if (phase === 'powerplay') return 2;
+  if (overs <= 20) return 5;
+  return phase === 'middle' ? 4 : 5;
 }
 
 export function setField(ctx: FieldContext): FieldDecision {
@@ -125,7 +131,8 @@ export function setField(ctx: FieldContext): FieldDecision {
     }
     return chosen;
   };
-  const deepCount = maxOutside(phase);
+  // The captain keeps one more up in the middle overs than the law allows: T20 sides attack there.
+  const deepCount = phase === 'middle' ? Math.min(4, maxOutside(phase, ctx.overs)) : maxOutside(phase, ctx.overs);
   const deep = pick(
     CANDIDATES.filter((c) => c.deep),
     deepCount,

@@ -62,7 +62,7 @@ describe('adaptive bowling (Thompson sampling)', () => {
 });
 
 describe('AI captain', () => {
-  it('obeys fielding restrictions: two out in the powerplay, four in the middle, five at the death', () => {
+  it('obeys fielding restrictions: two out in the powerplay, no more than five after it', () => {
     expect(fieldingPhase(20, 0)).toBe('powerplay');
     expect(fieldingPhase(20, 6 * 6)).toBe('middle');
     expect(fieldingPhase(20, 17 * 6)).toBe('death');
@@ -70,7 +70,7 @@ describe('AI captain', () => {
       const f = setField({ overs: 20, ballsBowled: balls, spinner: false, wagon: [] });
       expect(f.positions).toHaveLength(9);
       expect(f.phase).toBe(phase);
-      expect(f.positions.filter((p) => p.distance > 27.43).length).toBeLessThanOrEqual(maxOutside(phase));
+      expect(f.positions.filter((p) => p.distance > 27.43).length).toBeLessThanOrEqual(maxOutside(phase, 20));
     }
   });
 

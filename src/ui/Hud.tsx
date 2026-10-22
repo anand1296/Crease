@@ -1,5 +1,6 @@
 import { useGame } from '../state/game.ts';
 import { DELIVERY_TYPES } from '../game/bowling/deliveryTypes.ts';
+import { effortSpeed } from '../game/bowling/execute.ts';
 import type { BallOutcome } from '../game/session/deliveryCycle.ts';
 import type { InningsState } from '../game/match/match.ts';
 import { Scorecard } from './Scorecard.tsx';
@@ -173,57 +174,200 @@ function RunPrompt() {
   );
 }
 
+/** Pitching length (metres in front of the striker's stumps) in a captain's words. */
+export function lengthName(m: number): string {
+  if (m <= 1.3) return 'Yorker';
+  if (m <= 3.2) return 'Full';
+  if (m <= 6.5) return 'Good length';
+  if (m <= 8.8) return 'Back of a length';
+  return m >= 9.8 ? 'Bouncer' : 'Short';
+}
+
+/** Where on the pitch it lands, across: metres from middle stump towards the batter's off side. */
+export function lineName(m: number): string {
+  if (m > 0.75) return 'wide outside off';
+  if (m > 0.32) return 'outside off';
+  if (m > 0.12) return 'just outside off';
+  if (m > -0.12) return 'at the stumps';
+  if (m > -0.4) return 'on the pads';
+  return 'down the leg side';
+}
+
+const AMOUNT_NAME = { swing: 'Swing', cut: 'Cut', spin: 'Spin', none: '' } as const;
+const STEPS = ['Delivery', 'Landing spot', 'Run-up'] as const;
+const MOOD_NAME = { aggressive: 'Attacking', moderate: 'Balanced', defensive: 'Defensive' } as const;
+
+/**
+ * Bowling, one ball at a time: (1) choose the delivery, the side of the
+ * wicket, the field and how much it should move; (2) place the landing
+ * marker; (3) in the run-up, lock the pace on the meter (and still change
+ * the amount). Every control is also shown as a key that lights when pressed.
+ */
 function BowlingPanel() {
   const snap = useGame((s) => s.snap);
-  if (!snap || !snap.userBowling || snap.phase === 'chooseBowler' || snap.phase === 'inningsBreak' || snap.phase === 'complete') return null;
-  const { setup, deliveries } = snap;
+  const match = useGame((s) => s.match);
+  const help = useGame((s) => s.showHelp);
+  const { held, flash } = useKeys();
+  if (help || !snap || !match || !snap.userBowling) return null;
   const runningIn = snap.phase === 'delivery' && snap.ballPhase === 'runUp';
-  const length =
-    setup.length < 1.4 ? 'Yorker' : setup.length < 3.5 ? 'Full' : setup.length < 6.5 ? 'Good length' : setup.length < 9 ? 'Back of a length' : 'Short';
-  const line = setup.line > 0.5 ? 'Wide outside off' : setup.line > 0.2 ? 'Outside off' : setup.line > 0.05 ? 'Off stump' : setup.line > -0.08 ? 'Middle' : 'Leg side';
+  if (snap.phase !== 'aiming' && !runningIn) return null;
+  const lit = (a: GameAction) => held.has(a) || flash === a;
+  const { setup, deliveries } = snap;
+  const def = DELIVERY_TYPES[setup.type];
+  const step = snap.phase === 'aiming' ? (snap.aimStep === 'type' ? 0 : 1) : 2;
+  const preset = snap.presets.find((p) => p.id === snap.fieldPreset);
+  const amount =
+    def.variable === 'none' ? null : (
+      <div className="bp-row">
+        <span className="bp-label">{AMOUNT_NAME[def.variable]}</span>
+        <span className="bp-amount" aria-label={`${AMOUNT_NAME[def.variable]} ${Math.round(setup.amount * 100)}%`}>
+          {Array.from({ length: 10 }, (_, i) => (
+            <i key={i} className={i < Math.round(setup.amount * 10) ? 'on' : ''} />
+          ))}
+        </span>
+        <Key label="↑" on={lit('up')} />
+        <Key label="↓" on={lit('down')} />
+      </div>
+    );
   return (
-    <section className="hud-card bowling" aria-label="Bowling controls" data-testid="bowling-panel">
-      <div className="label">Delivery (Q / E)</div>
-      <div className="deliveries">
-        {deliveries.map((d) => (
-          <span key={d} className={d === setup.type ? 'chip on' : 'chip'}>
-            {DELIVERY_TYPES[d].name}
-          </span>
+    <section className="keys bowl-panel" aria-label="Bowling controls" data-testid="bowling-panel" data-step={STEPS[step]}>
+      <div className="keys-head">
+        <span>Bowling</span>
+        <button type="button" className="bp-side" onClick={() => match.toggleSide()} disabled={step === 2} data-testid="bowl-side">
+          {setup.side === 'over' ? 'Over the wicket' : 'Around the wicket'} <Key label="O" on={lit('side')} />
+        </button>
+      </div>
+      <ol className="bp-steps" aria-label="Steps">
+        {STEPS.map((name, i) => (
+          <li key={name} className={i === step ? 'now' : i < step ? 'done' : ''} aria-current={i === step ? 'step' : undefined}>
+            {name}
+          </li>
         ))}
-      </div>
-      <div className="label">Target (arrows)</div>
-      <div className="value">
-        {line}, {length.toLowerCase()}
-      </div>
-      {runningIn ? (
-        <div className="meter" aria-label="Release accuracy">
-          <span className="sweet" />
-          <Needle locked={snap.releaseLocked} />
-        </div>
-      ) : null}
-      <div className="hint">
-        {snap.phase === 'aiming' ? 'Space to run in' : runningIn ? (snap.releaseLocked ? 'Release locked' : 'Space when the needle is in the gold') : ''}
-      </div>
+      </ol>
+
+      {step === 0 ? (
+        <>
+          <div className="bp-deliveries" role="listbox" aria-label="Delivery">
+            {deliveries.map((d, i) => (
+              <button
+                type="button"
+                key={d}
+                role="option"
+                aria-selected={d === setup.type}
+                className={d === setup.type ? 'chip on' : 'chip'}
+                onClick={() => match.selectDelivery(d)}
+              >
+                <kbd>{i + 1}</kbd> {DELIVERY_TYPES[d].name}
+              </button>
+            ))}
+          </div>
+          <p className="bp-blurb">{def.blurb}</p>
+          {amount}
+          <div className="bp-row bp-field">
+            <FieldMap dots={snap.fieldMap} />
+            <div>
+              <span className="bp-label">Field</span>
+              <button type="button" className="bp-preset" onClick={() => match.cycleFieldPreset(1)} data-testid="field-preset">
+                {preset ? preset.name : "Captain's field (auto)"}
+              </button>
+              <span className="dim small">
+                {preset ? `${MOOD_NAME[preset.mood]} · ${preset.blurb}` : 'Set ball by ball for this batter and phase'}
+              </span>
+              <span className="bp-keys">
+                <Key label="F" on={lit('field')} /> <span className="dim small">next · Shift+F back</span>
+              </span>
+            </div>
+          </div>
+          <div className="bp-go">
+            <Key label="Space" on={lit('bowl')} wide /> <span>Choose where it lands</span>
+          </div>
+        </>
+      ) : step === 1 ? (
+        <>
+          <div className="bp-target">
+            <strong>{lengthName(setup.length)}</strong>, {lineName(setup.line)}
+            <span className="dim small"> · {setup.length.toFixed(1)} m from the stumps</span>
+          </div>
+          <div className="bp-row">
+            <div className="arrows" aria-hidden="true">
+              <span />
+              <Key label="↑" on={lit('up')} />
+              <span />
+              <Key label="←" on={lit('left')} />
+              <Key label="↓" on={lit('down')} />
+              <Key label="→" on={lit('right')} />
+            </div>
+            <span className="dim">Move the marker to where it should pitch: ↑ fuller, ↓ shorter.</span>
+          </div>
+          <div className="bp-go">
+            <Key label="Space" on={lit('bowl')} wide /> <span>Lock it and run in</span>
+          </div>
+          <div className="bp-back">
+            <Key label="Backspace" on={lit('back')} wide /> <span className="dim">{def.name}: change delivery</span>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="bp-row">
+            <span className="bp-label">Pace</span>
+            <div className="pace-meter" aria-label="Pace">
+              <span className="zone-red" />
+              {snap.lockedPace === undefined ? <PaceNeedle /> : <span className="needle locked" style={{ left: `${snap.lockedPace * 100}%` }} />}
+            </div>
+          </div>
+          <div className="bp-target">
+            {snap.lockedPace === undefined ? (
+              <span className="dim">Lock the pace: further right is quicker; the red is flat out and costs control.</span>
+            ) : (
+              <span>
+                Locked at <strong>{Math.round(snap.lockedPace * 100)}%</strong> · about{' '}
+                <strong>{Math.round(snap.deliveryKph * effortSpeed(snap.lockedPace) * (def.variable === 'spin' ? 1.04 - 0.08 * setup.amount : 1))} km/h</strong>
+                {snap.lockedPace > 0.9 ? ' · flat out' : ''}
+              </span>
+            )}
+          </div>
+          {amount}
+          <div className="bp-go">
+            <Key label="Space" on={lit('bowl')} wide /> <span>{snap.lockedPace === undefined ? 'Lock the pace' : `${def.name}, ${lengthName(setup.length).toLowerCase()}`}</span>
+          </div>
+        </>
+      )}
     </section>
   );
 }
 
 /**
- * The accuracy needle moves every frame during the run-up: it is moved
- * directly rather than re-rendering the bowling panel sixty times a second.
+ * The pace needle sweeps every frame during the run-up: it is moved directly
+ * rather than re-rendering the panel sixty times a second.
  */
-function Needle({ locked }: { locked: boolean }) {
+function PaceNeedle() {
   const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     const place = (m: number) => {
-      if (ref.current) ref.current.style.left = `${(locked ? 0.5 : m) * 100}%`;
+      if (ref.current) ref.current.style.left = `${m * 100}%`;
     };
     place(useGame.getState().meter);
     return useGame.subscribe((st, prev) => {
       if (st.meter !== prev.meter) place(st.meter);
     });
-  }, [locked]);
+  }, []);
   return <span ref={ref} className="needle" />;
+}
+
+/** The field from above, as seen from behind the bowler: striker's end at the top. */
+function FieldMap({ dots }: { dots: readonly { x: number; z: number; role: 'keeper' | 'bowler' | 'fielder' }[] }) {
+  const r = 46;
+  const k = r / 66;
+  return (
+    <svg className="field-map" viewBox="-50 -50 100 100" width="96" height="96" aria-label="Field placings" role="img">
+      <circle r={r} className="fm-ground" />
+      <circle r={27.43 * k} className="fm-circle" />
+      <rect x={-1.5} y={-10.1 * k} width={3} height={20.2 * k} className="fm-pitch" />
+      {dots.map((d, i) => (
+        <circle key={i} cx={-d.x * k} cy={-d.z * k} r={d.role === 'fielder' ? 2.6 : 2.2} className={`fm-${d.role}`} />
+      ))}
+    </svg>
+  );
 }
 
 function BowlerChoice() {
@@ -246,6 +390,10 @@ function BowlerChoice() {
         ))}
       </ol>
       <p className="dim small">Enter picks the highlighted bowler.</p>
+      <p className="small chooser-field">
+        Field: <strong>{snap.presets.find((p) => p.id === snap.fieldPreset)?.name ?? "Captain's field (auto)"}</strong>{' '}
+        <span className="dim">· F to change</span>
+      </p>
     </div>
   );
 }
@@ -529,30 +677,8 @@ function ControlsPanel() {
       </section>
     );
   }
-  return (
-    <section className="keys" aria-label="Bowling controls" data-testid="controls-panel">
-      <div className="keys-head">
-        <span>Bowling</span>
-      </div>
-      <div className="keys-body">
-        <div className="keys-aim">
-          {arrows}
-          <div className="aim-label">Move the target</div>
-        </div>
-        <ul>
-          <li className={lit('prevDelivery') || lit('nextDelivery') ? 'on' : ''}>
-            <Key label="Q" on={lit('prevDelivery')} />
-            <Key label="E" on={lit('nextDelivery')} />
-            <span>Change delivery</span>
-          </li>
-          <li className={lit('bowl') ? 'on' : ''}>
-            <Key label="Space" on={lit('bowl')} wide />
-            <span>Run in, then release on the gold</span>
-          </li>
-        </ul>
-      </div>
-    </section>
-  );
+  // Bowling has its own panel (BowlingPanel), which shows its keys.
+  return null;
 }
 
 // --- Between balls ------------------------------------------------------------------------

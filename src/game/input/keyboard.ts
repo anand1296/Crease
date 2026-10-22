@@ -18,6 +18,9 @@ export const GAME_ACTIONS = [
   'bowl',
   'nextDelivery',
   'prevDelivery',
+  'field',
+  'side',
+  'back',
   'run',
   'pause',
   'confirm',
@@ -54,6 +57,9 @@ export const DEFAULT_BINDINGS: Bindings = {
   bowl: ['Space'],
   nextDelivery: ['KeyE'],
   prevDelivery: ['KeyQ'],
+  field: ['KeyF'],
+  side: ['KeyO'],
+  back: ['Backspace'],
   run: ['Space', 'KeyR'],
   pause: ['KeyP', 'Escape'],
   confirm: ['Enter'],
@@ -78,7 +84,7 @@ export function keyLabel(code: string): string {
   if (code.startsWith('Digit')) return code.slice(5);
   const names: Record<string, string> = {
     ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', ShiftLeft: 'Shift', ShiftRight: 'Shift',
-    Space: 'Space', Escape: 'Esc', Tab: 'Tab', Enter: 'Enter',
+    Space: 'Space', Escape: 'Esc', Tab: 'Tab', Enter: 'Enter', Backspace: 'Backspace',
   };
   return names[code] ?? code;
 }
