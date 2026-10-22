@@ -1,5 +1,5 @@
-import { useRef } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { useEffect, useRef } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Environment, Lightformer, Sky } from '@react-three/drei';
 import { Effects } from './Effects.tsx';
 import { Ground } from './Ground.tsx';
@@ -7,6 +7,8 @@ import { MatchView } from './MatchView.tsx';
 import { Stadium } from './Stadium.tsx';
 import { useGame } from '../../state/game.ts';
 import { preloadCricketers } from './rig/Cricketer.tsx';
+import { FrameBudget } from './FrameBudget.tsx';
+import { exposeDebug } from '../debug.ts';
 
 // Start fetching the player models while the menus are up.
 preloadCricketers();
@@ -42,14 +44,74 @@ function Lighting() {
   );
 }
 
+/** Resolution scale at each adaptive level (see FrameBudget). */
+const DPR_SCALE = [1, 0.85, 0.72, 0.6];
+
+/**
+ * Whether the 3D view needs drawing every frame. Behind the setup screens and
+ * the pause menu nothing moves, so the canvas keeps its last frame and the
+ * browser's main thread and GPU are free for the menus.
+ */
+function useLive(): boolean {
+  return useGame((s) => s.screen === 'menu' || (s.screen === 'match' && (!s.paused || s.warming)));
+}
+
+/** Draws one more frame whenever the view stops being live, so it shows the latest state. */
+function Invalidator({ live }: { live: boolean }) {
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    invalidate();
+  }, [live, invalidate]);
+  return null;
+}
+
+/** Rendering statistics for tests and profiling. */
+function RenderStats() {
+  const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+  useEffect(
+    () =>
+      exposeDebug({
+        renderInfo: () => {
+          let objects = 0;
+          scene.traverse(() => {
+            objects++;
+          });
+          return {
+            calls: gl.info.render.calls,
+            triangles: gl.info.render.triangles,
+            programs: gl.info.programs?.length ?? 0,
+            textures: gl.info.memory.textures,
+            geometries: gl.info.memory.geometries,
+            objects,
+            dpr: gl.getPixelRatio(),
+            perf: useGame.getState().perf,
+          };
+        },
+      }),
+    [gl, scene],
+  );
+  return null;
+}
+
 export function GameCanvas({ onReady }: { onReady: () => void }) {
   const quality = useGame((s) => s.quality);
+  const perf = useGame((s) => s.perf);
+  const live = useLive();
   const high = quality === 'high';
+  const device = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1;
+  const dpr = (high ? Math.min(device, 1.5) : 1) * (DPR_SCALE[perf] ?? 1);
   return (
     <Canvas
       key={quality}
+      frameloop={live ? 'always' : 'demand'}
       shadows={high ? 'soft' : false}
-      dpr={high ? [1, 1.5] : 1}
+      dpr={dpr}
+      onCreated={({ gl }) => {
+        // Checking for shader errors reads compile logs synchronously, which
+        // stalls on every new program; only worth it while developing.
+        gl.debug.checkShaderErrors = import.meta.env.DEV;
+      }}
       // With post-processing the tone mapping is done by the effect chain.
       flat={high}
       camera={{ fov: 15, near: 0.5, far: 900, position: [0, 12.5, -55] }}
@@ -77,8 +139,11 @@ export function GameCanvas({ onReady }: { onReady: () => void }) {
       <Ground />
       <Stadium crowd={high} />
       <MatchView />
-      {high ? <Effects /> : null}
+      {high ? <Effects ao={perf < 2} /> : null}
       <FirstFrame onReady={onReady} />
+      <FrameBudget live={live} />
+      <Invalidator live={live} />
+      <RenderStats />
     </Canvas>
   );
 }

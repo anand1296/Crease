@@ -19,7 +19,7 @@ export function useGameControls(): void {
       sound.unlock();
       const g = useGame.getState();
       const m = g.match;
-      if (!m || g.screen !== 'match') return;
+      if (!m || g.screen !== 'match' || g.warming) return;
       switch (action) {
         case 'pause':
           if (m.phase !== 'complete') g.setPaused(!g.paused);

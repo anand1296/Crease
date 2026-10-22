@@ -59,6 +59,8 @@ Simulation (core, physics,        deterministic TypeScript — no React or three
 | `game/scenes/camera/director.ts` | The broadcast director: which shot is on air and its framing, as a pure function of the ball's state (unit-tested) |
 | `game/scenes/Effects.tsx` | High-quality post-processing chain |
 | `scripts/avatars/` | Offline conversion of Rocketbox FBX avatars and clips to the runtime assets in `public/players/` |
+| `game/scenes/warmup.ts` | Compiles every shader and uploads every texture of a new match behind the loading screen, so nothing compiles mid-play |
+| `game/scenes/FrameBudget.tsx`, `adaptiveQuality.ts` | Adaptive resolution: steps the pixel ratio (and High's ambient occlusion) down when frames run slow, back up when there is headroom |
 | `game/scenes/replay.ts` | Action replays: records each rendered frame of a ball (ball, poses, bats, stumps) and plays a window of it back for wickets and boundaries |
 | `game/scenes/MatchView.tsx` | Per-frame driver, players posed from the simulation, bat, ball, markers, camera rig; orbiting menu camera when no match is on |
 | `game/scenes/Ground.tsx`, `Stadium.tsx`, `Stumps.tsx` | Field and pitch textures, stands, instanced crowd, instanced sponsor boards, floodlights, live scoreboard |
@@ -82,6 +84,13 @@ There is exactly one animation loop: react-three-fiber's. Each frame:
 
    Meshes are positioned imperatively; nothing re-renders React per frame.
 3. The match notifies subscribers on events (phase changes, ball outcomes, innings changes). The store converts that into a snapshot for the HUD, and the driver turns the same events into sounds.
+
+**Keeping frames smooth.**
+
+- *Shader warm-up*: starting a match shows a loading screen at once, builds the match after that has painted, then compiles every shader (in parallel where supported) and uploads every texture before the HUD appears.
+- *Render on demand*: behind the setup, squad and pause screens the canvas switches to on-demand rendering and keeps its last frame.
+- *Adaptive resolution*: `FrameBudget` measures the median frame time and steps the pixel ratio down below ≈45 fps.
+- *Idle-time audio*: the reverb impulse and crowd reactions are synthesised in idle slices, never inside a key press or a frame.
 
 Starting, restarting or quitting a match replaces the `Match` in the store. The players are keyed by innings, so every view resets with it, and the keyboard handler always reads the current match from the store. The canvas stays mounted throughout: the stadium is the backdrop to the menus.
 

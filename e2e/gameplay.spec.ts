@@ -1,5 +1,11 @@
 import { expect, type Page, test } from '@playwright/test';
 
+/** Start shows a loading screen at once while the match compiles its shaders; then the HUD appears. */
+async function takeTheField(page: Page): Promise<void> {
+  await expect(page.getByTestId('warming')).toBeVisible();
+  await expect(page.getByTestId('warming')).toBeHidden({ timeout: 120_000 });
+}
+
 /**
  * Plays the actual game: menus → match setup → squad → batting through the
  * keyboard (strokes timed to the live ball) → pause → a second match bowling,
@@ -59,6 +65,10 @@ test.describe('gameplay', () => {
     await page.getByTestId('squad-done').click();
 
     await page.getByTestId('start-match').click();
+    await takeTheField(page);
+    // Every shader is compiled while the loading screen is up, none during play.
+    const programs = await page.evaluate(() => window.__crease?.renderInfo?.().programs ?? -1);
+    expect(programs).toBeGreaterThan(0);
     await expect(page.getByTestId('score')).toHaveText('0/0');
     await expect(page.getByTestId('role')).toContainText('You are batting');
     await expect(page.getByTestId('scoreboard')).toContainText('AUS');
@@ -89,6 +99,7 @@ test.describe('gameplay', () => {
       await page.keyboard.press('Enter');
       await expect.poll(() => page.evaluate(() => window.__crease?.phase?.())).not.toBe('review');
     }
+    expect(await page.evaluate(() => window.__crease?.renderInfo?.().programs)).toBe(programs);
     const score = await page.evaluate(() => window.__crease?.score?.());
     expect((score?.balls ?? 0) + 3).toBeGreaterThanOrEqual(3);
 
@@ -111,6 +122,7 @@ test.describe('gameplay', () => {
     await page.getByRole('button', { name: '2', exact: true }).click();
     await page.getByRole('button', { name: 'We bowl' }).click();
     await page.getByTestId('start-match').click();
+    await takeTheField(page);
     await expect(page.getByTestId('role')).toContainText('You are bowling');
     await expect(page.getByTestId('review')).toBeVisible();
     await page.keyboard.press('Enter');

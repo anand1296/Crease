@@ -151,6 +151,36 @@ export function renderBatHit(hit: BatHit, sampleRate: number, seed: number): Flo
   return out;
 }
 
+/**
+ * Runs a long synthesis job in short slices when the browser is idle, so
+ * building reverb and crowd sounds never holds up a frame or a key press.
+ */
+function runWhenIdle(job: Iterator<unknown>, done?: () => void): void {
+  const ric = typeof window !== 'undefined' ? window.requestIdleCallback?.bind(window) : undefined;
+  const slice = (deadline?: IdleDeadline) => {
+    const until = performance.now() + 6;
+    for (;;) {
+      if (job.next().done) {
+        done?.();
+        return;
+      }
+      if (deadline ? deadline.timeRemaining() < 3 : performance.now() > until) break;
+    }
+    if (ric) ric(slice, { timeout: 500 });
+    else setTimeout(slice, 16);
+  };
+  if (ric) ric(slice, { timeout: 500 });
+  else setTimeout(slice, 0);
+}
+
+/** The crowd reactions the game plays, rendered once and reused (intensity, seconds). */
+const CROWD_PRESETS: readonly (readonly [number, number])[] = [
+  [0.75, 3.5],
+  [0.85, 3],
+  [0.9, 3.5],
+  [1, 4.5],
+];
+
 class SoundEngine {
   private ctx: AudioContext | undefined;
   private master: GainNode | undefined;
@@ -158,11 +188,41 @@ class SoundEngine {
   private dry: GainNode | undefined;
   private wet: GainNode | undefined;
   private noise: AudioBuffer | undefined;
+  /** Pre-rendered crowd reactions, keyed by preset. */
+  private readonly crowd = new Map<string, AudioBuffer>();
   private hits = 1;
   muted = readMuted();
 
-  /** Call from a user gesture; safe to call repeatedly. */
+  private creating = false;
+
+  /**
+   * Call from a user gesture; safe to call repeatedly. Creating the audio
+   * context costs tens of milliseconds, so the first call schedules it just
+   * after the gesture's handler (the page then has user activation, so it
+   * may start); later calls resume it if the browser suspended it.
+   */
   unlock(): void {
+    if (this.ctx) {
+      try {
+        if (this.ctx.state === 'suspended') void this.ctx.resume();
+      } catch {
+        // Ignore.
+      }
+      return;
+    }
+    if (this.creating) return;
+    this.creating = true;
+    const later = () =>
+      setTimeout(() => {
+        this.creating = false;
+        this.create();
+      }, 0);
+    // After the next paint, so the press that triggered it shows first.
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(later);
+    else later();
+  }
+
+  private create(): void {
     try {
       if (!this.ctx) {
         const Ctor = audioCtor();
@@ -182,11 +242,12 @@ class SoundEngine {
         this.dry = ctx.createGain();
         this.dry.connect(master);
         const reverb = ctx.createConvolver();
-        reverb.buffer = this.makeStadiumImpulse(ctx);
         this.wet = ctx.createGain();
         this.wet.gain.value = 0.22;
         this.wet.connect(reverb).connect(master);
-        this.noise = this.makeNoise(ctx);
+        // The audio graph is ready now; the buffers it plays are synthesised
+        // in idle time (≈200 ms of work in all), never inside the press that unlocked it.
+        runWhenIdle(this.prepare(ctx, reverb));
       }
       if (this.ctx.state === 'suspended') void this.ctx.resume();
     } catch {
@@ -263,8 +324,37 @@ class SoundEngine {
   cheer(intensity: number, seconds: number): void {
     const ctx = this.ready();
     if (!ctx) return;
-    const buf = this.renderCrowd(ctx, intensity, seconds);
-    this.play(buf, 0.85, 1.4);
+    // The nearest pre-rendered reaction, pitched a little each time so repeats don't sound canned.
+    let best: string | undefined;
+    let bestD = Infinity;
+    for (const [i, sec] of CROWD_PRESETS) {
+      const d = Math.abs(i - intensity) * 4 + Math.abs(sec - seconds);
+      if (d < bestD) {
+        bestD = d;
+        best = `${i}:${sec}`;
+      }
+    }
+    const buf = best ? this.crowd.get(best) : undefined;
+    if (!buf) return;
+    this.hits += 7919;
+    this.play(buf, 0.85, 1.4, 0.95 + ((this.hits % 1000) / 1000) * 0.1);
+  }
+
+  /** Builds the reverb, the noise source and the crowd reactions, one slice at a time. */
+  private *prepare(ctx: AudioContext, reverb: ConvolverNode): Generator<void> {
+    this.noise = this.makeNoise(ctx);
+    yield;
+    reverb.buffer = this.makeStadiumImpulse(ctx);
+    yield;
+    for (const [i, sec] of CROWD_PRESETS) {
+      const steps = this.renderCrowd(ctx, i, sec);
+      let r = steps.next();
+      while (!r.done) {
+        yield;
+        r = steps.next();
+      }
+      this.crowd.set(`${i}:${sec}`, r.value);
+    }
   }
 
   private ready(): AudioContext | undefined {
@@ -273,11 +363,12 @@ class SoundEngine {
     return ctx;
   }
 
-  private play(buf: AudioBuffer, level: number, wetLevel: number): void {
+  private play(buf: AudioBuffer, level: number, wetLevel: number, rate = 1): void {
     const ctx = this.ctx;
     if (!ctx || !this.dry || !this.wet) return;
     const src = ctx.createBufferSource();
     src.buffer = buf;
+    src.playbackRate.value = rate;
     const g = ctx.createGain();
     g.gain.value = level;
     src.connect(g);
@@ -323,8 +414,9 @@ class SoundEngine {
   /**
    * Crowd reaction: many voices (noise through vowel formants with their own
    * swells) plus applause (a dense scatter of short clap transients).
+   * A generator that pauses after each voice, so it can be spread over idle time.
    */
-  private renderCrowd(ctx: AudioContext, intensity: number, seconds: number): AudioBuffer {
+  private *renderCrowd(ctx: AudioContext, intensity: number, seconds: number): Generator<void, AudioBuffer> {
     const sr = ctx.sampleRate;
     const len = Math.ceil(sr * seconds);
     const buf = ctx.createBuffer(2, len, sr);
@@ -358,6 +450,7 @@ class SoundEngine {
           const tremble = 0.75 + 0.25 * Math.sin(2 * Math.PI * rate * t + v);
           data[i] = (data[i] ?? 0) + (a * 0.6 + b * 0.4) * 0.006 * tremble * shape(t) * intensity;
         }
+        yield;
       }
       // Applause: claps arrive at a rate that follows the shape.
       const clapsPerSecond = 90 * intensity;
@@ -375,6 +468,7 @@ class SoundEngine {
         }
         t += -Math.log(1 - rnd.unit() * 0.999) / Math.max(1, clapsPerSecond * Math.max(0.05, shape(t)));
       }
+      yield;
     }
     return buf;
   }

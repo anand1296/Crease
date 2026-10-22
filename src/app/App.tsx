@@ -35,6 +35,7 @@ export function App() {
   const [webgl] = useState(hasWebGL);
   const screen = useGame((s) => s.screen);
   const quit = useGame((s) => s.quitToMenu);
+  const warming = useGame((s) => s.warming);
   useGameControls();
 
   return (
@@ -69,9 +70,14 @@ export function App() {
               <MatchSetup />
             ) : screen === 'squad' ? (
               <SquadPicker />
-            ) : (
+            ) : warming ? null : (
               <Hud />
             )
+          ) : null}
+          {status === 'ready' && warming ? (
+            <div className="loading warming" data-testid="warming" aria-live="polite">
+              Taking the field…
+            </div>
           ) : null}
         </ErrorBoundary>
       ) : (

@@ -93,6 +93,17 @@ export class KeyboardInput {
   enabled = true;
   /** The most recent action pressed and when (for the on-screen key indicator). */
   lastPress: { action: GameAction; at: number } | undefined;
+  private readonly listeners = new Set<() => void>();
+
+  /** Called whenever the held keys change (for the on-screen indicator), inside the key event. */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private changed(): void {
+    for (const l of this.listeners) l();
+  }
 
   constructor(bindings: Bindings = DEFAULT_BINDINGS) {
     this.bindings = bindings;
@@ -130,6 +141,7 @@ export class KeyboardInput {
 
   readonly clear = (): void => {
     this.held.clear();
+    this.changed();
   };
 
   private readonly handleDown = (e: KeyboardEvent): void => {
@@ -149,10 +161,11 @@ export class KeyboardInput {
         this.onPress(action, e);
       }
     }
+    this.changed();
   };
 
   private readonly handleUp = (e: KeyboardEvent): void => {
-    this.held.delete(e.code);
+    if (this.held.delete(e.code)) this.changed();
   };
 }
 

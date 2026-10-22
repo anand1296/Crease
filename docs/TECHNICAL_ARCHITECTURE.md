@@ -4,11 +4,11 @@
 
 | | |
 | --- | --- |
-| Version | 0.7.0 (October 2026) |
+| Version | 0.7.1 (October 2026) |
 | Repository | https://github.com/anand1296/Crease |
 | Hosting | Vercel (static site, Git-integrated: every push to `main` deploys; pull requests get previews) |
 | Stack | TypeScript (strict) · React 19 · Three.js r180 via React Three Fiber 9 · Vite 7 · Zustand 5 · Vitest 3 · Playwright |
-| Size | ≈11,700 lines of application TypeScript, ≈1,500 lines of unit and simulation tests (114 tests), 3 browser tests |
+| Size | ≈11,900 lines of application TypeScript, ≈1,550 lines of unit and simulation tests (119 tests), 3 browser tests |
 | Backend | None. Everything — physics, AI, commentary, audio — runs in the player's browser |
 
 Companion documents: [README](../README.md) (running and playing), [GAME_DESIGN](../GAME_DESIGN.md) (rules and the simulation's numbers), [ARCHITECTURE](../ARCHITECTURE.md) (module summary), [CHANGELOG](../CHANGELOG.md), [batting report](batting-report.md).
@@ -143,6 +143,20 @@ sequenceDiagram
 - The simulation advances in fixed 1/240 s steps regardless of frame rate; rendering interpolates the ball between the last two steps. Results are identical at 30, 60 or 144 fps.
 - Frame deltas above 0.1 s are clamped: a stalled tab pauses the game rather than fast-forwarding it.
 - The game pauses itself when the window loses focus.
+- Behind the match setup, squad and pause screens the canvas switches from `frameloop="always"` to `"demand"`: one last frame is drawn and kept, and nothing is rendered until play resumes, so the menus have the main thread and the GPU to themselves.
+
+### Performance: what stalls a WebGL game, and what Crease does about it
+
+Profiled with Chrome's CPU profiler, Long Animation Frame and Event Timing entries in headless Chromium. Per-frame JavaScript (simulation, AI, posing 24 skinned players) is a few milliseconds; the stalls were elsewhere:
+
+| Stall | Cause | Fix |
+| --- | --- | --- |
+| Freezes the first time something appears (ball in flight, broken wicket, replay) | WebGL compiles a material's program on first draw; three.js then reads the compile log synchronously. On Windows (ANGLE → Direct3D) one program can take hundreds of ms | `scenes/warmup.ts`: after a match is built, upload every texture (`initTexture`), compile every material with `compileAsync` (KHR_parallel_shader_compile), with hidden objects made visible for the synchronous parts and the post-processing target bound so the right program variants are built, then render one frame to build the shadow depth programs. A loading screen covers it. `checkShaderErrors` is off in production. An e2e test asserts the program count doesn't change during play |
+| ≈165 ms hitch on every boundary, wicket and catch | The crowd roar was synthesised sample by sample on the main thread | Four reactions pre-rendered by a generator in `requestIdleCallback` slices after audio starts; reused with a slight pitch change |
+| First click ≈115 ms; Start button slow to respond | Audio context and reverb built inside the click; the match (squads, AI, 24 skinned clones) built inside the Start handler | Audio context created after the next paint, buffers in idle time; Start shows the loading screen first and builds the match once it has painted |
+| Menus sluggish over the live stadium | Every DOM update waited behind a full 3D frame | On-demand rendering behind menus and pause |
+| Low frame rate on modest GPUs | Fill rate: up to 1.5× resolution, 4× MSAA, ambient occlusion | `FrameBudget` / `adaptiveQuality.ts`: median frame time over 90 frames; slower than 45 fps → pixel ratio steps 1 → 0.85 → 0.72 → 0.6 and (level 2) ambient occlusion off by disabling its pass (removing it would rebuild and recompile the effect chain); one step back up after a smooth spell, never again if that fails. Unit-tested |
+| Key indicator a frame late; bowling panel re-rendered every frame | Polled with `requestAnimationFrame`; meter value through React state | Keyboard notifies the indicator inside the key event; the needle is moved directly through a store subscription |
 
 ### Determinism
 
@@ -293,7 +307,7 @@ flowchart TB
 
 - **Everything environmental is procedural**: textures are drawn on canvases at load (outfield stripes and grain with a matching normal map; pitch grain, live grass, cracks and footmarks; stitched ball; sponsor boards; a 32-person spectator sprite sheet), so the only binary assets are the player models.
 - **Draw calls are budgeted**: the crowd is one instanced mesh whose cheer animation runs in the vertex shader; sponsor boards are six instanced meshes; only the main body parts and equipment cast shadows.
-- **Quality tiers**: *High* adds soft shadows, image-based lighting, the crowd, post-processing and high-DPI rendering; *Low* drops them. Low is chosen automatically when `WEBGL_debug_renderer_info` reports a software renderer (SwiftShader, llvmpipe), and the choice is persisted.
+- **Quality tiers**: *High* adds soft shadows, image-based lighting, the crowd, post-processing and high-DPI rendering; *Low* drops them. Low is chosen automatically when `WEBGL_debug_renderer_info` reports a software renderer (SwiftShader, llvmpipe), and the choice is persisted. Within a tier the resolution adapts to the frame rate (see [Performance](#performance-what-stalls-a-webgl-game-and-what-crease-does-about-it)).
 
 ## 9. Players: models, kits and animation
 
@@ -444,7 +458,7 @@ docs/             This document, batting report
 - Strokes, the bowling action and fielding are procedural motions retargeted onto the models, not motion-captured cricket; four body models are shared across all players; faces are generic.
 - No byes, leg byes or overthrows; no DRS; no free hit after a no-ball; a called run can't be sent back.
 - Ball physics was not changed in 0.7.0; the ball is drawn 1.35× life size for visibility.
-- Real-GPU frame rate hasn't been profiled; on software renderers even Low graphics is slow.
+- Real-GPU frame rate hasn't been profiled across devices (adaptive resolution keeps it up on modest GPUs); on software renderers even Low graphics is slow. A resolution step costs one resize (a few ms on a GPU).
 - One-day scoring (≈4.3 an over) is below modern ODI rates (≈5.8); the one-day batting curve needs more tuning.
 - Squads reflect each board's latest announcement as of October 2026 and will date; ratings are approximations.
 - Player names are used for a non-commercial project; a commercial release would need player and board licences.

@@ -2,7 +2,7 @@
 
 A browser-based 3D cricket game, built with React, TypeScript and Three.js. Inspired by the depth and replayability of classic cricket games: batting that rewards timing and shot selection, bowling with real variation, and an opponent that plays the ball rather than the dice.
 
-> **Status: alpha (0.7.0).** Play a full limited-overs match against the computer: pick India, Pakistan, Australia or England with their current T20I squads, choose your playing XI and batting order, set the overs (2–50), difficulty and pitch, toss, bat and bowl both innings, and finish with a result and full scorecards. The game waits for you between balls, sums up every over and wicket with the scorecard, replays wickets and boundaries, and runs at a speed you choose. Real ball physics, sixteen strokes, twelve delivery types, LBW, wides, run-outs and bowler quotas; motion-captured, skinned player models in team kits; umpires who signal; a broadcast-style camera; post-processed graphics; and synthesised sound, including a physically modelled bat-on-ball crack. Game AI throughout: a bowling attack that learns your weaknesses, an AI captain that sets fields to where you score (within powerplay restrictions), T20-minded computer batters that read the field, spoken ball-by-ball commentary, and a coach that reviews your innings. See [Roadmap](#roadmap).
+> **Status: alpha (0.7.1).** Play a full limited-overs match against the computer: pick India, Pakistan, Australia or England with their current T20I squads, choose your playing XI and batting order, set the overs (2–50), difficulty and pitch, toss, bat and bowl both innings, and finish with a result and full scorecards. The game waits for you between balls, sums up every over and wicket with the scorecard, replays wickets and boundaries, and runs at a speed you choose. Real ball physics, sixteen strokes, twelve delivery types, LBW, wides, run-outs and bowler quotas; motion-captured, skinned player models in team kits; umpires who signal; a broadcast-style camera; post-processed graphics; and synthesised sound, including a physically modelled bat-on-ball crack. Game AI throughout: a bowling attack that learns your weaknesses, an AI captain that sets fields to where you score (within powerplay restrictions), T20-minded computer batters that read the field, spoken ball-by-ball commentary, and a coach that reviews your innings. See [Roadmap](#roadmap).
 
 ## Running locally
 
@@ -62,7 +62,7 @@ Hold an arrow for direction, then press a stroke key **as the ball arrives**. Th
 
 <kbd>P</kbd> / <kbd>Esc</kbd> pause (resume, sound, commentary, restart, quit to menu) · <kbd>Enter</kbd> / <kbd>Space</kbd> next ball, continue past a card, skip a replay · <kbd>C</kbd> camera · <kbd>M</kbd> sound on/off · <kbd>V</kbd> commentary on/off · <kbd>H</kbd> help. The game pauses itself when the window loses focus.
 
-**Graphics** (main menu): *High* adds soft shadows, image-based lighting, the crowd, ambient occlusion, bloom, filmic tone mapping and up to 1.5× resolution; *Low* drops them for machines without a capable GPU. Low is chosen automatically when the browser reports a software renderer; your choice is remembered.
+**Graphics** (main menu): *High* adds soft shadows, image-based lighting, the crowd, ambient occlusion, bloom, filmic tone mapping and up to 1.5× resolution; *Low* drops them for machines without a capable GPU. Low is chosen automatically when the browser reports a software renderer; your choice is remembered. On top of that the game watches its own frame rate: below ≈45 fps it lowers the resolution step by step (and on High turns off ambient occlusion), and raises it again when there is headroom.
 
 **Camera**: the default *classic* camera sits low and close behind the bowler's arm, as in Cricket 07, and pushes in through the run-up until the striker fills the frame at release; after the stroke it cuts to a high side-on camera that follows the ball and the chase (or to the stumps when they are hit). <kbd>C</kbd> cycles to the long-lens *broadcast* camera, the view from behind the striker and a high wide view.
 
@@ -122,7 +122,7 @@ Built in phases; each phase ships a verified vertical slice.
 - Running is all-or-nothing per run: you cannot send the non-striker back once a run is called.
 - Audio is synthesised in the browser; commentary uses the browser's own voice; there is no continuous crowd bed.
 - Keyboard only: no gamepad or touch controls yet.
-- On software-rendered browsers (no GPU) even Low graphics runs slowly. Frame rate on real GPUs has not been measured yet.
+- On software-rendered browsers (no GPU) even Low graphics runs slowly. Frame rate on real GPUs has not been measured systematically; adaptive resolution keeps it up on modest ones.
 
 ## Assets and licensing
 

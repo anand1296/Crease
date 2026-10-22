@@ -93,6 +93,16 @@ export interface GameState {
   readonly muted: boolean;
   readonly quality: Quality;
   readonly commentaryOn: boolean;
+  /**
+   * True from pressing Start until the new match's shaders are compiled and
+   * its textures uploaded: a loading screen covers the game meanwhile, so
+   * nothing stalls once play begins.
+   */
+  readonly warming: boolean;
+  /** Adaptive graphics level, 0 (full) … 3 (lightest), lowered when frames run slow. */
+  readonly perf: number;
+  setWarming: (warming: boolean) => void;
+  setPerf: (perf: number) => void;
   /** Action replays after wickets and boundaries (setting), and whether one is playing. */
   readonly replaysOn: boolean;
   readonly replaying: boolean;
@@ -205,6 +215,16 @@ const DEFAULT_SETUP: MatchSetup = {
 };
 
 let unsubscribe: (() => void) | undefined;
+let pendingStart = 0;
+
+/** Runs `fn` after the browser has painted the current state (so a press shows at once). */
+function afterPaint(fn: () => void): void {
+  if (typeof requestAnimationFrame === 'undefined') {
+    setTimeout(fn, 0);
+    return;
+  }
+  requestAnimationFrame(() => setTimeout(fn, 0));
+}
 let seedCounter = 0;
 const newSeed = () => `crease-${Date.now().toString(36)}-${seedCounter++}`;
 
@@ -265,7 +285,7 @@ export const useGame = create<GameState>()((set, get) => {
   const attach = (match: Match, toss: string) => {
     unsubscribe?.();
     unsubscribe = match.subscribe(() => set({ snap: snapshot(match, toss) }));
-    set({ match, snap: snapshot(match, toss), paused: false, meter: 0.5, screen: 'match' });
+    set({ match, snap: snapshot(match, toss), paused: false, meter: 0.5, screen: 'match', warming: true });
     keyboard.enabled = true;
   };
 
@@ -281,6 +301,15 @@ export const useGame = create<GameState>()((set, get) => {
     muted: sound.muted,
     quality: detectQuality(),
     commentaryOn: readCommentaryEnabled(),
+    warming: false,
+    perf: 0,
+    setWarming: (warming) => {
+      if (get().warming !== warming) set({ warming });
+    },
+    setPerf: (perf) => {
+      const p = Math.max(0, Math.min(3, Math.round(perf)));
+      if (p !== get().perf) set({ perf: p });
+    },
     replaysOn: readFlag('crease.replays', true),
     replaying: false,
     replayIds: [],
@@ -307,21 +336,35 @@ export const useGame = create<GameState>()((set, get) => {
       };
       set({ setup: fixed });
     },
+    // Building a match (squads, AI, 24 skinned players) takes a moment: show the
+    // loading screen first, then build it once that has been painted.
     startMatch: () => {
       sound.unlock();
-      const { match, toss } = createMatch(get().setup, newSeed());
-      attach(match, toss);
+      const ticket = ++pendingStart;
+      set({ warming: true });
+      afterPaint(() => {
+        if (ticket !== pendingStart) return;
+        const { match, toss } = createMatch(get().setup, newSeed());
+        attach(match, toss);
+      });
     },
     rematch: () => {
-      const { match, toss } = createMatch(get().setup, newSeed());
-      attach(match, toss);
+      const ticket = ++pendingStart;
+      hush();
+      set({ warming: true });
+      afterPaint(() => {
+        if (ticket !== pendingStart) return;
+        const { match, toss } = createMatch(get().setup, newSeed());
+        attach(match, toss);
+      });
     },
     quitToMenu: () => {
+      pendingStart++;
       unsubscribe?.();
       unsubscribe = undefined;
       keyboard.enabled = false;
       hush();
-      set({ screen: 'menu', match: undefined, snap: undefined, paused: false, replaying: false, replayIds: [] });
+      set({ screen: 'menu', match: undefined, snap: undefined, paused: false, replaying: false, replayIds: [], warming: false });
     },
     setPaused: (paused) => {
       get().match?.setPaused(paused);

@@ -175,7 +175,6 @@ function RunPrompt() {
 
 function BowlingPanel() {
   const snap = useGame((s) => s.snap);
-  const meter = useGame((s) => s.meter);
   if (!snap || !snap.userBowling || snap.phase === 'chooseBowler' || snap.phase === 'inningsBreak' || snap.phase === 'complete') return null;
   const { setup, deliveries } = snap;
   const runningIn = snap.phase === 'delivery' && snap.ballPhase === 'runUp';
@@ -199,7 +198,7 @@ function BowlingPanel() {
       {runningIn ? (
         <div className="meter" aria-label="Release accuracy">
           <span className="sweet" />
-          <span className="needle" style={{ left: `${(snap.releaseLocked ? 0.5 : meter) * 100}%` }} />
+          <Needle locked={snap.releaseLocked} />
         </div>
       ) : null}
       <div className="hint">
@@ -207,6 +206,24 @@ function BowlingPanel() {
       </div>
     </section>
   );
+}
+
+/**
+ * The accuracy needle moves every frame during the run-up: it is moved
+ * directly rather than re-rendering the bowling panel sixty times a second.
+ */
+function Needle({ locked }: { locked: boolean }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const place = (m: number) => {
+      if (ref.current) ref.current.style.left = `${(locked ? 0.5 : m) * 100}%`;
+    };
+    place(useGame.getState().meter);
+    return useGame.subscribe((st, prev) => {
+      if (st.meter !== prev.meter) place(st.meter);
+    });
+  }, [locked]);
+  return <span ref={ref} className="needle" />;
 }
 
 function BowlerChoice() {
@@ -419,21 +436,30 @@ function useKeys(): { held: ReadonlySet<GameAction>; flash: GameAction | undefin
   });
   useEffect(() => {
     const watched: GameAction[] = ['left', 'right', 'up', 'down', 'backFoot', 'ground', 'loft', 'defend', 'sweep', 'leave', 'run', 'bowl', 'nextDelivery', 'prevDelivery'];
-    let raf = 0;
     let last = '';
-    const loop = () => {
+    let fade: ReturnType<typeof setTimeout> | undefined;
+    // Runs inside the key event, so the key lights up in the very next paint.
+    const update = () => {
       const held = watched.filter((a) => keyboard.isHeld(a));
       const lp = keyboard.lastPress;
-      const flash = lp && performance.now() - lp.at < 450 ? lp.action : undefined;
+      const age = lp ? performance.now() - lp.at : Infinity;
+      const flash = lp && age < 450 ? lp.action : undefined;
+      if (flash) {
+        clearTimeout(fade);
+        fade = setTimeout(update, 450 - age + 10);
+      }
       const key = `${held.join(',')}|${flash ?? ''}`;
       if (key !== last) {
         last = key;
         setState({ held: new Set(held), flash, dir: keyboard.direction(), back: keyboard.isHeld('backFoot') });
       }
-      raf = requestAnimationFrame(loop);
     };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
+    const unsubscribe = keyboard.subscribe(update);
+    update();
+    return () => {
+      unsubscribe();
+      clearTimeout(fade);
+    };
   }, []);
   return state;
 }

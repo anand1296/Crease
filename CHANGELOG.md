@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.1 — Smoothness and responsiveness (2026-10-22)
+
+Profiled in the browser (CPU profiles, long-animation-frame and event-timing entries) and fixed what was stalling the game:
+
+- **No more freezes mid-play from shader compilation.** Every shader is compiled, and every texture uploaded, behind a short "Taking the field…" screen when a match starts, using parallel shader compilation where the browser supports it. Before, shaders compiled the first time something appeared — the first ball in flight, the first broken wicket, the first replay — freezing the game each time (on Windows a single shader can take hundreds of milliseconds). Synchronous shader-error checks are off in production. A browser test now fails if any shader compiles during play.
+- **No hitch on boundaries and wickets.** The crowd roar was synthesised on the spot (≈165 ms of main-thread work); the reactions are now pre-rendered in idle time and reused, pitched slightly differently each time.
+- **Instant buttons.** Start shows the loading screen at once and builds the match after that has painted; the first click no longer builds the audio engine inside the click (≈115 ms); setting up the audio happens in idle slices. Click and key handlers now take under 20 ms (was up to 127 ms).
+- **Menus and pause cost nothing.** The 3D view stops redrawing behind the match setup, squad and pause screens (it keeps its last frame), so the GPU and main thread are free for the menus.
+- **Adaptive quality.** When frames run slower than ≈45 fps the resolution steps down (and, on High, ambient occlusion is switched off), and it tries a step back up after a smooth spell. Occasional hitches don't count.
+- **Key indicator** lights in the same frame as the key press (it was polled a frame late); the bowling needle no longer re-renders the bowling panel sixty times a second.
+
 ## 0.7.0 — Match flow, replays and the classic camera (2026-10-22)
 
 - **A paced match**: after every ball the game waits for you — *Next ball* (Enter or Space). Every over ends with an over summary and the scorecard; every wicket with a dismissal card (how out, fall of wicket, partnership, who's in next) and the scorecard. The match opens with a how-to-play card.

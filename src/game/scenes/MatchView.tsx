@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef } from 'react';
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { type Camera, CanvasTexture, type Group, type Mesh, PerspectiveCamera, Quaternion, SRGBColorSpace, Vector3 } from 'three';
 import { Rng } from '../core/rng.ts';
@@ -18,6 +18,7 @@ import { type ClipName, type HumanoidHandle, type Kit, type Pose, neutralPose } 
 import { Cricketer } from './rig/Cricketer.tsx';
 import { Stumps, type WicketHandle } from './Stumps.tsx';
 import { type ReplayKind, ReplayRecorder, replayVectors, restorePose } from './replay.ts';
+import { warmUp } from './warmup.ts';
 import { AVATARS, type AvatarId } from './rig/avatarAssets.ts';
 import { type Shot, WIDE, direct } from './camera/director.ts';
 import { battingStance, bowlingAction, gait, gather, keeperStance, readyStance, resetPose, throwing } from './rig/motion.ts';
@@ -93,22 +94,47 @@ function MatchScene({ match }: { match: Match }) {
       useGame.getState().setReplay(false, []);
     };
   }, [recorder]);
+  // One boundary for the whole match, so the warm-up runs once everything
+  // (player models included) is in the scene.
   return (
-    <group>
-      <Driver match={match} recorder={recorder} />
-      {/* Re-mount the players when the sides swap at the innings break. */}
-      <Suspense fallback={null}>
+    <Suspense fallback={null}>
+      <group>
+        <Driver match={match} recorder={recorder} />
+        {/* Re-mount the players when the sides swap at the innings break. */}
         <Players key={inningsIndex} match={match} recorder={recorder} />
-      </Suspense>
-      <BallView match={match} recorder={recorder} />
-      <Wickets match={match} recorder={recorder} />
-      <Suspense fallback={null}>
+        <BallView match={match} recorder={recorder} />
+        <Wickets match={match} recorder={recorder} />
         <Umpires match={match} recorder={recorder} />
-      </Suspense>
-      <Markers match={match} />
-      <CameraRig match={match} recorder={recorder} />
-    </group>
+        <Markers match={match} />
+        <CameraRig match={match} recorder={recorder} />
+      </group>
+      <WarmUp />
+    </Suspense>
   );
+}
+
+/**
+ * Compiles every shader and uploads every texture of the new match before
+ * play (see warmup.ts); the loading screen stays up until it is done.
+ */
+function WarmUp() {
+  const get = useThree((s) => s.get);
+  // Once per match: the scene is complete when this boundary first commits.
+  useLayoutEffect(() => {
+    let live = true;
+    const { gl, scene, camera } = get();
+    useGame.getState().setWarming(true);
+    warmUp(gl, scene, camera, { offscreen: useGame.getState().quality === 'high' })
+      .catch(() => undefined)
+      .finally(() => {
+        if (live) useGame.getState().setWarming(false);
+      });
+    return () => {
+      live = false;
+      useGame.getState().setWarming(false);
+    };
+  }, [get]);
+  return null;
 }
 
 /** Replay length in recorded seconds around the moment, by what happened. */

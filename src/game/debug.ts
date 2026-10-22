@@ -15,6 +15,8 @@ export interface CreaseDebug {
   /** Total runs and wickets. */
   score?: () => { runs: number; wickets: number; balls: number };
   lastHeadline?: () => string | undefined;
+  /** Renderer statistics: draw calls, programs, textures, scene objects, pixel ratio, adaptive level. */
+  renderInfo?: () => { calls: number; triangles: number; programs: number; textures: number; geometries: number; objects: number; dpr: number; perf: number };
 }
 
 declare global {

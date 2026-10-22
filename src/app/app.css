@@ -791,6 +791,13 @@ button.icon {
   color: var(--chalk-dim);
 }
 
+/* While a new match compiles its shaders: covers the scene completely, so no half-built frame shows. */
+.loading.warming {
+  z-index: 30;
+  background: radial-gradient(ellipse at 50% 60%, #12301f 0%, #08140d 70%);
+  color: var(--chalk);
+}
+
 .overlay {
   position: absolute;
   inset: 0;
