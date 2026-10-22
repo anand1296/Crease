@@ -24,9 +24,20 @@ export type ShotId =
   | 'block'
   | 'leave'
   | 'loftedDrive'
-  | 'loftedAttack';
+  | 'loftedAttack'
+  | 'slogSweep';
 
-export type Footwork = 'front' | 'back';
+/**
+ * Front foot, back foot, or out of the crease: stepping down the pitch to
+ * meet the ball on the full (or the half-volley), at the risk of being
+ * stumped if it is missed.
+ */
+export type Footwork = 'front' | 'back' | 'out';
+
+/** Extra time to get down the pitch before the bat comes down, seconds. */
+export const STEP_OUT_TIME = 0.32;
+/** How far down the pitch the batter gets, metres in front of the popping crease. */
+const OUT = -1.75;
 
 export type ShotKind = 'attack' | 'loft' | 'defence' | 'deflect' | 'sweep' | 'leave';
 
@@ -80,16 +91,16 @@ const BACK = 0.45;
 
 export const SHOTS: Readonly<Record<ShotId, ShotDef>> = {
   straightDrive: {
-    id: 'straightDrive', name: 'Straight drive', kind: 'attack', footwork: ['front', 'back'],
+    id: 'straightDrive', name: 'Straight drive', kind: 'attack', footwork: ['front', 'back', 'out'],
     direction: 0, elevation: -5, batSpeed: 13, restitution: 0.42, tangentialRetention: 0.55,
-    depth: { front: FRONT, back: BACK }, idealLine: { min: -0.08, max: 0.2 }, idealHeight: { min: 0.12, max: 0.55 },
+    depth: { front: FRONT, back: BACK, out: OUT }, idealLine: { min: -0.08, max: 0.2 }, idealHeight: { min: 0.12, max: 0.55 },
     timingTolerance: 0.75, swingTime: 0.24, lateDirection: 1, timingTurnDeg: 10, riseWithHeightDeg: 30,
   },
   coverDrive: {
-    id: 'coverDrive', name: 'Cover drive', kind: 'attack', footwork: ['front'],
+    id: 'coverDrive', name: 'Cover drive', kind: 'attack', footwork: ['front', 'out'],
     direction: 55, elevation: -5, batSpeed: 13.5, restitution: 0.42, tangentialRetention: 0.55,
-    depth: { front: FRONT }, idealLine: { min: 0.15, max: 0.65 }, idealHeight: { min: 0.12, max: 0.55 },
-    timingTolerance: 0.6, swingTime: 0.25, lateDirection: 1, timingTurnDeg: 14, riseWithHeightDeg: 35,
+    depth: { front: FRONT, out: OUT }, idealLine: { min: 0.15, max: 0.65 }, idealHeight: { min: 0.12, max: 0.55 },
+    timingTolerance: 0.6, swingTime: 0.25, lateDirection: 1, timingTurnDeg: 18, riseWithHeightDeg: 35,
   },
   offDrive: {
     id: 'offDrive', name: 'Off drive', kind: 'attack', footwork: ['front', 'back'],
@@ -98,28 +109,28 @@ export const SHOTS: Readonly<Record<ShotId, ShotDef>> = {
     timingTolerance: 0.7, swingTime: 0.24, lateDirection: 1, timingTurnDeg: 12, riseWithHeightDeg: 30,
   },
   onDrive: {
-    id: 'onDrive', name: 'On drive', kind: 'attack', footwork: ['front', 'back'],
+    id: 'onDrive', name: 'On drive', kind: 'attack', footwork: ['front', 'back', 'out'],
     direction: -20, elevation: -5, batSpeed: 13, restitution: 0.42, tangentialRetention: 0.55,
-    depth: { front: FRONT, back: BACK }, idealLine: { min: -0.25, max: 0.08 }, idealHeight: { min: 0.12, max: 0.55 },
+    depth: { front: FRONT, back: BACK, out: OUT }, idealLine: { min: -0.25, max: 0.08 }, idealHeight: { min: 0.12, max: 0.55 },
     timingTolerance: 0.6, swingTime: 0.24, lateDirection: 1, timingTurnDeg: 12, riseWithHeightDeg: 30,
   },
   squareCut: {
     id: 'squareCut', name: 'Square cut', kind: 'attack', footwork: ['back'],
     direction: 92, elevation: -3, batSpeed: 14, restitution: 0.42, tangentialRetention: 0.5,
     depth: { back: 0.5 }, idealLine: { min: 0.35, max: 1.05 }, idealHeight: { min: 0.4, max: 1.25 },
-    timingTolerance: 0.55, swingTime: 0.2, lateDirection: 1, timingTurnDeg: 16, riseWithHeightDeg: 25,
+    timingTolerance: 0.55, swingTime: 0.2, lateDirection: 1, timingTurnDeg: 24, riseWithHeightDeg: 25,
   },
   lateCut: {
-    id: 'lateCut', name: 'Late cut', kind: 'deflect', footwork: ['back'],
+    id: 'lateCut', name: 'Late cut', kind: 'deflect', footwork: ['back', 'front'],
     direction: 145, elevation: -4, batSpeed: 5, restitution: 0.36, tangentialRetention: 0.75,
-    depth: { back: 0.85 }, idealLine: { min: 0.3, max: 0.85 }, idealHeight: { min: 0.3, max: 1.05 },
+    depth: { back: 0.85, front: 0.2 }, idealLine: { min: 0.3, max: 0.85 }, idealHeight: { min: 0.3, max: 1.05 },
     timingTolerance: 0.4, swingTime: 0.17, lateDirection: 1, timingTurnDeg: 14, riseWithHeightDeg: 20,
   },
   pull: {
     id: 'pull', name: 'Pull', kind: 'attack', footwork: ['back'],
     direction: -78, elevation: 2, batSpeed: 15, restitution: 0.42, tangentialRetention: 0.5,
     depth: { back: 0.4 }, idealLine: { min: -0.35, max: 0.35 }, idealHeight: { min: 0.75, max: 1.45 },
-    timingTolerance: 0.55, swingTime: 0.21, lateDirection: -1, timingTurnDeg: 18, riseWithHeightDeg: 18,
+    timingTolerance: 0.55, swingTime: 0.21, lateDirection: -1, timingTurnDeg: 22, riseWithHeightDeg: 18,
   },
   hook: {
     id: 'hook', name: 'Hook', kind: 'loft', footwork: ['back'],
@@ -140,9 +151,9 @@ export const SHOTS: Readonly<Record<ShotId, ShotDef>> = {
     timingTolerance: 0.4, swingTime: 0.3, lateDirection: 1, timingTurnDeg: 20, riseWithHeightDeg: 40,
   },
   flick: {
-    id: 'flick', name: 'Flick', kind: 'attack', footwork: ['front', 'back'],
+    id: 'flick', name: 'Flick', kind: 'attack', footwork: ['front', 'back', 'out'],
     direction: -58, elevation: -3, batSpeed: 11.5, restitution: 0.42, tangentialRetention: 0.55,
-    depth: { front: -0.35, back: 0.4 }, idealLine: { min: -0.45, max: 0.05 }, idealHeight: { min: 0.1, max: 0.9 },
+    depth: { front: -0.35, back: 0.4, out: OUT }, idealLine: { min: -0.45, max: 0.05 }, idealHeight: { min: 0.1, max: 0.9 },
     timingTolerance: 0.55, swingTime: 0.2, lateDirection: -1, timingTurnDeg: 16, riseWithHeightDeg: 25,
   },
   legGlance: {
@@ -152,9 +163,9 @@ export const SHOTS: Readonly<Record<ShotId, ShotDef>> = {
     timingTolerance: 0.45, swingTime: 0.16, lateDirection: -1, timingTurnDeg: 14, riseWithHeightDeg: 20,
   },
   block: {
-    id: 'block', name: 'Defensive block', kind: 'defence', footwork: ['front', 'back'],
+    id: 'block', name: 'Defensive block', kind: 'defence', footwork: ['front', 'back', 'out'],
     direction: 0, elevation: -28, batSpeed: 1.2, restitution: 0.16, tangentialRetention: 0.35,
-    depth: { front: -0.45, back: BACK }, idealLine: { min: -0.3, max: 0.4 }, idealHeight: { min: 0, max: 1.2 },
+    depth: { front: -0.45, back: BACK, out: OUT }, idealLine: { min: -0.3, max: 0.4 }, idealHeight: { min: 0, max: 1.2 },
     timingTolerance: 1.3, swingTime: 0.14, lateDirection: 1, timingTurnDeg: 8, riseWithHeightDeg: 12,
   },
   leave: {
@@ -164,16 +175,22 @@ export const SHOTS: Readonly<Record<ShotId, ShotDef>> = {
     timingTolerance: 1, swingTime: 0.1, lateDirection: 1, timingTurnDeg: 0, riseWithHeightDeg: 0,
   },
   loftedDrive: {
-    id: 'loftedDrive', name: 'Lofted drive', kind: 'loft', footwork: ['front'],
+    id: 'loftedDrive', name: 'Lofted drive', kind: 'loft', footwork: ['front', 'out'],
     direction: 0, elevation: 32, batSpeed: 17.5, restitution: 0.43, tangentialRetention: 0.55,
-    depth: { front: FRONT }, idealLine: { min: -0.12, max: 0.35 }, idealHeight: { min: 0.12, max: 0.65 },
+    depth: { front: FRONT, out: OUT }, idealLine: { min: -0.12, max: 0.35 }, idealHeight: { min: 0.12, max: 0.65 },
     timingTolerance: 0.55, swingTime: 0.28, lateDirection: 1, timingTurnDeg: 12, riseWithHeightDeg: 20,
   },
   loftedAttack: {
-    id: 'loftedAttack', name: 'Lofted shot', kind: 'loft', footwork: ['front', 'back'],
+    id: 'loftedAttack', name: 'Lofted shot', kind: 'loft', footwork: ['front', 'back', 'out'],
     direction: 45, elevation: 30, batSpeed: 17.5, restitution: 0.43, tangentialRetention: 0.55,
-    depth: { front: FRONT, back: BACK }, idealLine: { min: -0.4, max: 0.6 }, idealHeight: { min: 0.1, max: 1.1 },
+    depth: { front: FRONT, back: BACK, out: OUT }, idealLine: { min: -0.4, max: 0.6 }, idealHeight: { min: 0.1, max: 1.1 },
     timingTolerance: 0.5, swingTime: 0.27, lateDirection: 1, timingTurnDeg: 16, riseWithHeightDeg: 18,
+  },
+  slogSweep: {
+    id: 'slogSweep', name: 'Slog sweep', kind: 'sweep', footwork: ['front'],
+    direction: -70, elevation: 26, batSpeed: 18, restitution: 0.42, tangentialRetention: 0.55,
+    depth: { front: -0.75 }, idealLine: { min: -0.4, max: 0.4 }, idealHeight: { min: 0, max: 0.6 },
+    timingTolerance: 0.42, swingTime: 0.3, lateDirection: -1, timingTurnDeg: 22, riseWithHeightDeg: 30,
   },
 };
 

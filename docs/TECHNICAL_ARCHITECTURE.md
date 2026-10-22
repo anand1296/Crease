@@ -4,11 +4,11 @@
 
 | | |
 | --- | --- |
-| Version | 0.8.0 (October 2026) |
+| Version | 0.9.0 (October 2026) |
 | Repository | https://github.com/anand1296/Crease |
 | Hosting | Vercel (static site, Git-integrated: every push to `main` deploys; pull requests get previews) |
 | Stack | TypeScript (strict) · React 19 · Three.js r180 via React Three Fiber 9 · Vite 7 · Zustand 5 · Vitest 3 · Playwright |
-| Size | ≈13,400 lines of application TypeScript, ≈1,800 lines of unit and simulation tests (136 tests), 3 browser tests |
+| Size | ≈14,200 lines of application TypeScript, ≈2,000 lines of unit and simulation tests (150 tests), 3 browser tests |
 | Backend | None. Everything — physics, AI, commentary, audio — runs in the player's browser |
 
 Companion documents: [README](../README.md) (running and playing), [GAME_DESIGN](../GAME_DESIGN.md) (rules and the simulation's numbers), [ARCHITECTURE](../ARCHITECTURE.md) (module summary), [CHANGELOG](../CHANGELOG.md), [batting report](batting-report.md).
@@ -332,7 +332,9 @@ The body material is a `MeshStandardMaterial` patched at compile time (`onBefore
 
 Every player has a hidden **control rig** (`Humanoid.tsx`, sized to the avatar's measured proportions) that the procedural motion library poses — batting stance, backlift, stroke and follow-through timed to the simulated contact; the bowling actions (keyframed tracks per action — pace, medium, off-spin, leg-spin — against time from release: bound, back-foot contact side-on, the arm turning backwards-over a full circle to release just past vertical with the front leg braced, follow-through across the body; unit tests check the arm never turns the wrong way and is high at release, and the hand is measured to be within a few centimetres of the physics' release point); the keeper's crouch; fielders' ready position, gather and throw; umpire signals. `AvatarRig` then drives the visible skeleton from one of two sources, cross-fading over 0.25 s when the source changes:
 
-- The ball is held in the bowler's measured hand until release, then eased onto the physics' path over 70 ms. Its seam is a raised ring: for pace it is upright and steady (the ball backspins about the seam's axis), angled by the swing; for spin the ball turns about the real spin axis (top spin about x, side spin along the flight) with the seam set at an angle to it, so the seam visibly rotates.
+- **Batting strokes** (`rig/strokes.ts`) are built from stroke families (drive, cut, pull/hook, flick/glance, sweep, reverse sweep, block, leave), each with a backlift, a contact posture (hands relative to the shoulders and the bat's direction) and a follow-through, turned towards where the ball is being hit. The body is placed so that the bat's sweet spot is exactly on the contact point at contact; the downswing is an accelerating arc; the hands never leave the reach of the shoulders. The bat is then drawn where the model's palms actually are after the arm IK (`gripWorld`), so it never floats free of the hands. Unit tests check the sweet spot meets the ball for every stroke and both hands.
+- **Fielding** uses a pick-up (down low as the ball arrives along the ground) and a keyframed overarm throw (side-on with the front arm at the target, the ball cocked behind the head, over the top, follow-through across the body), keyed to the throw plan's release time.
+- The ball is held in the bowler's measured hand until release, then eased onto the physics' path over 70 ms. Its seam is drawn as on a real ball — a narrow ridge with six rows of off-white stitching and faint quarter seams, from a 1024×512 colour map and a matching bump map, with only a hairline ridge in the geometry: for pace it is upright and steady (the ball backspins about the seam's axis), angled by the swing; for spin the ball turns about the real spin axis (top spin about x, side spin along the flight) with the seam set at an angle to it, so the seam visibly rotates.
 - **Motion capture** for running, jogging, walking (clip chosen by speed, advanced by distance actually covered so feet don't slide), idling, breathing and celebrating.
 - **Retargeting** of the control rig: each limb bone gets a constant correction `R0` mapping its A-pose bind orientation to "hanging down" (the rig's zero pose), so its orientation is the rig segment's orientation × `R0`; the torso's rotation is shared over three vertebrae; the head is steadied and turned towards the ball (yaw-limited); arms holding the bat are solved with **two-bone IK on the model itself** (elbow pole from the rig) so the gloves land exactly on the handle; fingers curl to grip.
 
@@ -343,12 +345,15 @@ Every player has a hidden **control rig** (`Humanoid.tsx`, sized to the avatar's
 | When | Shot |
 | --- | --- |
 | Between balls | Wide, behind the bowler's arm (whole pitch and close field) |
+| Television, between balls | **Close-up**: a long-lens shot of the batter from behind the bowler's arm, high enough that the background is outfield grass |
 | Human bowling, setting up the ball | **Aim**: high behind the bowler's arm, the whole pitch and the landing marker in frame; the run-up pushes in from here |
 | Run-up | Slow push-in and zoom (smoothstep), arriving tight on the striker a beat before release; a slight hand-held drift |
 | Ball left, missed or padded | Hold the tight frame |
 | After the stroke | 0.45 s from the bowler's end, widening and panning with the ball |
 | Ball beyond 12 m | **Cut** to a high camera on the far side of the boundary, square to the ball's path, framing ball and chasing fielder (field of view computed to fit both and the ball's height) |
 | Stumps broken | **Cut** to a low stump camera |
+
+Since 0.9.0 the **broadcast** style is the default and modelled on television coverage: the main camera sits high in the stand behind the bowler (≈70 m back, 17 m up, 10° → 6° lens through the run-up), which gives the compressed broadcast look; after the stroke it stays on its tripod and pans and zooms out with the ball (as a camera operator does); then the director cuts to one of a set of **fixed cameras** on gantries at the front of the stands — square of the wicket on either side for balls hit square, at the keeper's end for balls hit straight, the main camera for balls behind square — and stays on it for the rest of the ball, framed tight on ball and chasing fielder. Between balls there is a long-lens close-up of the batter. The vignette was removed from the effect chain.
 
 The director has two styles. **Classic** (the default since 0.7.0) is Cricket 07's framing: the camera sits about 5 m up and 27 m behind the bowler's stumps with a 30° lens, and pushes in to 3.9 m up, 17 m back with a 19° lens — high enough that the line to the striker clears the umpire's hat. **TV** is the long-lens broadcast framing (46 m back, 15° → 9.5°). <kbd>C</kbd> cycles classic → broadcast → batter's view → high wide view.
 
@@ -367,7 +372,7 @@ All synthesised in the browser (`audio/sound.ts`), through a gentle limiter and 
 - **Match HUD**: a scoreboard bar along the bottom (score, overs, batters, bowler and this over's balls, run rate, the chase, powerplay); a **controls panel** that shows the batting or bowling keys at all times, lights the keys held or just pressed (polled each animation frame from the keyboard state) and names the stroke the current direction + key will play (the same `shotFromInput` the match uses); the *Next ball* prompt and the over and wicket cards; the REPLAY badge.
 - **Screens**: main menu (over the live stadium, orbiting camera) → match setup (teams, overs 2/5/10/15/20, difficulty, pitch, toss/bat/bowl) → squad board (tick 11 of the squad, reorder, validation: exactly 11, warnings for no keeper, fewer than five bowlers, no spinner) → match (HUD) → innings break (scorecard, coach) → result (summary, top performers, both scorecards, coach, rematch).
 - **Store**: `state/game.ts` (Zustand) holds the screen, setup, settings (sound, graphics, commentary — persisted in `localStorage`) and a **snapshot** of the match rebuilt on match events, so the HUD re-renders on events, not frames.
-- **Input**: bindings are data (`input/keyboard.ts`); the handler reads the current match from the store. Batting: arrows for direction + D (ground), A (lofted), S (defend/push), W (sweep), X (leave), Shift (back foot), Space/R (run). Bowling: 1–9/Enter (choose bowler), Q/E (delivery), arrows (target), Space (run in, release on the meter). General: Enter/Space (next ball, continue, skip replay), P/Esc, C, M, V, H.
+- **Input**: bindings are data (`input/keyboard.ts`); the handler reads the current match from the store. Batting (Cricket 07 scheme): S front foot, W back foot, D use your feet, A leave, Shift lofted, screen-relative arrows (↓ straight), Space/R or D after the hit to run. Bowling: 1–9/Enter (choose bowler), 1–6 or Q/E (delivery), ↑/↓ amount, O side, F field, Space (marker, run in, lock pace), Backspace (back), arrows (marker). Fielding: hold ↑ (keeper's end) or ↓ (bowler's end) for power, release to throw. General: Enter/Space (next ball, continue, skip replay), P/Esc, C, M, V, H.
 - **Accessibility basics**: DOM UI with roles and labels, visible focus, `prefers-reduced-motion` respected, captions for every spoken line (the ticker).
 
 ## 13. Data: teams and squads

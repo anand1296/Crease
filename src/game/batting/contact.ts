@@ -287,13 +287,22 @@ export function resolveContact(input: ContactInput): ContactResult {
   const sweet = clamp(1 - 2.2 * Math.abs(along), 0.35, 1) * (1 - 0.35 * (Math.abs(across) / EDGE_START) ** 2);
   const e = def.restitution * sweet;
   // Digging out a yorker: the bat comes down steeply with little room to swing.
-  const batSpeed = def.batSpeed * power * (0.6 + 0.4 * quality) * (1 - Math.min(0.5, yorkedBy * 2));
+  // Timed to perfection, the bat is at full speed through the ball and it races away; coming down
+  // the pitch adds the batter's momentum.
+  const timedBonus = 1 + 0.14 * Math.exp(-((timing / 0.3) ** 2));
+  const stepOut = attempt.footwork === 'out' ? 1.06 : 1;
+  const batSpeed = def.batSpeed * power * (0.6 + 0.4 * quality) * timedBonus * stepOut * (1 - Math.min(0.5, yorkedBy * 2));
   const kt = def.tangentialRetention;
 
   const direction =
     aimDeg + def.lateDirection * timing * def.timingTurnDeg + rng.boundedNormal((1.5 + 9 * (1 - quality)) * control);
+  // Too early, the face closes and the ball goes up in the air; too late, it is squeezed down.
+  const early = Math.max(0, -timing - 0.4);
+  const late = Math.max(0, timing - 0.4);
+  const attacking = def.kind === 'attack' || def.kind === 'loft' || def.kind === 'sweep';
   const elevation =
-    intendedElev + along * 70 + rng.boundedNormal((1 + 6 * (1 - quality)) * control) - Math.abs(timing) * 2;
+    intendedElev + along * 70 + rng.boundedNormal((1 + 6 * (1 - quality)) * control) - Math.abs(timing) * 2 +
+    (attacking ? early * 9 - late * 4 : 0);
 
   // The batter sets the face for the ball they perceive: its pace always,
   // its angle and movement only as well as their technique reads it.

@@ -63,6 +63,7 @@ Simulation (core, physics,        deterministic TypeScript — no React or three
 | `scripts/avatars/` | Offline conversion of Rocketbox FBX avatars and clips to the runtime assets in `public/players/` |
 | `game/scenes/warmup.ts` | Compiles every shader and uploads every texture of a new match behind the loading screen, so nothing compiles mid-play |
 | `game/scenes/FrameBudget.tsx`, `adaptiveQuality.ts` | Adaptive resolution: steps the pixel ratio (and High's ambient occlusion) down when frames run slow, back up when there is headroom |
+| `game/scenes/rig/strokes.ts` | Batting strokes as motion: body position, hands and bat through backlift, downswing, contact (sweet spot on the ball) and follow-through, by stroke family |
 | `game/scenes/replay.ts` | Action replays: records each rendered frame of a ball (ball, poses, bats, stumps) and plays a window of it back for wickets and boundaries |
 | `game/scenes/MatchView.tsx` | Per-frame driver, players posed from the simulation, bat, ball, markers, camera rig; orbiting menu camera when no match is on |
 | `game/scenes/Ground.tsx`, `Stadium.tsx`, `Stumps.tsx` | Field and pitch textures, stands, instanced crowd, instanced sponsor boards, floodlights, live scoreboard |

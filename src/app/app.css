@@ -1737,3 +1737,161 @@ kbd.k.on {
     height: 72px;
   }
 }
+
+/* --- Batting: shot names and the timing gauge ------------------------------------------- */
+
+.keys li .what {
+  min-width: 82px;
+  font: 600 14px var(--display);
+  color: var(--chalk);
+}
+
+.timing {
+  margin-top: 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.timing-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.timing-head strong {
+  font: 800 17px var(--display);
+}
+
+.timing-head .good,
+.timing .mark.good {
+  color: var(--good);
+}
+
+.timing-head .ok {
+  color: var(--ok);
+}
+
+.timing-head .bad {
+  color: var(--bad);
+}
+
+.timing-bar {
+  position: relative;
+  height: 12px;
+  border-radius: 6px;
+  background: rgba(239, 123, 107, 0.35);
+}
+
+.timing-bar .zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 6px;
+}
+
+.timing-bar .zone.ok {
+  left: 34%;
+  right: 34%;
+  background: rgba(227, 192, 98, 0.55);
+}
+
+.timing-bar .zone.good {
+  left: 44%;
+  right: 44%;
+  background: var(--good);
+}
+
+.timing-bar .mark {
+  position: absolute;
+  top: -5px;
+  bottom: -5px;
+  width: 4px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+
+.timing-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+/* --- Fielding: the throw ------------------------------------------------------------------ */
+
+.throw-prompt {
+  position: absolute;
+  left: 50%;
+  bottom: 120px;
+  transform: translateX(-50%);
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  width: min(360px, calc(100% - 32px));
+  padding: 10px 14px;
+  border-radius: 4px;
+  border: 1px solid var(--brass);
+  background: var(--glass);
+  pointer-events: none;
+}
+
+.throw-prompt strong {
+  font: 800 22px var(--display);
+  color: var(--brass);
+}
+
+.throw-ends {
+  display: flex;
+  gap: 16px;
+  font: 600 15px var(--display);
+  color: var(--chalk-dim);
+}
+
+.throw-ends .on {
+  color: var(--chalk);
+}
+
+.throw-ends kbd.k {
+  height: 22px;
+  min-width: 24px;
+  font-size: 12px;
+}
+
+.throw-meter {
+  position: relative;
+  width: 100%;
+  height: 12px;
+  border-radius: 6px;
+  background: rgba(241, 238, 227, 0.15);
+}
+
+.throw-meter .zone-good {
+  position: absolute;
+  left: 37.5%;
+  width: 33.3%;
+  top: 0;
+  bottom: 0;
+  background: var(--good);
+}
+
+.throw-meter .zone-wild {
+  position: absolute;
+  left: 70.8%;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 0 6px 6px 0;
+  background: var(--bad);
+}
+
+.throw-meter .needle {
+  position: absolute;
+  top: -5px;
+  bottom: -5px;
+  width: 4px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: #fff;
+}

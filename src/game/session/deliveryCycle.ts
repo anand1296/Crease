@@ -19,7 +19,7 @@ import { type BallEvent, BallInPlay } from '../simulation/ballInPlay.ts';
  */
 export type CyclePhase = 'runUp' | 'inFlight' | 'struck' | 'dead';
 
-export type WicketKind = 'bowled' | 'caught' | 'lbw' | 'runOut';
+export type WicketKind = 'bowled' | 'caught' | 'lbw' | 'runOut' | 'stumped';
 
 export interface BallOutcome {
   /** Runs credited to the batter (including boundaries). */
@@ -60,6 +60,62 @@ export interface CycleOptions {
   readonly battingAi?: Omit<BattingAiOptions, 'batter' | 'rng' | 'ground'>;
   /** Human batters call their own runs; otherwise the batters take the safe runs automatically. */
   readonly manualRunning?: boolean;
+  /** The human is fielding: after a pick-up with the batters running, they choose where to throw it and how hard. */
+  readonly humanFielding?: boolean;
+}
+
+/** Which end a throw goes to: the keeper (striker's end) or the bowler. */
+export type ThrowEnd = 'striker' | 'bowler';
+
+/**
+ * A throw from the field. Released after the pick-up and a wind-up; the
+ * ball arrives after its flight. A direct hit breaks the stumps on arrival;
+ * otherwise the keeper or bowler gathers it first (longer if the throw was
+ * wild).
+ */
+export interface ThrowPlan {
+  readonly end: ThrowEnd;
+  readonly power: number;
+  readonly releaseAt: number;
+  readonly arriveAt: number;
+  readonly direct: boolean;
+  /** How far the throw missed the stumps, metres (sideways). */
+  readonly miss: number;
+  readonly human: boolean;
+}
+
+/** How long the game waits for a human's throw after the pick-up before the fielder throws anyway. */
+export const THROW_WAIT = 1.1;
+
+/**
+ * The physics of a throw: power 0–1.2 (the meter), the fielder's arm 0–1.
+ * Speed grows with power and arm; accuracy is best in the middle of the
+ * range (0.45–0.85) and falls away when the throw is forced; a lob (low
+ * power) takes longer as it drops and bounces in. Pick-up and wind-up come
+ * first. A direct hit breaks the stumps on arrival; otherwise whoever is at
+ * the stumps gathers it first — longer if it was wild.
+ */
+export function planThrow(i: {
+  from: { x: number; z: number };
+  end: ThrowEnd;
+  power: number;
+  arm: number;
+  now: number;
+  collectedAt: number;
+  rng: Rng;
+}): { plan: Omit<ThrowPlan, 'human'>; breakAt: number } {
+  const pw = Math.min(1.2, Math.max(0.1, i.power));
+  const target = i.end === 'striker' ? STRIKER_STUMPS_Z : BOWLER_STUMPS_Z;
+  const dist = Math.hypot(i.from.x, i.from.z - target);
+  const speed = (12 + 20 * Math.min(1, pw)) * (0.78 + 0.35 * i.arm);
+  const releaseAt = Math.max(i.now, i.collectedAt + 0.4) + 0.12;
+  const arriveAt = releaseAt + dist / speed + (pw < 0.35 ? 0.25 : 0);
+  const forcing = Math.max(0, pw - 0.85) * 4 + Math.max(0, 0.45 - pw) * 0.5;
+  const spread = (0.12 + 0.02 * dist) * (1.35 - 0.6 * i.arm) * (1 + forcing);
+  const miss = Math.abs(i.rng.boundedNormal(spread));
+  const direct = miss < 0.14;
+  const breakAt = direct ? arriveAt : arriveAt + 0.25 + Math.min(1.2, Math.max(0, miss - 0.6) * 0.6);
+  return { plan: { end: i.end, power: pw, releaseAt, arriveAt, direct, miss }, breakAt };
 }
 
 /** Seconds for run `i` (0-based): the first from a standing start, later ones including the turn. */
@@ -94,6 +150,10 @@ export class DeliveryCycle {
   returnAt: number | undefined;
   /** Which set of stumps the return is thrown to. */
   throwTo: 'striker' | 'bowler' = 'striker';
+  /** The throw, once made (human fielding, or the computer's). */
+  throwPlan: ThrowPlan | undefined;
+  /** Human fielding: waiting for the throw since this time. */
+  awaitingThrowSince: number | undefined;
   readonly events: BallEvent[] = [];
   private releaseQuality: number | undefined;
   /** Changes a human bowler makes during the run-up (amount of swing/spin/cut, the pace they lock). */
@@ -217,6 +277,8 @@ export class DeliveryCycle {
     }
     // Once a fielder has the ball, the physics stops; the plan says when.
     if (this.collectedAt !== undefined) {
+      // Waiting too long for the human's throw: the fielder throws it himself.
+      if (this.awaitingThrowSince !== undefined && this.time - this.awaitingThrowSince >= THROW_WAIT) this.throwBall(this.dangerEnd(), 0.7, false);
       if (this.returnAt !== undefined && this.time >= this.returnAt) this.resolveRuns();
       return;
     }
@@ -271,8 +333,19 @@ export class DeliveryCycle {
         // Limited-overs wide: well outside off, down the leg side, or over head height.
         const wide = line > 0.85 || line < -0.45 || ev.position.y > 1.95;
         const headline = wide ? 'Wide' : !shot || shot.shot === 'leave' ? 'Left alone' : c?.kind === 'miss' ? 'Beaten!' : 'Dot ball';
-        this.finish({ headline, detail: wide ? 'Signalled wide: one extra.' : 'Taken by the keeper.', wide });
         this.carrier = this.opts.field.findIndex((f) => f.keeper);
+        // Down the pitch and beaten: the keeper has the bails off before he can get back.
+        const keeper = this.opts.field[this.carrier];
+        if (shot?.footwork === 'out' && keeper && this.rng.fork('stumping').chance(0.72 + 0.25 * (keeper.player.fielding.catching / 100))) {
+          this.finish({
+            wicket: { kind: 'stumped', fielder: keeper.player.name, batter: 'striker' },
+            headline: 'STUMPED!',
+            detail: `Down the pitch, beaten, and ${keeper.player.name} whips the bails off.${wide ? ' (Wide as well.)' : ''}`,
+            wide,
+          });
+          break;
+        }
+        this.finish({ headline, detail: wide ? 'Signalled wide: one extra.' : 'Taken by the keeper.', wide });
         break;
       }
       case 'boundary':
@@ -311,7 +384,65 @@ export class DeliveryCycle {
     const p = plan.interceptPos;
     this.throwTo = Math.hypot(p.x, p.z - STRIKER_STUMPS_Z) <= Math.hypot(p.x, p.z - BOWLER_STUMPS_Z) ? 'striker' : 'bowler';
     // Nobody set off: the ball is dead as soon as it is in the fielder's hands.
-    if (this.runStarts.length === 0) this.resolveRuns();
+    if (this.runStarts.length === 0) {
+      this.resolveRuns();
+      return;
+    }
+    if (this.opts.humanFielding) {
+      // The human throws it: where, and how hard, decide whether anyone is run out.
+      this.returnAt = undefined;
+      this.awaitingThrowSince = this.time;
+    } else if (this.returnAt !== undefined) {
+      // The computer's throw comes in when the fielding plan says (its runs were judged on that).
+      const arriveAt = this.returnAt;
+      this.throwPlan = {
+        end: this.throwTo,
+        power: 0.65,
+        releaseAt: Math.min(arriveAt - 0.15, this.time + 0.55),
+        arriveAt,
+        direct: true,
+        miss: 0,
+        human: false,
+      };
+    }
+  }
+
+  /** The end a batter is heading for and most likely to be short of. */
+  dangerEnd(): ThrowEnd {
+    const p = this.runProgress(this.time);
+    const n = p.current !== undefined ? p.completed : Math.max(0, p.completed - 1);
+    // Run n: the original striker runs towards the bowler's end on even runs; both batters are
+    // equally far through it, so the end the throw is nearer to is the better bet.
+    const pos = this.carrier !== undefined ? this.fielderPos[this.carrier] : undefined;
+    if (!pos) return n % 2 === 0 ? 'bowler' : 'striker';
+    return Math.hypot(pos.x, pos.z - STRIKER_STUMPS_Z) <= Math.hypot(pos.x, pos.z - BOWLER_STUMPS_Z) ? 'striker' : 'bowler';
+  }
+
+  /**
+   * Throws the ball in, to one end, with a power 0–1.2. Speed grows with
+   * power and the fielder's arm; accuracy is best in the middle of the
+   * range and falls away when the throw is forced. A direct hit breaks the
+   * stumps on arrival; otherwise whoever is at the stumps gathers first.
+   */
+  throwBall(end: ThrowEnd, power: number, human = true): boolean {
+    if (this.collectedAt === undefined || this.throwPlan || this.phase === 'dead' || this.carrier === undefined) return false;
+    const fielder = this.opts.field[this.carrier];
+    const from = this.fielderPos[this.carrier];
+    if (!fielder || !from) return false;
+    const t = planThrow({
+      from,
+      end,
+      power,
+      arm: fielder.player.fielding.throwing / 100,
+      now: this.time,
+      collectedAt: this.collectedAt,
+      rng: this.rng.fork(`throw-${this.time.toFixed(3)}`),
+    });
+    this.throwTo = end;
+    this.throwPlan = { ...t.plan, human };
+    this.awaitingThrowSince = undefined;
+    this.returnAt = t.breakAt;
+    return true;
   }
 
   /** Human batter calls a run (or the next one). */
@@ -507,19 +638,29 @@ export class DeliveryCycle {
     if (this.carrier !== undefined) {
       const p = this.fielderPos[this.carrier];
       if (p) {
-        // Gathered, then (if the batters are running) thrown in on a flat arc.
-        const throwStart = (this.collectedAt ?? Infinity) + 0.55;
-        const end = this.returnAt;
-        if (end !== undefined && this.time > throwStart && end > throwStart && this.runStarts.length > 0) {
-          const u = Math.min(1, (this.time - throwStart) / (end - throwStart));
-          const tz = this.throwTo === 'striker' ? STRIKER_STUMPS_Z : BOWLER_STUMPS_Z;
-          out.x = p.x + (0 - p.x) * u;
+        // Gathered, then (if the batters are running) thrown in: a flat throw, or a lob that bounces in.
+        const t = this.throwPlan;
+        if (t && this.time > t.releaseAt) {
+          const u = Math.min(1, (this.time - t.releaseAt) / Math.max(0.05, t.arriveAt - t.releaseAt));
+          const tz = t.end === 'striker' ? STRIKER_STUMPS_Z : BOWLER_STUMPS_Z;
+          // Where it arrives: on the stumps, or wide of them by the miss.
+          const side = p.x >= 0 ? -1 : 1;
+          const ax = t.direct ? 0 : side * Math.min(2.5, t.miss);
+          out.x = p.x + (ax - p.x) * u;
           out.z = p.z + (tz - p.z) * u;
-          out.y = 1.6 + (0.6 - 1.6) * u + Math.sin(Math.PI * u) * Math.min(6, Math.hypot(p.x, p.z - tz) * 0.08);
+          const d = Math.hypot(p.x, p.z - tz);
+          const loft = t.power < 0.35 ? Math.min(9, d * 0.18) : Math.min(4, d * 0.05);
+          out.y = 1.9 + (0.45 - 1.9) * u + Math.sin(Math.PI * u) * loft;
+          if (u >= 1 && !t.direct) {
+            // Taken at the stumps.
+            out.x = ax * 0.3;
+            out.y = 0.8;
+            out.z = tz + (t.end === 'striker' ? 0.6 : -0.6);
+          }
           return out;
         }
         out.x = p.x;
-        out.y = 1.0;
+        out.y = t || (this.collectedAt !== undefined && this.time - this.collectedAt > 0.3) ? 1.7 : 0.4;
         out.z = p.z;
         return out;
       }

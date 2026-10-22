@@ -89,9 +89,9 @@ Bounces are resolved at the exact contact point within the step (sub-step interp
 
 ### Strokes
 
-Sixteen strokes, each a distinct set of physical intentions:
+Seventeen strokes (the slog sweep is new), each a distinct set of physical intentions:
 
-- contact depth (front or back foot);
+- contact depth (front foot, back foot, or out of the crease — stepping out meets the ball 1.75 m down the pitch, takes 0.32 s longer, adds 6% bat speed, and a miss is usually stumped);
 - the line and height of ball it suits;
 - bat speed and restitution, and how much along-the-face velocity it keeps;
 - intended direction and elevation;
@@ -111,7 +111,11 @@ The player commits with a key press; the bat arrives `swingTime` later (0.14–0
 - **Tolerance is a distance along the ball's path**, so the time window shrinks with ball speed: pace is harder to time than spin. It is widened by the timing attribute.
 - **Early strokes** meet the ball as it reaches the contact point.
 - **Late strokes** meet it wherever it is when the bat arrives, unless it has already reached the pads or stumps.
-- Timing rotates the face continuously (late opens it for straight-bat strokes and turns leg-side strokes finer) and lowers contact quality and bat speed. It is not a pass/fail check.
+- Timing rotates the face continuously (late opens it for straight-bat strokes and turns leg-side strokes finer) and lowers contact quality and bat speed. It is not a pass/fail check. The rotation is strong enough to place the ball: a square cut goes to point timed perfectly and towards third man played late (24° per timing window), a pull squarer or finer (22°).
+- Perfect timing (within ±0.3 of the window) gives up to 14% extra bat speed; too early (beyond 0.4) closes the face and lifts attacking strokes (+9° per window); too late squeezes them down.
+- The **timing gauge** shows the error in units of the stroke's window (perfect within ±0.3, good within ±0.8) and in milliseconds.
+
+**Controls** follow Cricket 07: S front foot, W back foot, D use your feet, A leave, Shift lofted, and screen-relative arrows (↓ straight). `battingControls.ts` maps each key and arrow combination to a stroke and an aim; every stroke is reachable.
 
 ### Where the bat goes, and what the batter could see
 
@@ -202,6 +206,8 @@ Computer v computer at Normal, measured over 400 balls on three seeds: 3.5–5.1
 - **Umpires** stand behind the bowler's stumps and at square leg, and signal out (LBW and caught), four, six, wide and no-ball; the square-leg umpire gives run-outs.
 - **Wickets** break: the stumps go back and the bails fly.
 - **Pace of play**: the match waits for the player after every ball; overs end with a summary card and wickets with a dismissal card, each with the scorecard. The simulation runs at a chosen fraction of real time (0.65×, 0.8× by default, or 1×); only the clock rate changes, never the physics step, so results are identical at every speed.
+- **Throws** (`planThrow`): speed (12 + 20 × power) × (0.78 + 0.35 × arm) m/s after a 0.5 s pick-up and wind-up; a lob (power < 0.35) takes 0.25 s longer. Sideways error at the stumps (0.12 + 0.02 × distance) × (1.35 − 0.6 × arm) × (1 + forcing), where forcing grows above 0.85 power (and a little below 0.45). A miss under 0.14 m is a direct hit; otherwise the stumps are broken 0.25 s after arrival (more if wild). A human chooses the end and power; the computer's throws arrive when its fielding plan said.
+- **Stumpings**: a batter who steps out and is beaten is stumped with probability 0.72 + 0.25 × the keeper's catching.
 - **Field presets** (`fielding/presets.ts`): ten common T20 fields from attacking to defensive. Fielding restrictions: two outside the 30-yard circle in the powerplay, five after it in T20 (the one-day rule — four in the middle overs — remains in the engine). A field change assigns fielders to the new positions by minimum total squared distance (Hungarian algorithm), close catchers excepted, so nobody crosses the ground for a small change.
 - **Fielding movement**: after a stroke only the chaser, one backing-up fielder, the keeper and the bowler move; the rest hold their positions (the ring walks in a step as the bowler runs in). Fields are reset under the camera cut between balls.
 - **Replays**: every rendered frame of a ball is recorded (ball, poses, bats, stumps), and wickets and boundaries are played back at 0.45× with a replay camera.

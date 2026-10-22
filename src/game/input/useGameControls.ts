@@ -64,14 +64,19 @@ export function useGameControls(): void {
         const eligible = m.eligibleBowlers();
         if (i >= 0 && eligible[i]) m.chooseBowler(eligible[i].id);
         else if (action === 'confirm' || action === 'bowl') m.chooseBowler(m.suggestedBowler().id);
-        else if (action === 'field') m.cycleFieldPreset(keyboard.isHeld('backFoot') ? -1 : 1);
+        else if (action === 'field') m.cycleFieldPreset(keyboard.isHeld('lofted') ? -1 : 1);
         return;
       }
       if (m.humanBatting) {
-        if (action === 'ground' || action === 'loft' || action === 'defend' || action === 'sweep' || action === 'leave') {
-          m.playShot(shotFromInput(action, keyboard.direction(), keyboard.isHeld('backFoot'), m.striker.battingHand));
-        } else if (action === 'run') {
+        // Once the ball has been hit, D (as in Cricket 07) or Space calls a run.
+        const struck = m.cycle?.phase === 'struck';
+        if (action === 'run' || (struck && action === 'shotFeet')) {
           m.callRun();
+          return;
+        }
+        if (action === 'shotFront' || action === 'shotBack' || action === 'shotFeet' || action === 'leave') {
+          const kind = action === 'shotFront' ? 'front' : action === 'shotBack' ? 'back' : action === 'shotFeet' ? 'feet' : 'leave';
+          m.playShot(shotFromInput(kind, keyboard.direction(), keyboard.isHeld('lofted'), m.striker.battingHand));
         }
         return;
       }
@@ -85,7 +90,7 @@ export function useGameControls(): void {
         else if (pick >= 0) {
           const type = m.availableDeliveries[pick];
           if (type) m.selectDelivery(type);
-        } else if (action === 'field') m.cycleFieldPreset(keyboard.isHeld('backFoot') ? -1 : 1);
+        } else if (action === 'field') m.cycleFieldPreset(keyboard.isHeld('lofted') ? -1 : 1);
         else if (action === 'side') m.toggleSide();
         else if (action === 'back') m.aimBack();
         else if ((action === 'up' || action === 'down') && !placing) m.adjustAmount(action === 'up' ? 0.1 : -0.1);

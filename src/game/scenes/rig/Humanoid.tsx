@@ -81,6 +81,8 @@ export interface HumanoidHandle {
   handWorld(side: 'L' | 'R', out: Vector3): Vector3;
   /** Shows or hides the cap or hat (a bowler hands his to the umpire). */
   headwear?(visible: boolean): void;
+  /** World point where the hand grips a handle (the palm), after the last `apply`. */
+  gripWorld?(side: 'L' | 'R', out: Vector3): Vector3;
 }
 
 /** The control rig's joints in the character's own space (root = origin, facing +z), after `apply`. */

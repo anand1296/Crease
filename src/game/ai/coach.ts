@@ -27,14 +27,14 @@ export interface BallRecord {
   readonly length: number | undefined;
   readonly shot: string | undefined;
   readonly shotName: string | undefined;
-  readonly footwork: 'front' | 'back' | undefined;
+  readonly footwork: 'front' | 'back' | 'out' | undefined;
   readonly contact: 'middled' | 'mistimed' | 'edge' | 'miss' | 'leave' | undefined;
   readonly timingMs: number | undefined;
   readonly runs: number;
   readonly extras: number;
   readonly wide: boolean;
   readonly noBall: boolean;
-  readonly wicket: 'bowled' | 'caught' | 'lbw' | 'runOut' | undefined;
+  readonly wicket: 'bowled' | 'caught' | 'lbw' | 'runOut' | 'stumped' | undefined;
   readonly legal: boolean;
 }
 

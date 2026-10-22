@@ -1,58 +1,75 @@
 import { describe, expect, it } from 'vitest';
 import { ALL_SHOTS, SHOTS, type ShotId } from '../batting/shots.ts';
-import { type BatAction, type ScreenDirection, shotFromInput, sideOf } from './battingControls.ts';
+import { type BatAction, type ScreenDirection, directionOf, shotFromInput, sideOf } from './battingControls.ts';
 
 const D = (x: -1 | 0 | 1, y: -1 | 0 | 1): ScreenDirection => ({ x, y });
+const DOWN = -1;
+const UP = 1;
 
-describe('batting controls', () => {
+describe('batting controls (Cricket 07 scheme)', () => {
   it('screen-left is the off side for a right-hander and the leg side for a left-hander', () => {
     expect(sideOf(-1, 'right')).toBe('off');
     expect(sideOf(-1, 'left')).toBe('leg');
     expect(sideOf(1, 'right')).toBe('leg');
   });
 
-  it('maps the main strokes', () => {
-    expect(shotFromInput('ground', D(0, 0), false, 'right').shot).toBe('straightDrive');
-    expect(shotFromInput('ground', D(-1, 0), false, 'right').shot).toBe('coverDrive');
-    expect(shotFromInput('ground', D(-1, 0), true, 'right').shot).toBe('squareCut');
-    expect(shotFromInput('ground', D(1, 0), true, 'right').shot).toBe('pull');
-    expect(shotFromInput('ground', D(-1, 0), false, 'left').shot).toBe('flick');
-    expect(shotFromInput('defend', D(0, 0), true, 'right')).toEqual({ shot: 'block', footwork: 'back' });
-    expect(shotFromInput('sweep', D(-1, 0), false, 'right').shot).toBe('reverseSweep');
-    expect(shotFromInput('loft', D(1, 0), true, 'right').shot).toBe('hook');
+  it('arrows are screen directions from behind the bowler: ↓ straight, ← square off side, ↖ fine', () => {
+    expect(directionOf(D(0, DOWN), 'right')).toBe(0);
+    expect(directionOf(D(-1, 0), 'right')).toBe(90);
+    expect(directionOf(D(-1, DOWN), 'right')).toBe(45);
+    expect(directionOf(D(-1, UP), 'right')).toBe(135);
+    expect(directionOf(D(1, 0), 'right')).toBe(-90);
+    expect(directionOf(D(-1, 0), 'left')).toBe(-90);
+    expect(directionOf(D(0, 0), 'right')).toBeUndefined();
   });
 
-  it('aims lofted shots into the direction pressed, on the correct side for each hand', () => {
-    const rh = shotFromInput('loft', D(-1, 0), false, 'right');
-    const lh = shotFromInput('loft', D(-1, 0), false, 'left');
+  it('S front foot, W back foot, D use your feet, A leave; alone they defend', () => {
+    expect(shotFromInput('front', D(0, 0), false, 'right')).toEqual({ shot: 'block', footwork: 'front' });
+    expect(shotFromInput('back', D(0, 0), false, 'right')).toEqual({ shot: 'block', footwork: 'back' });
+    expect(shotFromInput('feet', D(0, 0), false, 'right')).toEqual({ shot: 'block', footwork: 'out' });
+    expect(shotFromInput('leave', D(-1, 0), false, 'right').shot).toBe('leave');
+    expect(shotFromInput('front', D(0, DOWN), false, 'right').shot).toBe('straightDrive');
+    expect(shotFromInput('front', D(-1, DOWN), false, 'right').shot).toBe('coverDrive');
+    expect(shotFromInput('back', D(-1, 0), false, 'right').shot).toBe('squareCut');
+    expect(shotFromInput('back', D(-1, UP), false, 'right').shot).toBe('lateCut');
+    expect(shotFromInput('back', D(1, 0), false, 'right').shot).toBe('pull');
+    expect(shotFromInput('front', D(1, 0), false, 'right').shot).toBe('flick');
+    expect(shotFromInput('front', D(1, UP), false, 'right').shot).toBe('sweep');
+    expect(shotFromInput('feet', D(0, DOWN), false, 'right')).toEqual({ shot: 'straightDrive', footwork: 'out' });
+  });
+
+  it('Shift lofts the shot: lofted drive, slog sweep, reverse sweep, hook, and lofted shots aimed where pressed', () => {
+    expect(shotFromInput('front', D(0, DOWN), true, 'right').shot).toBe('loftedDrive');
+    expect(shotFromInput('front', D(1, UP), true, 'right').shot).toBe('slogSweep');
+    expect(shotFromInput('front', D(-1, UP), true, 'right').shot).toBe('reverseSweep');
+    expect(shotFromInput('back', D(1, UP), true, 'right').shot).toBe('hook');
+    const rh = shotFromInput('front', D(-1, DOWN), true, 'right');
+    const lh = shotFromInput('front', D(-1, DOWN), true, 'left');
     expect(rh.shot).toBe('loftedAttack');
     expect(rh.aimDeg ?? 0).toBeGreaterThan(0);
     expect(lh.aimDeg ?? 0).toBeLessThan(0);
   });
 
-  it('every one of the 16 strokes is reachable from the keyboard', () => {
-    const reached = new Set<ShotId>();
-    const actions: BatAction[] = ['ground', 'loft', 'defend', 'sweep', 'leave'];
-    for (const action of actions) {
+  const all = (f: (a: BatAction, d: ScreenDirection, lofted: boolean) => void) => {
+    for (const action of ['front', 'back', 'feet', 'leave'] as const) {
       for (const x of [-1, 0, 1] as const) {
         for (const y of [-1, 0, 1] as const) {
-          for (const back of [false, true]) reached.add(shotFromInput(action, D(x, y), back, 'right').shot);
+          for (const lofted of [false, true]) f(action, D(x, y), lofted);
         }
       }
     }
+  };
+
+  it('every stroke is reachable from the keyboard', () => {
+    const reached = new Set<ShotId>();
+    all((a, d, l) => reached.add(shotFromInput(a, d, l, 'right').shot));
     expect([...reached].sort()).toEqual([...ALL_SHOTS].sort());
   });
 
   it('never asks for footwork a stroke does not have', () => {
-    for (const action of ['ground', 'loft', 'defend', 'sweep', 'leave'] as const) {
-      for (const x of [-1, 0, 1] as const) {
-        for (const y of [-1, 0, 1] as const) {
-          for (const back of [false, true]) {
-            const a = shotFromInput(action, D(x, y), back, 'right');
-            expect(SHOTS[a.shot].footwork.includes(a.footwork)).toBe(true);
-          }
-        }
-      }
-    }
+    all((a, d, l) => {
+      const s = shotFromInput(a, d, l, 'right');
+      expect(SHOTS[s.shot].footwork.includes(s.footwork)).toBe(true);
+    });
   });
 });

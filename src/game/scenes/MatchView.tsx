@@ -8,7 +8,6 @@ import { keyboard } from '../input/keyboardInstance.ts';
 import { exposeDebug } from '../debug.ts';
 import { BOWLER_STUMPS_Z, FIELD, STRIKER_POPPING_Z, STRIKER_STUMPS_Z } from '../data/field.ts';
 import { type Team, kitColors } from '../data/teams.ts';
-import { directionVector } from '../batting/contact.ts';
 import { SHOTS } from '../batting/shots.ts';
 import type { Match } from '../match/match.ts';
 import { type Player, offSideSign } from '../model/player.ts';
@@ -21,8 +20,9 @@ import { type ReplayKind, ReplayRecorder, replayVectors, restorePose } from './r
 import { warmUp } from './warmup.ts';
 import { AVATARS, type AvatarId } from './rig/avatarAssets.ts';
 import { type Shot, WIDE, direct } from './camera/director.ts';
-import { type ActionKind, actionSpan, battingStance, bowlingAction, gait, gather, keeperStance, readyStance, resetPose, throwing } from './rig/motion.ts';
+import { type ActionKind, THROW_SPAN, actionSpan, battingStance, bowlingAction, gait, gather, keeperStance, pickUp, readyStance, resetPose, throwAction } from './rig/motion.ts';
 import { type RunUp, runUpFor } from '../bowling/runUp.ts';
+import { familyOf, strokeFrame } from './rig/strokes.ts';
 import { releasePoint } from '../bowling/execute.ts';
 
 /**
@@ -140,10 +140,13 @@ function WarmUp() {
   return null;
 }
 
+/** Seconds of holding the throw key for full power. */
+const THROW_CHARGE = 0.75;
+
 /** Replay length in recorded seconds around the moment, by what happened. */
 function replayWindow(kind: ReplayKind, release: number, contact: number | undefined, event: number | undefined): [number, number] {
   const e = event ?? release + 1;
-  if (kind === 'bowled' || kind === 'lbw') return [release - 0.35, e + 1.3];
+  if (kind === 'bowled' || kind === 'lbw' || kind === 'stumped') return [release - 0.35, e + 1.3];
   const from = (contact ?? release) - (kind === 'runOut' ? 0.4 : 0.9);
   return [Math.max(release - 0.35, from), e + (kind === 'boundary' ? 0.6 : 1.0)];
 }
@@ -154,6 +157,7 @@ function Driver({ match, recorder }: { match: Match; recorder: ReplayRecorder })
   const steps = useRef(0);
   const meta = useRef<{ release: number; contact: number | undefined; event: number | undefined; off: 1 | -1 }>({ release: 0, contact: undefined, event: undefined, off: 1 });
   const replayedFor = useRef<unknown>(undefined);
+  const charge = useRef<{ end: 'striker' | 'bowler' | undefined; t: number }>({ end: undefined, t: 0 });
   const heard = useRef<{ cycle: unknown; n: number; outcome: unknown }>({ cycle: undefined, n: 0, outcome: undefined });
   useEffect(
     () =>
@@ -223,6 +227,23 @@ function Driver({ match, recorder }: { match: Match; recorder: ReplayRecorder })
       }
     }
     if (c?.phase === 'runUp' && match.humanBowling) useGame.getState().setMeter(match.meter);
+    // Fielding: hold ↑ (keeper's end) or ↓ (bowler's end) to wind up the throw, let go to throw.
+    if (match.awaitingThrow && !g.paused) {
+      const up = keyboard.isHeld('up');
+      const down = keyboard.isHeld('down');
+      const ch = charge.current;
+      if (up || down) {
+        if (!ch.end) {
+          ch.end = up ? 'striker' : 'bowler';
+          ch.t = 0;
+        }
+        ch.t += delta;
+        g.setMeter(Math.min(1.2, ch.t / THROW_CHARGE));
+      } else if (ch.end) {
+        match.throwBall(ch.end, Math.min(1.2, ch.t / THROW_CHARGE));
+        ch.end = undefined;
+      }
+    } else charge.current.end = undefined;
     // Sound for whatever happened this frame.
     const h = heard.current;
     if (h.cycle !== c) {
@@ -319,7 +340,6 @@ function idle(m: Motion, t: number, which: ClipName = 'idle'): void {
 }
 
 const BAT_LENGTH = 0.86;
-const SWEET_SPOT = 0.7;
 const RUN_LANE = 1.25;
 const END_Z = STRIKER_POPPING_Z + 0.35;
 
@@ -454,14 +474,7 @@ function Players({ match, recorder, bowlerHand }: { match: Match; recorder: Repl
           idle(m, t * 0.8 + i * 1.7, i % 3 === 0 ? 'breathe' : 'idle');
           m.facing = turnTowards(m.facing, facingBatter, dt * 3);
         }
-        if (c?.carrier === i) {
-          const throwStart = (c.collectedAt ?? Infinity) + 0.55;
-          if (c.returnAt !== undefined && c.runStarts.length > 0 && t >= (c.collectedAt ?? Infinity)) {
-            const u = (c.time - (c.collectedAt ?? c.time)) / Math.max(0.3, throwStart + 0.35 - (c.collectedAt ?? 0));
-            throwing(p, u, f.player.bowlingArm === 'right');
-          } else gather(p);
-          p.grip = 0.6;
-        }
+        fieldTheBall(c, i, m, f.player.bowlingArm === 'right', dt);
       }
       celebration(m, wicket && (!isBowler || c?.phase === 'dead'), t, i);
       if (!p.clip || p.clip.name === 'idle' || p.clip.name === 'breathe') p.look = look;
@@ -536,12 +549,25 @@ function Players({ match, recorder, bowlerHand }: { match: Match; recorder: Repl
       recorder.pose(id, p);
     }
 
-    // Striker's bat: in the stroke it is posed by poseStriker; while running, carried.
+    // Striker's bat: always in his hands. It is placed where the model's palms actually are after
+    // the arms have been solved (so it can never float free of them), pointing the way the stroke wants.
     const sb = strikerBat.current;
     if (sb) {
+      const sh = handles.current.get(strikerId);
       if (running) {
-        const sh = handles.current.get(strikerId);
         if (sh) carryBat(sb, sh, m0(motions.get(strikerId)));
+      } else if (sh?.gripWorld) {
+        const right = match.striker.battingHand === 'right';
+        const topGrip = sh.gripWorld(right ? 'L' : 'R', tmpA);
+        const lowGrip = sh.gripWorld(right ? 'R' : 'L', tmpB);
+        const between = lowGrip.sub(topGrip);
+        const gap = between.length();
+        const dir = tmpAxis.copy(batState.dir);
+        // Where the two hands are a sensible distance apart along the handle, follow them.
+        if (gap > 0.04 && gap < 0.22) dir.lerp(between.normalize(), 0.5).normalize();
+        sb.position.copy(topGrip).addScaledVector(dir, -0.04);
+        tmpQ.setFromUnitVectors(DOWN, dir);
+        sb.quaternion.copy(tmpQ);
       } else {
         sb.position.copy(batState.hands);
         tmpQ.setFromUnitVectors(DOWN, batState.dir);
@@ -645,6 +671,47 @@ function carryBat(bat: Group, h: HumanoidHandle, facing: number): void {
   tmpB.set(Math.sin(facing) * 0.6, -0.8, Math.cos(facing) * 0.6).normalize();
   tmpQ.setFromUnitVectors(DOWN, tmpB);
   bat.quaternion.copy(tmpQ);
+}
+
+/**
+ * A fielder dealing with the ball: down to pick up a ball along the ground
+ * as he reaches it, then ball in hand, turned towards the stumps, and the
+ * throw when it comes (at the time the throw plan says).
+ */
+function fieldTheBall(c: Match['cycle'], i: number, m: Motion, rightArmed: boolean, dt: number): void {
+  if (!c) return;
+  const p = m.pose;
+  const plan = c.fieldingPlan;
+  const contact = c.contact;
+  if (plan && plan.fielder === i && contact !== undefined && c.carrier === undefined && plan.kind === 'fielded' && plan.interceptPos.y < 0.6) {
+    // Getting down to it in the last strides.
+    const until = contact + plan.interceptT - c.time;
+    if (until < 0.35) pickUp(p, 1 - until / 0.35);
+    return;
+  }
+  if (c.carrier !== i) return;
+  const t = c.throwPlan;
+  if (t) {
+    const tau = c.time - t.releaseAt;
+    if (tau >= THROW_SPAN.start && tau <= THROW_SPAN.end) {
+      throwAction(p, tau, rightArmed);
+      const tz = t.end === 'striker' ? STRIKER_STUMPS_Z : BOWLER_STUMPS_Z;
+      m.facing = turnTowards(m.facing, Math.atan2(0 - m.pos.x, tz - m.pos.z) + (rightArmed ? 0.35 : -0.35), dt * 10);
+      return;
+    }
+    if (tau > THROW_SPAN.end) return;
+  }
+  const since = c.collectedAt !== undefined ? c.time - c.collectedAt : 1;
+  if (since < 0.2 && plan?.kind === 'fielded' && plan.interceptPos.y < 0.6) {
+    // Coming back up with it.
+    pickUp(p, 1 - since / 0.2);
+    return;
+  }
+  gather(p);
+  p.grip = 0.6;
+  // Ball in hand, looking for the stumps.
+  const tz = c.dangerEnd() === 'striker' ? STRIKER_STUMPS_Z : BOWLER_STUMPS_Z;
+  m.facing = turnTowards(m.facing, Math.atan2(0 - m.pos.x, tz - m.pos.z), dt * 6);
 }
 
 /** Which action a bowler uses. */
@@ -758,7 +825,7 @@ function poseBowler(match: Match, m: Motion, dt: number, t: number): void {
     if (moved > 0.004) stride(m, moved, dt, 8);
     else readyStance(p, t);
   }
-  if (c.carrier === idx) gather(p);
+  fieldTheBall(c, idx, m, g.right, dt);
 }
 
 /**
@@ -766,7 +833,7 @@ function poseBowler(match: Match, m: Motion, dt: number, t: number): void {
  * bat's sweet spot meets the ball at the simulated contact point and time.
  */
 function poseStriker(match: Match, m: Motion, bat: { body: Vector3; hands: Vector3; dir: Vector3 }, dt: number): void {
-  const off = offSideSign(match.striker.battingHand);
+  const off = offSideSign(match.striker.battingHand) > 0 ? 1 : -1;
   const c = match.cycle;
   const play = c?.play;
   const stroke = play?.strokeInfo;
@@ -775,86 +842,79 @@ function poseStriker(match: Match, m: Motion, bat: { body: Vector3; hands: Vecto
   const frontLeg = off > 0 ? p.legL : p.legR;
   const backLeg = off > 0 ? p.legR : p.legL;
   const stanceBody = tmpA.set(-off * 0.45, 0, STRIKER_POPPING_Z + 0.22);
-  const stanceHands = new Vector3(-off * 0.18, 0.88, STRIKER_POPPING_Z + 0.08);
-  const stanceDir = new Vector3(off * 0.15, -1, 0.12).normalize();
   // Side-on: chest towards the off side.
   m.facing = off > 0 ? Math.PI / 2 : -Math.PI / 2;
 
   if (!stroke || !play) {
     m.pos.lerp(stanceBody, Math.min(1, dt * 4));
-    bat.hands.copy(stanceHands);
-    bat.dir.lerp(stanceDir, Math.min(1, dt * 8)).normalize();
-    // Tap of the bat and a little bounce as the bowler runs in.
+    // Stance: bat grounded behind the toe, hands at the top of the thigh; a tap as the bowler runs in.
+    const tap = c?.phase === 'runUp' ? Math.max(0, Math.sin(c.time * 7)) * 0.04 : 0;
+    bat.hands.set(m.pos.x + off * 0.27, 0.88 + tap, m.pos.z - 0.1);
+    bat.dir.lerp(tmpB.set(off * 0.15, -1, 0.12).normalize(), Math.min(1, dt * 8)).normalize();
     if (c?.phase === 'runUp') p.bob = Math.sin(c.time * 6) * 0.01;
   } else {
     const def = SHOTS[stroke.attempt.shot];
     const tt = play.time;
     const k = Math.min(1, Math.max(0, (tt - stroke.pressTime) / Math.max(0.05, stroke.batTime - stroke.pressTime)));
-    const follow = Math.max(0, (tt - stroke.batTime) / 0.35);
+    const follow = Math.max(0, (tt - stroke.batTime) / 0.38);
     const contact = new Vector3(stroke.expected.x, Math.min(1.9, Math.max(0.06, stroke.expected.y)), stroke.planeZ);
-    const leave = def.kind === 'leave';
-    const sweep = def.kind === 'sweep';
-    const front = stroke.attempt.footwork === 'front';
-    const target = leave
-      ? new Vector3(-off * 0.5, 0, stroke.planeZ + 0.45)
-      : new Vector3(contact.x - off * 0.42, 0, contact.z + (front ? 0.45 : 0.32));
-    m.pos.lerpVectors(stanceBody, target, Math.min(1, k * 1.3));
-    // Footwork: front foot strides towards the bowler (the batter's side-on "forward" is along −z).
-    const step = Math.min(1, k * 1.6);
-    if (front) {
-      frontLeg.roll = 0.22 + 0.55 * step;
-      frontLeg.bend = 0.35 + 0.4 * step;
-      backLeg.roll = 0.15;
-      backLeg.bend = 0.2;
-    } else {
+    const f = strokeFrame({
+      attempt: stroke.attempt,
+      off,
+      contact,
+      aimDeg: stroke.attempt.aimDeg ?? def.direction,
+      k,
+      follow,
+      stance: stanceBody,
+    });
+    const fam = familyOf(stroke.attempt.shot);
+    const moved = m.pos.distanceTo(f.root);
+    m.pos.copy(f.root);
+    const step = f.step;
+    // Footwork.
+    if (stroke.attempt.footwork === 'out' && step < 0.95) {
+      // Down the pitch: quick skipping strides.
+      gait(p, (m.phase += moved * 6), 0.6);
+      p.lean = 0.3;
+    } else if (stroke.attempt.footwork === 'back') {
+      // Back and across: weight on the back foot, front leg relaxed.
       backLeg.roll = 0.05;
-      backLeg.bend = 0.15;
+      backLeg.bend = 0.25;
       frontLeg.roll = 0.35;
-    }
-    if (sweep) {
-      p.drop = 0.42 * step;
-      backLeg.bend = 1.9 * step;
-      backLeg.pitch = -0.4 * step;
-    }
-    const shoulder = new Vector3(m.pos.x + off * 0.08, 1.43 - p.drop, m.pos.z - 0.05);
-    const toBall = contact.clone().sub(shoulder);
-    const dist = toBall.length();
-    const contactDir = toBall.normalize();
-    const contactHands = dist > SWEET_SPOT ? contact.clone().addScaledVector(contactDir, -SWEET_SPOT) : shoulder.clone();
-    const backlift = new Vector3(-off * 0.35, 0.85, 0.45).normalize();
-    const aim = directionVector(stroke.attempt.aimDeg ?? def.direction, 0, off);
-    const followDir = new Vector3(aim.x * 0.5, 0.95, aim.z * 0.5).normalize();
-    const top = shoulder.clone().add(new Vector3(-off * 0.2, 0.22, 0.15));
-    if (leave) {
-      bat.hands.lerpVectors(stanceHands, shoulder.clone().add(new Vector3(0, 0.35, 0.1)), Math.min(1, k * 2));
-      bat.dir.copy(backlift);
-    } else if (k < 0.4) {
-      bat.hands.lerpVectors(stanceHands, top, k / 0.4);
-      slerpDir(bat.dir, stanceDir, backlift, k / 0.4);
-    } else if (k < 1) {
-      const u = (k - 0.4) / 0.6;
-      bat.hands.lerpVectors(top, contactHands, u * u);
-      slerpDir(bat.dir, backlift, contactDir, u * u);
+      frontLeg.bend = 0.3 + 0.2 * step;
+      frontLeg.pitch = 0.15 * step;
     } else {
-      const u = Math.min(1, follow);
-      bat.hands.lerpVectors(contactHands, shoulder.clone().add(new Vector3(aim.x * 0.3, 0.3, aim.z * 0.3)), u);
-      slerpDir(bat.dir, contactDir, followDir, u);
+      // Front-foot stride towards the pitch of the ball, front knee bent over it, back leg straightening behind.
+      frontLeg.roll = 0.22 + 0.6 * step;
+      frontLeg.pitch = 0.2 * step;
+      frontLeg.bend = 0.35 + 0.5 * step;
+      backLeg.roll = 0.12;
+      backLeg.bend = 0.12;
+      backLeg.pitch = -0.15 * step;
     }
-    // Upper body turns into the stroke.
-    p.twist = -off * (Math.atan2(aim.x * off, -aim.z) * 0.35) * Math.min(1, k + follow);
-    p.lean = 0.35 + 0.2 * step;
+    if (fam === 'sweep' || fam === 'reverse') {
+      // Down on the back knee.
+      backLeg.bend = 2.0 * step;
+      backLeg.pitch = -0.2 * step;
+      frontLeg.bend = 1.3 * step;
+      frontLeg.pitch = 0.9 * step;
+    }
+    p.drop = f.drop;
+    p.lean = Math.max(p.lean, f.lean);
+    p.twist = -off * f.turn;
+    bat.hands.copy(f.hands);
+    bat.dir.copy(f.bat);
   }
-  // Both hands on the handle, one above the other.
-  p.handL = bat.hands.clone().addScaledVector(bat.dir, off > 0 ? 0.02 : 0.1);
-  p.handR = bat.hands.clone().addScaledVector(bat.dir, off > 0 ? 0.1 : 0.02);
+  // Both hands on the handle, one above the other: the wrists are aimed so the palms close on it.
+  const top = bat.hands.clone().addScaledVector(bat.dir, 0.03);
+  const bottom = bat.hands.clone().addScaledVector(bat.dir, 0.13);
+  const shoulder = tmpB.set(m.pos.x, 1.42 - p.drop, m.pos.z);
+  const wrist = (grip: Vector3) => grip.clone().addScaledVector(grip.clone().sub(shoulder).normalize(), -0.075);
+  // For a right-hander the left hand is on top.
+  p.handL = wrist(off > 0 ? top : bottom);
+  p.handR = wrist(off > 0 ? bottom : top);
 }
 
-function slerpDir(out: Vector3, from: Vector3, to: Vector3, t: number): void {
-  const qa = new Quaternion().setFromUnitVectors(DOWN, from);
-  const qb = new Quaternion().setFromUnitVectors(DOWN, to);
-  qa.slerp(qb, Math.min(1, Math.max(0, t)));
-  out.copy(DOWN).applyQuaternion(qa).normalize();
-}
 
 // --- Wickets -------------------------------------------------------------------------------
 
@@ -1033,45 +1093,89 @@ function Umpires({ match, recorder }: { match: Match; recorder: ReplayRecorder }
 // --- Ball ---------------------------------------------------------------------------------
 
 /** Red leather with mottling and a raised, stitched seam round the equator. */
-function ballTexture(): CanvasTexture {
-  const w = 512;
-  const h = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    ctx.fillStyle = '#9e1418';
+/**
+ * The ball's leather: a deep, lacquered red with a little mottling; the
+ * main seam round its equator — a narrow ridge with three rows of off-white
+ * stitching either side of the centre line, as on a real ball — and the
+ * faint quarter seams. Returns the colour map and a matching bump map that
+ * raises the stitching and the ridge.
+ */
+function ballTexture(): { map: CanvasTexture; bump: CanvasTexture } {
+  const w = 1024;
+  const h = 512;
+  const make = () => {
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    return c;
+  };
+  const colour = make();
+  const bumpCanvas = make();
+  const ctx = colour.getContext('2d');
+  const bump = bumpCanvas.getContext('2d');
+  if (ctx && bump) {
+    ctx.fillStyle = '#8f1216';
     ctx.fillRect(0, 0, w, h);
+    bump.fillStyle = '#000';
+    bump.fillRect(0, 0, w, h);
     const rng = new Rng('ball');
-    for (let i = 0; i < 2500; i++) {
-      ctx.fillStyle = `rgba(${rng.int(120, 190)}, ${rng.int(10, 40)}, ${rng.int(15, 40)}, ${rng.range(0.1, 0.35)})`;
+    for (let i = 0; i < 4000; i++) {
+      ctx.fillStyle = `rgba(${rng.int(110, 175)}, ${rng.int(8, 32)}, ${rng.int(12, 34)}, ${rng.range(0.08, 0.25)})`;
       ctx.beginPath();
-      ctx.arc(rng.range(0, w), rng.range(0, h), rng.range(1, 6), 0, Math.PI * 2);
+      ctx.arc(rng.range(0, w), rng.range(0, h), rng.range(1, 5), 0, Math.PI * 2);
       ctx.fill();
     }
     const mid = h / 2;
-    ctx.fillStyle = '#6e0c10';
-    ctx.fillRect(0, mid - 5, w, 10);
-    // Six rows of stitching: three each side of the seam.
-    ctx.fillStyle = '#efe3c2';
-    for (const dy of [-11, -7.5, -4, 4, 7.5, 11]) {
-      for (let x = 0; x < w; x += 6) ctx.fillRect(x, mid + dy - 1, 3.5, 2);
-    }
-    // Quarter seams.
-    ctx.strokeStyle = 'rgba(80, 6, 10, 0.6)';
-    ctx.lineWidth = 1.5;
+    // The seam: a slightly darker ridge with a fine groove along its centre.
+    ctx.fillStyle = '#7a0e12';
+    ctx.fillRect(0, mid - 17, w, 34);
+    ctx.fillStyle = '#4a070a';
+    ctx.fillRect(0, mid - 1.5, w, 3);
+    bump.fillStyle = '#5a5a5a';
+    bump.fillRect(0, mid - 17, w, 34);
+    bump.fillStyle = '#202020';
+    bump.fillRect(0, mid - 1.5, w, 3);
+    // Six rows of stitching, three each side: short, slanted, off-white stitches.
+    const rows = [-14, -9, -4.5, 4.5, 9, 14];
+    rows.forEach((dy, r) => {
+      const slant = dy < 0 ? -1 : 1;
+      for (let x = (r % 2) * 3; x < w; x += 7) {
+        for (const [g, col] of [[ctx, '#ede3c6'], [bump, '#ffffff']] as const) {
+          g.strokeStyle = col;
+          g.lineWidth = 1.8;
+          g.beginPath();
+          g.moveTo(x, mid + dy - 1.4 * slant);
+          g.lineTo(x + 3.6, mid + dy + 1.4 * slant);
+          g.stroke();
+        }
+      }
+    });
+    // Quarter seams: a fine line and tiny stitch marks, flush with the leather.
     for (const x of [w * 0.25, w * 0.75]) {
+      ctx.strokeStyle = 'rgba(60, 5, 8, 0.7)';
+      ctx.lineWidth = 1.4;
       ctx.beginPath();
       ctx.moveTo(x, 0);
+      ctx.lineTo(x, mid - 18);
+      ctx.moveTo(x, mid + 18);
       ctx.lineTo(x, h);
       ctx.stroke();
+      ctx.fillStyle = 'rgba(214, 196, 160, 0.45)';
+      for (let y = 6; y < h; y += 9) {
+        if (Math.abs(y - mid) < 20) continue;
+        ctx.fillRect(x - 3, y, 1.2, 2.5);
+        ctx.fillRect(x + 2, y + 4, 1.2, 2.5);
+      }
+      bump.fillStyle = '#303030';
+      bump.fillRect(x - 0.7, 0, 1.4, h);
     }
   }
-  const tex = new CanvasTexture(canvas);
-  tex.colorSpace = SRGBColorSpace;
-  tex.anisotropy = 4;
-  return tex;
+  const map = new CanvasTexture(colour);
+  map.colorSpace = SRGBColorSpace;
+  map.anisotropy = 8;
+  const bumpTex = new CanvasTexture(bumpCanvas);
+  bumpTex.anisotropy = 8;
+  return { map, bump: bumpTex };
 }
 
 /** Ball orientation: seam normal and spin, set at release from the delivery. */
@@ -1137,7 +1241,13 @@ function BallView({ match, recorder, bowlerHand }: { match: Match; recorder: Rep
   const orient = useRef<Group>(null);
   const out = useMemo(() => ({ x: 0, y: 0, z: 0 }), []);
   const texture = useMemo(ballTexture, []);
-  useEffect(() => () => texture.dispose(), [texture]);
+  useEffect(
+    () => () => {
+      texture.map.dispose();
+      texture.bump.dispose();
+    },
+    [texture],
+  );
   const spin = useMemo<BallSpin>(() => ({ q: new Quaternion(), axis: new Vector3(1, 0, 0), rate: 0, cycle: undefined, released: false }), []);
   const fromHand = useMemo(() => new Vector3(), []);
   useEffect(
@@ -1220,13 +1330,13 @@ function BallView({ match, recorder, bowlerHand }: { match: Match; recorder: Rep
     <group ref={ref}>
       <group ref={orient}>
         <mesh castShadow>
-          <sphereGeometry args={[r, 32, 20]} />
-          <meshPhysicalMaterial map={texture} roughness={0.42} clearcoat={0.7} clearcoatRoughness={0.25} />
+          <sphereGeometry args={[r, 48, 32]} />
+          <meshPhysicalMaterial map={texture.map} bumpMap={texture.bump} bumpScale={1.2} roughness={0.38} clearcoat={0.75} clearcoatRoughness={0.2} />
         </mesh>
-        {/* The seam: a raised, stitched ring, exaggerated so it reads at broadcast distance. */}
+        {/* The seam's ridge: barely proud of the leather, the same red — it only shows in the silhouette. */}
         <mesh rotation-x={Math.PI / 2}>
-          <torusGeometry args={[r * 1.005, r * 0.13, 6, 40]} />
-          <meshStandardMaterial color="#f3ead0" roughness={0.55} emissive="#3a2f1a" emissiveIntensity={0.25} />
+          <torusGeometry args={[r * 0.992, r * 0.035, 6, 64]} />
+          <meshStandardMaterial color="#6e0d11" roughness={0.6} />
         </mesh>
       </group>
     </group>
@@ -1278,11 +1388,26 @@ function Markers({ match }: { match: Match }) {
     if (!tm || !bandGroup) return;
     const aiming = match.humanBowling && match.phase === 'aiming';
     const running = match.humanBowling && match.phase === 'delivery' && c?.phase === 'runUp';
-    tm.visible = aiming || running;
+    // Batting: where the bowler is aiming to pitch it, from the start of his run-up until it lands
+    // (as Cricket 07's ball marker). It is his intention: the ball itself may stray from it.
+    const facing =
+      match.humanBatting && match.phase === 'delivery' && c && !c.events.some((e) => e.type === 'bounce') && (c.phase === 'runUp' || c.phase === 'inFlight');
+    tm.visible = aiming || running || Boolean(facing);
     const placing = aiming && match.aimStep === 'target';
     bandGroup.visible = placing;
     if (!tm.visible) return;
     const off = offSideSign(match.striker.battingHand);
+    if (facing && c) {
+      const plan = c.plan;
+      tm.position.set((plan.pitchLine ?? plan.line) * off, 0.02, STRIKER_STUMPS_Z - plan.length);
+      // Fades in as the bowler gathers pace.
+      const show = Math.min(1, c.time / 0.6);
+      mats.ring.color.set('#ffffff');
+      mats.ring.opacity = 0.85 * show;
+      mats.cross.opacity = 0.6 * show;
+      tm.scale.setScalar(0.85);
+      return;
+    }
     tm.position.set(match.setup.line * off, 0.02, STRIKER_STUMPS_Z - match.setup.length);
     const pulse = placing ? 1 + Math.sin(state.clock.elapsedTime * 6) * 0.08 : 1;
     tm.scale.setScalar(pulse);
@@ -1337,6 +1462,7 @@ function CameraRig({ match, recorder }: { match: Match; recorder: ReplayRecorder
   const look = useMemo(() => new Vector3(WIDE.look.x, WIDE.look.y, WIDE.look.z), []);
   const pos = useMemo(() => new Vector3(WIDE.pos.x, WIDE.pos.y, WIDE.pos.z), []);
   const last = useRef<Shot['name'] | undefined>(undefined);
+  const lastCam = useRef<string | undefined>(undefined);
   const shake = useRef(0);
   const lastMode = useRef(mode);
   const replayWas = useRef(false);
@@ -1383,8 +1509,12 @@ function CameraRig({ match, recorder }: { match: Match; recorder: ReplayRecorder
         chaser: chaser ? { x: chaser.x, y: 0, z: chaser.z } : undefined,
         previous: last.current,
         humanBowling: match.humanBowling,
+        // Between balls (not during a replay or a card about to show one), the striker in close-up.
+        subject: !live ? { x: -offSideSign(match.striker.battingHand) * 0.45, y: 0, z: STRIKER_POPPING_Z + 0.22 } : undefined,
+        previousCam: lastCam.current,
       });
       last.current = shot.name;
+      lastCam.current = shot.cam;
       wantPos.set(shot.pos.x, shot.pos.y, shot.pos.z);
       wantLook.set(shot.look.x, shot.look.y, shot.look.z);
       fov = shot.fov;
@@ -1428,7 +1558,7 @@ function replayCamera(rec: ReplayRecorder, camera: PerspectiveCamera | Camera, p
   if (!fr) return;
   const ball = tmpA.set(fr.ball[0] ?? 0, fr.ball[1] ?? 0, fr.ball[2] ?? 0);
   let fov = 32;
-  if (rec.kind === 'bowled' || rec.kind === 'lbw') {
+  if (rec.kind === 'bowled' || rec.kind === 'lbw' || rec.kind === 'stumped') {
     tmpB.set(rec.off * 7.5, 1.1, STRIKER_STUMPS_Z - 2.2);
     pos.lerp(tmpB, cut ? 1 : 1 - Math.exp(-dt * 6));
     look.lerp(tmpQLook.set(ball.x * 0.4, 0.55, Math.max(STRIKER_STUMPS_Z - 3, Math.min(STRIKER_STUMPS_Z, ball.z))), cut ? 1 : 1 - Math.exp(-dt * 8));

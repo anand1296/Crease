@@ -30,7 +30,7 @@ export interface BallCall {
   readonly wide: boolean;
   readonly noBall: boolean;
   readonly boundary?: 4 | 6 | undefined;
-  readonly wicket?: { readonly kind: 'bowled' | 'caught' | 'lbw' | 'runOut'; readonly fielder?: string | undefined; readonly out: string } | undefined;
+  readonly wicket?: { readonly kind: 'bowled' | 'caught' | 'lbw' | 'runOut' | 'stumped'; readonly fielder?: string | undefined; readonly out: string } | undefined;
   /** An lbw appeal turned down, and why. */
   readonly notOutLbw?: string | undefined;
   readonly padded?: boolean | undefined;
@@ -92,6 +92,7 @@ const LINES = {
   caughtBig: ['Up, up… and {field} holds on at the rope! What a catch.', 'Went for the big one and found {field}. Caught.'],
   lbw: ['Big appeal… given! Plumb in front — {bat} is out lbw.', 'Trapped in front! The finger goes up.'],
   runOut: ['Run out! {field}’s throw beats {bat} to the crease.', 'Direct hit… and {bat} is short of his ground. Run out!'],
+  stumped: ['Stumped! {bat} came down the track, missed, and {field} did the rest.', 'Down the pitch, beaten in the flight — stumped by {field}!'],
   notOut: ['Loud appeal for lbw… not out. {reason}.', 'They go up for lbw, but the umpire shakes his head — {reason}.'],
   beaten: ['Beaten! Lovely delivery from {bowl}.', 'Past the outside edge. {bat} had no idea.', 'Played and missed. That {ball} did just enough.'],
   left: ['Left alone outside off.', '{bat} shoulders arms. Good judgement.', 'No stroke offered — well left.'],
@@ -150,6 +151,7 @@ export class Commentator {
       if (c.wicket.kind === 'bowled') parts.push(this.say(c.delivery.name === 'Yorker' ? 'yorked' : 'bowled', f));
       else if (c.wicket.kind === 'lbw') parts.push(this.say('lbw', f));
       else if (c.wicket.kind === 'runOut') parts.push(this.say('runOut', f));
+      else if (c.wicket.kind === 'stumped') parts.push(this.say('stumped', f));
       else if (c.contact === 'edge' && c.wicket.fielder && (c.directionDeg === undefined || Math.abs(c.directionDeg) > 150)) parts.push(this.say('caughtBehind', f));
       else parts.push(this.say(lofted ? 'caughtBig' : 'caught', f));
       if (c.outBatterRuns !== undefined) parts.push(`${out} goes for ${c.outBatterRuns}.`);

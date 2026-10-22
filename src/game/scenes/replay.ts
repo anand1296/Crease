@@ -70,7 +70,7 @@ export function restorePose(s: PoseSnap, p: Pose, vectors: { handL: Vector3; han
   return p;
 }
 
-export type ReplayKind = 'bowled' | 'lbw' | 'caught' | 'runOut' | 'boundary';
+export type ReplayKind = 'bowled' | 'lbw' | 'caught' | 'runOut' | 'stumped' | 'boundary';
 
 export class ReplayRecorder {
   frames: ReplayFrame[] = [];

@@ -18,6 +18,7 @@ import { defaultXi, keeperFor } from '../game/match/squad.ts';
 import type { DifficultyId } from '../game/model/difficulty.ts';
 import type { Hand, Player } from '../game/model/player.ts';
 import type { BallOutcome } from '../game/session/deliveryCycle.ts';
+import type { ContactResult } from '../game/batting/contact.ts';
 
 /**
  * App state. The match itself lives in a Match instance (outside React);
@@ -63,6 +64,8 @@ export interface MatchSnapshot {
   readonly nonStriker: { readonly id: string; readonly name: string; readonly card: BattingCard | undefined };
   readonly bowler: { readonly name: string; readonly style: string; readonly card: BowlingCard | undefined; readonly fatigue: number };
   readonly lastOutcome: BallOutcome | undefined;
+  /** The stroke's contact (timing, quality) for the timing gauge: this ball's once it is hit, else the last ball's. */
+  readonly contact: ContactResult | undefined;
   readonly ballCount: number;
   /** Set while the game waits for the player between balls. */
   readonly review: Review | undefined;
@@ -82,6 +85,8 @@ export interface MatchSnapshot {
   readonly fieldPreset: string;
   readonly presets: readonly FieldPreset[];
   readonly lockedPace: number | undefined;
+  /** Fielding: the ball is in hand and the batters are running — throw it in. */
+  readonly awaitingThrow: boolean;
   /** Stock speed of the chosen delivery at 75% effort, km/h (the HUD scales it by the locked pace). */
   readonly deliveryKph: number;
   /** Where the fielders stand (world x/z) and which is the keeper, for the field map. */
@@ -192,6 +197,7 @@ function snapshot(m: Match, toss: string): MatchSnapshot {
       fatigue: m.bowlerFatigue,
     },
     lastOutcome: m.lastOutcome,
+    contact: m.humanBatting ? (m.cycle?.play?.contact ?? (m.phase === 'review' ? m.lastOutcome?.contact : undefined)) : undefined,
     ballCount: m.history.length,
     review: m.phase === 'review' ? m.review : undefined,
     commentary: m.commentary[m.commentary.length - 1],
@@ -206,6 +212,7 @@ function snapshot(m: Match, toss: string): MatchSnapshot {
     fieldPreset: m.fieldPreset,
     presets: m.humanBowling ? m.availablePresets : [],
     lockedPace: m.lockedPace,
+    awaitingThrow: m.awaitingThrow,
     deliveryKph: stockSpeed(bowler.bowlingStyle, bowler.bowling.pace) * DELIVERY_TYPES[m.setup.type].speedFactor * 3.6,
     fieldMap: m.humanBowling
       ? m.field.map((f) => ({ x: f.start.x, z: f.start.z, role: f.keeper ? ('keeper' as const) : f.position.id === 'bowler' ? ('bowler' as const) : ('fielder' as const) }))
@@ -316,7 +323,7 @@ export const useGame = create<GameState>()((set, get) => {
     snap: undefined,
     paused: false,
     showHelp: false,
-    camera: 'classic',
+    camera: 'broadcast',
     meter: 0.5,
     muted: sound.muted,
     quality: detectQuality(),
@@ -393,9 +400,9 @@ export const useGame = create<GameState>()((set, get) => {
     },
     toggleHelp: () => set({ showHelp: !get().showHelp }),
     cycleCamera: () => {
-      const order: CameraMode[] = ['classic', 'broadcast', 'batter', 'high'];
+      const order: CameraMode[] = ['broadcast', 'classic', 'batter', 'high'];
       const i = order.indexOf(get().camera);
-      set({ camera: order[(i + 1) % order.length] ?? 'classic' });
+      set({ camera: order[(i + 1) % order.length] ?? 'broadcast' });
     },
     setMeter: (meter) => {
       if (Math.abs(meter - get().meter) > 0.004) set({ meter });

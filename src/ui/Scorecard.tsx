@@ -16,6 +16,8 @@ export function howOut(c: BattingCard, keeperName?: string): string {
       return `c ${d.fielder === keeperName ? '†' : ''}${d.fielder ?? ''} b ${d.bowler ?? ''}`;
     case 'runOut':
       return `run out (${d.fielder ?? ''})`;
+    case 'stumped':
+      return `st †${d.fielder ?? ''} b ${d.bowler ?? ''}`;
   }
 }
 

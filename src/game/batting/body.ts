@@ -69,12 +69,13 @@ export function batterBoxes(
   }
   const zc = contactPlaneZ(attempt, footworkSkill, pitchZ);
   // Pads are always behind the bat's contact point, so the bat gets first go.
-  if (attempt.footwork === 'front') {
-    // Front pad to the line of the ball, leg side of the bat, just behind it.
+  if (attempt.footwork === 'front' || attempt.footwork === 'out') {
+    // Front pad to the line of the ball, leg side of the bat, just behind it. Out of the crease,
+    // the back foot has come down the pitch too.
     const frontX = clamp(lineAtContact - off * 0.2, -0.5, 0.5);
     const frontZ = zc + 0.18;
     const backX = -off * 0.2;
-    const backZ = STRIKER_POPPING_Z + 0.35;
+    const backZ = attempt.footwork === 'out' ? zc + 0.6 : STRIKER_POPPING_Z + 0.35;
     return [
       box('pad', frontX, frontZ, PAD_HALF_WIDTH, PAD_HALF_DEPTH, 0, PAD_HEIGHT),
       box('pad', backX, backZ, PAD_HALF_WIDTH, PAD_HALF_DEPTH, 0, PAD_HEIGHT),

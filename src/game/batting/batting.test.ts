@@ -130,6 +130,31 @@ describe('3. timing matters, continuously', () => {
   });
 });
 
+describe('3b. timing shapes the shot (the timing gauge)', () => {
+  it('a square cut timed perfectly goes square; played late it runs fine, between gully and third man', () => {
+    const at = (ms: number) => simulateMany(base({ plan: shortWide, attempt: attempt('squareCut'), timingMs: ms, deliverySeed: 'cut' }), 25);
+    const dir = (xs: ReturnType<typeof at>) => mean(xs.filter((s) => s.kind === 'middled' || s.kind === 'mistimed').map((s) => s.directionDeg));
+    const ideal = dir(at(0));
+    const late = dir(at(18));
+    expect(ideal).toBeGreaterThan(75);
+    expect(ideal).toBeLessThan(108);
+    expect(late).toBeGreaterThan(ideal + 15);
+    expect(late).toBeLessThan(150);
+  });
+
+  it('a perfectly timed drive races away faster than one a touch early or late', () => {
+    const speed = (ms: number) => mean(simulateMany(base({ attempt: attempt('straightDrive'), plan: { type: 'fast', line: 0.05, length: 3.5 }, timingMs: ms, deliverySeed: 'pace' }), 25).filter((s) => s.kind !== 'miss').map((s) => s.exitSpeed));
+    const perfect = speed(0);
+    expect(perfect).toBeGreaterThan(speed(-15) + 1);
+    expect(perfect).toBeGreaterThan(speed(15) + 1);
+  });
+
+  it('too early on a drive, the ball goes up in the air', () => {
+    const elev = (ms: number) => mean(simulateMany(base({ attempt: attempt('coverDrive'), timingMs: ms, deliverySeed: 'early' }), 25).filter((s) => s.kind !== 'miss').map((s) => s.elevationDeg));
+    expect(elev(-28)).toBeGreaterThan(elev(0) + 3);
+  });
+});
+
 describe('4. skill controls consistency', () => {
   it('an elite batter places the same shot more consistently than a tailender', () => {
     const run = (b: Player) => simulateMany(base({ batter: b, timingMs: 12, deliverySeed: 'fixed' }), 40);

@@ -2,7 +2,7 @@
 
 A browser-based 3D cricket game, built with React, TypeScript and Three.js. Inspired by the depth and replayability of classic cricket games: batting that rewards timing and shot selection, bowling with real variation, and an opponent that plays the ball rather than the dice.
 
-> **Status: alpha (0.8.0).** Play a full limited-overs match against the computer: pick India, Pakistan, Australia or England with their current T20I squads, choose your playing XI and batting order, set the overs (2–20), difficulty and pitch, toss, bat and bowl both innings, and finish with a result and full scorecards. The game waits for you between balls, sums up every over and wicket with the scorecard, replays wickets and boundaries, and runs at a speed you choose. Real ball physics, sixteen strokes, sixteen delivery types with swing, cut and spin you control, ten T20 field presets, over or around the wicket, realistic bowling actions, LBW, wides, run-outs and bowler quotas; motion-captured, skinned player models in team kits; umpires who signal; a broadcast-style camera; post-processed graphics; and synthesised sound, including a physically modelled bat-on-ball crack. Game AI throughout: a bowling attack that learns your weaknesses, an AI captain that sets fields to where you score (within powerplay restrictions), T20-minded computer batters that read the field, spoken ball-by-ball commentary, and a coach that reviews your innings. See [Roadmap](#roadmap).
+> **Status: alpha (0.9.0).** Play a full limited-overs match against the computer: pick India, Pakistan, Australia or England with their current T20I squads, choose your playing XI and batting order, set the overs (2–20), difficulty and pitch, toss, bat and bowl both innings, and finish with a result and full scorecards. The game waits for you between balls, sums up every over and wicket with the scorecard, replays wickets and boundaries, and runs at a speed you choose. Real ball physics, sixteen strokes, sixteen delivery types with swing, cut and spin you control, ten T20 field presets, over or around the wicket, realistic bowling actions, LBW, wides, run-outs and bowler quotas; motion-captured, skinned player models in team kits; umpires who signal; a broadcast-style camera; post-processed graphics; and synthesised sound, including a physically modelled bat-on-ball crack. Game AI throughout: a bowling attack that learns your weaknesses, an AI captain that sets fields to where you score (within powerplay restrictions), T20-minded computer batters that read the field, spoken ball-by-ball commentary, and a coach that reviews your innings. See [Roadmap](#roadmap).
 
 ## Running locally
 
@@ -37,17 +37,16 @@ Each bowler may bowl at most a fifth of the overs (rounded up) and never two ove
 
 ### Batting
 
-Hold an arrow for direction, then press a stroke key **as the ball arrives**. The key press is when you commit: the bat reaches the ball a fraction of a second later (each stroke has its own swing time), so press slightly before the ball reaches the batter. Directions are screen-relative: left is the left of the screen, whichever hand the batter uses.
+The controls follow EA Sports Cricket 07's keyboard scheme. Hold an arrow for direction, then press a shot key **as the ball arrives**: the key press is when you commit, and the bat reaches the ball a fraction of a second later (each stroke has its own swing time). Arrows are screen directions from behind the bowler, whichever hand the batter uses: <kbd>↓</kbd> straight back past the bowler, <kbd>←</kbd>/<kbd>→</kbd> square, <kbd>↙</kbd><kbd>↘</kbd> in front of square, <kbd>↖</kbd><kbd>↗</kbd> behind square. A white marker shows where the bowler is aiming to pitch it from the start of his run-up; the timing gauge shows how early or late you were.
 
-| Key | Stroke |
+| Key | Shot |
 | --- | --- |
-| <kbd>D</kbd> | Ground stroke. ↑ straight drive · ↖ off drive · ← cover drive · ↗ on drive · → flick · ↙ late cut · ↘ / ↓ leg glance. Hold <kbd>Shift</kbd>: ← square cut, → pull, back-foot drives |
-| <kbd>A</kbd> | Lofted stroke. ↑ lofted drive; any other direction lofts the ball that way; <kbd>Shift</kbd> + leg side or ↓ = hook |
-| <kbd>S</kbd> | Defend. No arrow = dead bat; with an arrow = push into that gap for a single |
-| <kbd>W</kbd> | Sweep (leg side); with the off-side arrow = reverse sweep |
-| <kbd>X</kbd> | Leave |
-| <kbd>Shift</kbd> | Hold for back-foot versions |
-| <kbd>Space</kbd> / <kbd>R</kbd> | Run. Press again for each further run. Boundaries need no running; anything else only counts if you run it, and if the throw beats you, you are run out |
+| <kbd>S</kbd> | Front-foot shot: ↓ straight drive, ↙ cover drive, ← square drive, ↖ late cut, ↘ on drive, → flick, ↗ sweep. Alone: forward defence |
+| <kbd>W</kbd> | Back-foot shot: ↓ punch, ↙ back-foot drive, ← square cut, ↖ late cut, ↘ on drive, → pull, ↗ fine pull. Alone: back-foot defence |
+| <kbd>D</kbd> | Use your feet: step down the pitch and drive or work it to leg (miss it and you may be stumped). Alone: smother it |
+| <kbd>A</kbd> | Leave |
+| <kbd>Shift</kbd> (hold) | Lofted version: lofted drive, over cover or midwicket, slog sweep (S+↗), reverse sweep (S+↖), hook (W+↗), upper cut (W+↖) |
+| <kbd>Space</kbd> / <kbd>D</kbd> after the hit | Run. Press again for each further run. Boundaries need no running; anything else only counts if you run it, and if the throw beats you, you are run out |
 
 ### Bowling
 
@@ -69,13 +68,15 @@ Hold an arrow for direction, then press a stroke key **as the ball arrives**. Th
 
 The same ball again is <kbd>Space</kbd>, <kbd>Space</kbd>, <kbd>Space</kbd>.
 
+**Fielding**: when the ball is gathered and the batters are running, hold <kbd>↑</kbd> to throw to the keeper's end or <kbd>↓</kbd> to the bowler's end; let go to throw. The longer you hold, the harder the throw: the green part of the meter is quick and accurate, the red is forced and wild. A direct hit can run a batter out; if you don't throw within about a second, the fielder throws himself.
+
 ### General
 
 <kbd>P</kbd> / <kbd>Esc</kbd> pause (resume, sound, commentary, restart, quit to menu) · <kbd>Enter</kbd> / <kbd>Space</kbd> next ball, continue past a card, skip a replay · <kbd>C</kbd> camera · <kbd>M</kbd> sound on/off · <kbd>V</kbd> commentary on/off · <kbd>H</kbd> help. The game pauses itself when the window loses focus.
 
 **Graphics** (main menu): *High* adds soft shadows, image-based lighting, the crowd, ambient occlusion, bloom, filmic tone mapping and up to 1.5× resolution; *Low* drops them for machines without a capable GPU. Low is chosen automatically when the browser reports a software renderer; your choice is remembered. On top of that the game watches its own frame rate: below ≈45 fps it lowers the resolution step by step (and on High turns off ambient occlusion), and raises it again when there is headroom.
 
-**Camera**: the default *classic* camera sits low and close behind the bowler's arm, as in Cricket 07, and pushes in through the run-up until the striker fills the frame at release; after the stroke it cuts to a high side-on camera that follows the ball and the chase (or to the stumps when they are hit). <kbd>C</kbd> cycles to the long-lens *broadcast* camera, the view from behind the striker and a high wide view.
+**Camera**: the default *broadcast* coverage works like television: the main camera is high in the stand behind the bowler on a long lens, zooming in through the run-up; after the stroke it pans and zooms out with the ball, then the director cuts to fixed cameras at the front of the stands (square on either side, or at the keeper's end for straight hits) framed on ball and fielder; between balls, a long-lens close-up of the batter. <kbd>C</kbd> cycles to the *classic* Cricket 07-style camera (low and close behind the bowler), the view from behind the striker and a high wide view.
 
 ## The AI opposition
 

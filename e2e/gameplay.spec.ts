@@ -78,8 +78,9 @@ test.describe('gameplay', () => {
     await expect(page.getByTestId('review')).toBeHidden();
     await expect(page.getByTestId('controls-panel')).toBeVisible();
 
-    // Three strokes.
-    const strokes = [{ press: 'KeyD' }, { hold: 'ArrowLeft', press: 'KeyD' }, { press: 'KeyS' }];
+    // Three strokes, Cricket 07 keys: S+↓ front-foot straight drive, W+← back-foot cut (off side for a
+    // right-hander), S alone forward defence.
+    const strokes = [{ hold: 'ArrowDown', press: 'KeyS' }, { hold: 'ArrowLeft', press: 'KeyW' }, { press: 'KeyS' }];
     for (const [i, stroke] of strokes.entries()) {
       await playStroke(page, stroke, 0.24);
       // Call a run if the ball was hit; harmless otherwise.
@@ -157,7 +158,9 @@ test.describe('gameplay', () => {
     await page.waitForTimeout(300);
     await page.keyboard.press('Space');
     await expect(panel).toContainText('Locked at');
-    await expect.poll(() => balls(page), { timeout: 90_000 }).toBe(1);
+    // Software rendering runs far below real time; a hit to the boundary would take minutes to roll there.
+    await page.evaluate(() => window.__crease?.setSpeed?.(4));
+    await expect.poll(() => balls(page), { timeout: 180_000 }).toBe(1);
     await expect(page.getByTestId('banner')).toBeVisible();
 
     expect(errors).toEqual([]);

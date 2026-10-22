@@ -271,3 +271,75 @@ export function battingStance(p: Pose): void {
   setLimb(p.legL, 0.15, 0.22, 0.35);
   setLimb(p.legR, -0.05, 0.22, 0.3);
 }
+
+/**
+ * Picking the ball up off the ground: down low, knees bent, weight forward,
+ * both hands reaching to the ball in front of the feet. `u` 0 → 1 going
+ * down, staying down at 1.
+ */
+export function pickUp(p: Pose, u: number): void {
+  const k = Math.min(1, Math.max(0, u));
+  p.clip = undefined;
+  p.handL = undefined;
+  p.handR = undefined;
+  p.lean = 0.35 + 0.75 * k;
+  p.drop = 0.05 + 0.3 * k;
+  p.twist = 0;
+  p.tilt = 0;
+  setLimb(p.legL, 0.2 + 0.7 * k, 0.12, 0.3 + 0.9 * k);
+  setLimb(p.legR, -0.1 - 0.3 * k, 0.12, 0.3 + 0.7 * k);
+  setLimb(p.armL, 0.3 + 0.5 * k, 0.12, 0.3);
+  setLimb(p.armR, 0.3 + 0.5 * k, 0.12, 0.3);
+  p.grip = 0.4;
+}
+
+/**
+ * An overarm throw, keyed to the release (τ seconds, negative before):
+ * gather at the chest, turn side-on with the front arm pointing at the
+ * target and the ball cocked behind the head, stride, whip the arm over the
+ * top, release in front, and follow through across the body.
+ */
+const THROW: { arm: LimbTracks; lead: LimbTracks; front: LimbTracks; back: LimbTracks; lean: Track; twist: Track } = {
+  arm: {
+    pitch: [[-0.45, 1.2], [-0.3, -1.0], [-0.12, -2.2], [-0.04, -3.2], [0, -3.9], [0.2, -5.0], [0.45, -5.9]],
+    roll: [[-0.45, 0.1], [-0.3, 0.9], [-0.12, 0.6], [0, 0.3], [0.2, -0.4], [0.45, 0]],
+    bend: [[-0.45, 1.5], [-0.3, 1.3], [-0.12, 1.4], [-0.04, 0.9], [0, 0.4], [0.2, 0.4], [0.45, 0.3]],
+  },
+  lead: {
+    pitch: [[-0.45, 1.2], [-0.3, 1.6], [-0.08, 1.5], [0, 0.4], [0.2, -0.2], [0.45, 0.1]],
+    roll: [[-0.45, 0.1], [-0.3, 0.2], [0, 0.4], [0.45, 0.15]],
+    bend: [[-0.45, 1.2], [-0.3, 0.3], [0, 1.0], [0.45, 0.5]],
+  },
+  front: {
+    pitch: [[-0.45, 0.1], [-0.3, 0.45], [-0.08, 0.5], [0, 0.35], [0.2, 0.1], [0.45, 0]],
+    roll: [[-0.45, 0.05], [0.45, 0.05]],
+    bend: [[-0.45, 0.3], [-0.3, 0.5], [-0.08, 0.3], [0, 0.2], [0.45, 0.25]],
+  },
+  back: {
+    pitch: [[-0.45, -0.1], [-0.3, -0.3], [-0.08, -0.35], [0, -0.3], [0.2, 0.4], [0.45, 0.1]],
+    roll: [[-0.45, 0.05], [0.45, 0.05]],
+    bend: [[-0.45, 0.3], [-0.3, 0.4], [0, 0.5], [0.2, 0.8], [0.45, 0.3]],
+  },
+  lean: [[-0.45, 0.3], [-0.3, -0.1], [-0.08, 0.0], [0, 0.4], [0.2, 0.6], [0.45, 0.3]],
+  twist: [[-0.45, 0], [-0.3, -0.9], [-0.08, -0.6], [0, 0.4], [0.2, 0.6], [0.45, 0.2]],
+};
+
+/** Span of the throwing action around release, seconds. */
+export const THROW_SPAN = { start: -0.45, end: 0.45 } as const;
+
+export function throwAction(p: Pose, tau: number, rightArmed: boolean): void {
+  p.clip = undefined;
+  p.handL = undefined;
+  p.handR = undefined;
+  setTracks(rightArmed ? p.armR : p.armL, THROW.arm, tau);
+  setTracks(rightArmed ? p.armL : p.armR, THROW.lead, tau);
+  setTracks(rightArmed ? p.legL : p.legR, THROW.front, tau);
+  setTracks(rightArmed ? p.legR : p.legL, THROW.back, tau);
+  const m = rightArmed ? 1 : -1;
+  p.lean = sampleTrack(THROW.lean, tau);
+  p.twist = m * sampleTrack(THROW.twist, tau);
+  p.tilt = 0;
+  p.drop = 0.06;
+  p.bob = 0;
+  p.grip = tau < 0 ? 0.6 : 0.1;
+}

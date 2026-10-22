@@ -3,7 +3,7 @@ import { type Vec3, copyVec3, vec3 } from '../core/vec3.ts';
 import { FIELD, STRIKER_STUMPS_Z } from '../data/field.ts';
 import { type Box, batterBoxes, contactPlaneZ } from '../batting/body.ts';
 import { type ContactResult, resolveContact } from '../batting/contact.ts';
-import { SHOTS, type ShotAttempt } from '../batting/shots.ts';
+import { SHOTS, STEP_OUT_TIME, type ShotAttempt } from '../batting/shots.ts';
 import type { ExecutedDelivery } from '../bowling/execute.ts';
 import type { Player } from '../model/player.ts';
 import {
@@ -121,7 +121,8 @@ export class BallInPlay {
     this.stroke = {
       attempt,
       pressTime: atTime,
-      batTime: atTime + def.swingTime,
+      // Stepping out takes a moment longer: down the pitch, then the bat comes down.
+      batTime: atTime + def.swingTime + (attempt.footwork === 'out' ? STEP_OUT_TIME : 0),
       planeZ,
       expected,
       sawBounce: this.ball.bounces > 0,

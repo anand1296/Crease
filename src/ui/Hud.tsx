@@ -8,7 +8,7 @@ import { HowToPlay } from './Menus.tsx';
 import { useEffect, useRef, useState } from 'react';
 import type { GameAction } from '../game/input/keyboard.ts';
 import { keyboard } from '../game/input/keyboardInstance.ts';
-import { shotFromInput } from '../game/input/battingControls.ts';
+import { type BatAction, shotFromInput } from '../game/input/battingControls.ts';
 import { SHOTS } from '../game/batting/shots.ts';
 import { howOut } from './Scorecard.tsx';
 import { oversText } from '../game/match/match.ts';
@@ -23,6 +23,7 @@ import { speak } from '../game/audio/voice.ts';
 export function Hud() {
   return (
     <>
+      <ThrowPrompt />
       <ScoreStrip />
       <DeliveryPanel />
       <OutcomeBanner />
@@ -337,6 +338,51 @@ function BowlingPanel() {
 }
 
 /**
+ * Fielding: the ball is in hand and the batters are running. Hold ↑ to
+ * throw to the keeper or ↓ to the bowler; the longer the hold, the harder
+ * the throw — the green is quick and accurate, the red is forced and wild.
+ */
+function ThrowPrompt() {
+  const waiting = useGame((s) => s.snap?.awaitingThrow ?? false);
+  const { held } = useKeys();
+  if (!waiting) return null;
+  const end = held.has('up') ? 'keeper' : held.has('down') ? 'bowler' : undefined;
+  return (
+    <div className="throw-prompt" role="status" data-testid="throw-prompt">
+      <strong>Throw it in!</strong>
+      <div className="throw-ends">
+        <span className={end === 'keeper' ? 'on' : ''}>
+          <Key label="↑" on={end === 'keeper'} /> keeper&apos;s end
+        </span>
+        <span className={end === 'bowler' ? 'on' : ''}>
+          <Key label="↓" on={end === 'bowler'} /> bowler&apos;s end
+        </span>
+      </div>
+      <div className="throw-meter" aria-label="Throw power">
+        <span className="zone-good" />
+        <span className="zone-wild" />
+        <ThrowNeedle />
+      </div>
+      <span className="dim small">Hold for power, let go to throw</span>
+    </div>
+  );
+}
+
+function ThrowNeedle() {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const place = (m: number) => {
+      if (ref.current) ref.current.style.left = `${(Math.min(1.2, m) / 1.2) * 100}%`;
+    };
+    place(0);
+    return useGame.subscribe((st, prev) => {
+      if (st.meter !== prev.meter) place(st.meter);
+    });
+  }, []);
+  return <span ref={ref} className="needle" />;
+}
+
+/**
  * The pace needle sweeps every frame during the run-up: it is moved directly
  * rather than re-rendering the panel sixty times a second.
  */
@@ -583,7 +629,7 @@ function useKeys(): { held: ReadonlySet<GameAction>; flash: GameAction | undefin
     back: false,
   });
   useEffect(() => {
-    const watched: GameAction[] = ['left', 'right', 'up', 'down', 'backFoot', 'ground', 'loft', 'defend', 'sweep', 'leave', 'run', 'bowl', 'nextDelivery', 'prevDelivery'];
+    const watched: GameAction[] = ['left', 'right', 'up', 'down', 'lofted', 'shotFront', 'shotBack', 'shotFeet', 'leave', 'run', 'bowl', 'nextDelivery', 'prevDelivery', 'field', 'side', 'back'];
     let last = '';
     let fade: ReturnType<typeof setTimeout> | undefined;
     // Runs inside the key event, so the key lights up in the very next paint.
@@ -599,7 +645,7 @@ function useKeys(): { held: ReadonlySet<GameAction>; flash: GameAction | undefin
       const key = `${held.join(',')}|${flash ?? ''}`;
       if (key !== last) {
         last = key;
-        setState({ held: new Set(held), flash, dir: keyboard.direction(), back: keyboard.isHeld('backFoot') });
+        setState({ held: new Set(held), flash, dir: keyboard.direction(), back: keyboard.isHeld('lofted') });
       }
     };
     const unsubscribe = keyboard.subscribe(update);
@@ -621,6 +667,46 @@ function Key({ label, on, wide }: { label: string; on: boolean; wide?: boolean }
  * as you press it, and the stroke keys show which shot they will play with
  * the direction you are holding.
  */
+/**
+ * How well the stroke was timed: a gauge from early to late with the
+ * perfect zone in the middle, shown from the moment of contact until the
+ * next ball. Positions are in units of the stroke's timing window, so a
+ * fast ball's narrower window shows up as a bigger error.
+ */
+function TimingGauge() {
+  const contact = useGame((s) => s.snap?.contact);
+  if (!contact || contact.kind === 'leave') return null;
+  const t = Math.max(-2.5, Math.min(2.5, contact.timing));
+  const ms = Math.round(contact.timingSeconds * 1000);
+  const word =
+    contact.kind === 'miss'
+      ? 'Missed'
+      : Math.abs(t) < 0.3
+        ? 'Perfect'
+        : Math.abs(t) < 0.8
+          ? t < 0 ? 'A touch early' : 'A touch late'
+          : t < 0 ? 'Early' : 'Late';
+  const tone = contact.kind === 'miss' ? 'bad' : Math.abs(t) < 0.3 ? 'good' : Math.abs(t) < 0.8 ? 'ok' : 'bad';
+  return (
+    <div className="timing" data-testid="timing-gauge" aria-label={`Timing: ${word}, ${ms} ms`}>
+      <div className="timing-head">
+        <span className="dim">Timing</span>
+        <strong className={tone}>{word}</strong>
+        <span className="dim">{ms === 0 ? '0 ms' : ms < 0 ? `${-ms} ms early` : `${ms} ms late`}</span>
+      </div>
+      <div className="timing-bar">
+        <span className="zone ok" />
+        <span className="zone good" />
+        <span className={`mark ${tone}`} style={{ left: `${50 + (t / 2.5) * 50}%` }} />
+      </div>
+      <div className="timing-scale dim">
+        <span>early</span>
+        <span>late</span>
+      </div>
+    </div>
+  );
+}
+
 function ControlsPanel() {
   const snap = useGame((s) => s.snap);
   const help = useGame((s) => s.showHelp);
@@ -640,40 +726,46 @@ function ControlsPanel() {
   );
   if (snap.userBatting) {
     const hand = snap.striker.hand;
-    const name = (a: 'ground' | 'loft' | 'defend' | 'sweep') => {
+    const name = (a: BatAction) => {
       const shot = shotFromInput(a, dir, back, hand);
-      return shot.push ? 'Push into the gap' : SHOTS[shot.shot].name;
+      return SHOTS[shot.shot].name;
     };
-    const rows: { a: GameAction; k: string; label: string }[] = [
-      { a: 'ground', k: 'D', label: name('ground') },
-      { a: 'loft', k: 'A', label: name('loft') },
-      { a: 'defend', k: 'S', label: name('defend') },
-      { a: 'sweep', k: 'W', label: name('sweep') },
-      { a: 'leave', k: 'X', label: 'Leave' },
-      { a: 'run', k: 'Space', label: snap.runsCalled > 0 ? `Run (${snap.runsCalled} called)` : 'Run' },
+    const struck = snap.ballPhase === 'struck';
+    const rows: { a: GameAction; k: string; label: string; what: string }[] = [
+      { a: 'shotFront', k: 'S', what: 'Front foot', label: name('front') },
+      { a: 'shotBack', k: 'W', what: 'Back foot', label: name('back') },
+      { a: 'shotFeet', k: 'D', what: struck ? 'Run' : 'Use your feet', label: struck ? (snap.runsCalled > 0 ? `${snap.runsCalled} called` : 'call a run') : `${name('feet')}` },
+      { a: 'leave', k: 'A', what: 'Leave', label: '' },
     ];
     return (
       <section className="keys" aria-label="Batting controls" data-testid="controls-panel">
         <div className="keys-head">
           <span>Batting</span>
-          <span className="dim">aim, then press a stroke as the ball arrives</span>
+          <span className="dim">aim with the arrows, press a shot as the ball arrives</span>
         </div>
         <div className="keys-body">
           <div className="keys-aim">
             {arrows}
-            <div className="aim-label">{dir.x === 0 && dir.y === 0 ? 'Direction' : 'Aiming'}</div>
-            <Key label="Shift" on={lit('backFoot')} wide />
-            <div className="aim-label">{back ? 'Back foot' : 'Front foot'}</div>
+            <div className="aim-label">{dir.x === 0 && dir.y === 0 ? 'No arrow: defend' : '↓ is straight'}</div>
+            <Key label="Shift" on={lit('lofted')} wide />
+            <div className="aim-label">{back ? 'Lofted' : 'Along the ground'}</div>
           </div>
           <ul>
             {rows.map((r) => (
               <li key={r.a} className={lit(r.a) ? 'on' : ''}>
-                <Key label={r.k} on={lit(r.a)} wide={r.k.length > 1} />
+                <Key label={r.k} on={lit(r.a)} />
+                <span className="what">{r.what}</span>
                 <span>{r.label}</span>
               </li>
             ))}
+            <li className={lit('run') ? 'on' : ''}>
+              <Key label="Space" on={lit('run')} wide />
+              <span className="what">Run</span>
+              <span>{snap.runsCalled > 0 ? `${snap.runsCalled} called` : ''}</span>
+            </li>
           </ul>
         </div>
+        <TimingGauge />
       </section>
     );
   }
@@ -749,23 +841,25 @@ function ReviewCard() {
             {snap.userBatting ? (
               <ol className="howto">
                 <li>
-                  Hold an <kbd>arrow</kbd> for where to hit it (as you see it on screen); <kbd>Shift</kbd> for the back foot.
+                  Hold an <kbd>arrow</kbd> for where to hit it, as you see it on screen: <kbd>↓</kbd> straight, <kbd>←</kbd>/<kbd>→</kbd> square.
+                  Hold <kbd>Shift</kbd> to loft it.
                 </li>
                 <li>
-                  As the ball arrives press <kbd>D</kbd> ground shot, <kbd>A</kbd> lofted, <kbd>S</kbd> defend, <kbd>W</kbd> sweep, or <kbd>X</kbd> to leave. Press slightly early — the bat takes a moment to come down.
+                  As the ball arrives press <kbd>S</kbd> front foot, <kbd>W</kbd> back foot, <kbd>D</kbd> to come down the pitch, or{' '}
+                  <kbd>A</kbd> to leave (a shot key alone defends). Press slightly early — the bat takes a moment to come down.
                 </li>
                 <li>
-                  If you hit it, <kbd>Space</kbd> to run — again for each extra run.
+                  If you hit it, <kbd>Space</kbd> (or <kbd>D</kbd>) to run — again for each extra run.
                 </li>
               </ol>
             ) : (
               <ol className="howto">
-                <li>Choose the bowler with the number keys.</li>
+                <li>Choose the bowler with the number keys, then the delivery (<kbd>1</kbd>–<kbd>6</kbd>), how much it moves (<kbd>↑</kbd>/<kbd>↓</kbd>), the side (<kbd>O</kbd>) and the field (<kbd>F</kbd>).</li>
                 <li>
-                  <kbd>Q</kbd>/<kbd>E</kbd> choose the delivery; the <kbd>arrows</kbd> move the target on the pitch.
+                  <kbd>Space</kbd>, then the <kbd>arrows</kbd> place the marker where it should pitch; <kbd>Space</kbd> runs in.
                 </li>
                 <li>
-                  <kbd>Space</kbd> to run in, <kbd>Space</kbd> again when the needle is in the gold.
+                  <kbd>Space</kbd> again to lock the pace on the meter. In the field, hold <kbd>↑</kbd>/<kbd>↓</kbd> to throw to the keeper or bowler.
                 </li>
               </ol>
             )}

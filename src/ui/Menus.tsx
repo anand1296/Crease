@@ -337,35 +337,32 @@ export function HowToPlay({ onClose }: { onClose: () => void }) {
       <div className="panel wide">
         <h2>Batting</h2>
         <p>
-          Hold an arrow key for where you want to hit it — directions are as you see them on screen — then press a stroke key just
-          before the ball reaches the batter. The moment you press is when the batter commits. Early or late changes where the ball
-          goes and how cleanly it comes off the bat.
+          The Cricket 07 keys. Hold an arrow for where you want to hit it — <kbd>↓</kbd> is straight back past the bowler, <kbd>←</kbd>/
+          <kbd>→</kbd> square, the diagonals in front of or behind square, as you see it on screen — then press a shot key just before
+          the ball reaches the batter. Too early or too late changes where it goes and how cleanly it comes off the bat: the timing
+          gauge shows you which. The white marker is where the bowler is aiming to pitch it.
         </p>
         <table className="keys">
           <tbody>
             <tr>
-              <td><kbd>D</kbd></td>
-              <td>Ground stroke. ↑ straight drive, ← / → cover drive or flick, ↖ ↗ off and on drives, ↙ late cut, ↘ glance. With Shift: cut and pull.</td>
-            </tr>
-            <tr>
-              <td><kbd>A</kbd></td>
-              <td>Lofted stroke in the direction held. Shift with the leg side: hook.</td>
-            </tr>
-            <tr>
               <td><kbd>S</kbd></td>
-              <td>Defend. With an arrow: push it into a gap for a single.</td>
+              <td>Front-foot shot: drives, flick, sweep (↗). Alone: forward defence.</td>
             </tr>
             <tr>
               <td><kbd>W</kbd></td>
-              <td>Sweep; with the off-side arrow, reverse sweep.</td>
+              <td>Back-foot shot: square cut (off side), late cut, pull (leg side), punch. Alone: back-foot defence.</td>
             </tr>
             <tr>
-              <td><kbd>X</kbd></td>
+              <td><kbd>D</kbd></td>
+              <td>Use your feet: down the pitch to drive. Miss it and you may be stumped. After the hit, D runs.</td>
+            </tr>
+            <tr>
+              <td><kbd>A</kbd></td>
               <td>Leave the ball.</td>
             </tr>
             <tr>
               <td><kbd>Shift</kbd></td>
-              <td>Hold for back-foot strokes.</td>
+              <td>Hold to loft it: lofted drives, slog sweep, reverse sweep, hook, upper cut.</td>
             </tr>
             <tr>
               <td><kbd>Space</kbd></td>
@@ -403,6 +400,11 @@ export function HowToPlay({ onClose }: { onClose: () => void }) {
             </tr>
           </tbody>
         </table>
+        <h2>Fielding</h2>
+        <p>
+          When your fielder has the ball and the batters are running, hold <kbd>↑</kbd> to throw to the keeper or <kbd>↓</kbd> to the
+          bowler, and let go to throw. Green is quick and accurate; red is forced and wild. Hit the stumps and they may be run out.
+        </p>
         <p className="dim">
           <kbd>P</kbd> pause · <kbd>C</kbd> camera · <kbd>M</kbd> sound · <kbd>V</kbd> commentary · <kbd>H</kbd> help
         </p>

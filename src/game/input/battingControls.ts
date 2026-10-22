@@ -1,23 +1,27 @@
-import { type ShotAttempt, attempt, push } from '../batting/shots.ts';
+import { type Footwork, type ShotAttempt, type ShotId, attempt } from '../batting/shots.ts';
 import type { Hand } from '../model/player.ts';
 
 /**
- * Maps batting input to a stroke.
+ * Batting controls, after EA Sports Cricket 07's keyboard scheme:
  *
- * Directions are screen-relative from the default camera behind the bowler:
- * up = straight back past the bowler, left/right = the sides of the screen,
- * down = behind the batter. Which side is "off" depends on the batter's
- * hand, so the same arrow always sends the ball the same way on screen.
+ *   S  front-foot shot     (S alone: forward defence)
+ *   W  back-foot shot      (W alone: back-foot defence)
+ *   D  use your feet: step out and play (D alone: smother it)
+ *   A  leave
+ *   Shift (hold)  lofted version of the shot
+ *   Arrows        direction, as you see it on screen from behind the bowler:
+ *                 ↓ straight back past the bowler, ← / → square on either
+ *                 side, ↙ ↘ in front of square, ↖ ↗ behind square.
  *
- * Actions: ground stroke, lofted stroke, defend, sweep, leave; holding the
- * back-foot modifier switches strokes that have a back-foot version.
+ * Which side is off depends on the batter's hand, so the same arrows send
+ * the ball the same way on screen for left- and right-handers.
  */
-export type BatAction = 'ground' | 'loft' | 'defend' | 'sweep' | 'leave';
+export type BatAction = 'front' | 'back' | 'feet' | 'leave';
 
 export interface ScreenDirection {
   /** −1 left, 0 none, +1 right. */
   readonly x: -1 | 0 | 1;
-  /** +1 up (towards the bowler), 0 none, −1 down (behind). */
+  /** +1 up the screen (behind the batter), 0 none, −1 down the screen (straight, towards the bowler). */
   readonly y: -1 | 0 | 1;
 }
 
@@ -30,39 +34,75 @@ export function sideOf(dirX: -1 | 0 | 1, hand: Hand): Side {
   return left === (hand === 'right') ? 'off' : 'leg';
 }
 
-export function shotFromInput(action: BatAction, dir: ScreenDirection, backFoot: boolean, hand: Hand): ShotAttempt {
+/**
+ * Batter-relative direction (degrees from straight, + off side) for an arrow
+ * combination, or undefined for no arrow.
+ */
+export function directionOf(dir: ScreenDirection, hand: Hand): number | undefined {
   const side = sideOf(dir.x, hand);
-  const fw = backFoot ? 'back' : 'front';
-  switch (action) {
-    case 'leave':
-      return attempt('leave', fw);
-    case 'defend': {
-      // No direction: a dead bat. With a direction: a push into that area for a single.
-      if (side === 'none' && dir.y !== -1) return dir.y === 1 ? push(0, fw) : attempt('block', fw);
-      const sign = side === 'off' ? 1 : side === 'leg' ? -1 : 0;
-      const angle = dir.y === 1 ? 30 : dir.y === 0 ? 70 : 125;
-      return side === 'none' ? push(-150, fw) : push(sign * angle, fw);
-    }
-    case 'sweep':
-      return side === 'off' ? attempt('reverseSweep') : attempt('sweep');
-    case 'loft': {
-      if (side === 'none') return dir.y === -1 ? attempt('hook') : attempt('loftedDrive');
-      if (side === 'leg' && (backFoot || dir.y === -1)) return attempt('hook');
-      // Lofted shot aimed into the direction pressed.
-      const sign = side === 'off' ? 1 : -1;
-      const angle = dir.y === 1 ? 32 : dir.y === 0 ? 65 : 115;
-      return attempt('loftedAttack', fw, sign * angle);
-    }
-    case 'ground': {
-      if (side === 'none') return dir.y === -1 ? attempt('legGlance', fw) : attempt('straightDrive', fw);
-      if (side === 'off') {
-        if (dir.y === 1) return attempt('offDrive', fw);
-        if (dir.y === -1) return attempt('lateCut');
-        return backFoot ? attempt('squareCut') : attempt('coverDrive');
-      }
-      if (dir.y === 1) return attempt('onDrive', fw);
-      if (dir.y === -1) return attempt('legGlance', fw);
-      return backFoot ? attempt('pull') : attempt('flick', fw);
+  if (side === 'none') return dir.y === -1 ? 0 : dir.y === 1 ? 180 : undefined;
+  const s = side === 'off' ? 1 : -1;
+  return s * (dir.y === -1 ? 45 : dir.y === 0 ? 90 : 135);
+}
+
+const at = (shot: ShotId, fw: Footwork, aim?: number): ShotAttempt => attempt(shot, fw, aim);
+
+function groundShot(fw: Footwork, d: number): ShotAttempt {
+  if (fw === 'back') {
+    switch (d) {
+      case 0: return at('straightDrive', 'back');
+      case 45: return at('offDrive', 'back', 45);
+      case 90: return at('squareCut', 'back');
+      case 135: return at('lateCut', 'back');
+      case 180: return at('legGlance', 'back');
+      case -135: return at('pull', 'back', -118);
+      case -90: return at('pull', 'back');
+      default: return at('onDrive', 'back');
     }
   }
+  if (fw === 'out') {
+    switch (d) {
+      case 0: return at('straightDrive', 'out');
+      case 45: return at('coverDrive', 'out', 45);
+      case 90: return at('coverDrive', 'out', 82);
+      case 135: return at('coverDrive', 'out', 100);
+      case 180: return at('flick', 'out', -150);
+      case -135: return at('flick', 'out', -125);
+      case -90: return at('flick', 'out', -88);
+      default: return at('onDrive', 'out');
+    }
+  }
+  switch (d) {
+    case 0: return at('straightDrive', 'front');
+    case 45: return at('coverDrive', 'front');
+    case 90: return at('coverDrive', 'front', 80);
+    case 135: return at('lateCut', 'front');
+    case 180: return at('legGlance', 'front');
+    case -135: return at('sweep', 'front');
+    case -90: return at('flick', 'front');
+    default: return at('onDrive', 'front');
+  }
+}
+
+function loftedShot(fw: Footwork, d: number | undefined): ShotAttempt {
+  if (d === undefined || d === 0) return fw === 'back' ? at('loftedAttack', 'back', 0) : at('loftedDrive', fw);
+  if (fw === 'front') {
+    if (d === 135) return at('reverseSweep', 'front');
+    if (d === -135) return at('slogSweep', 'front');
+    if (d === 180) return at('loftedAttack', 'front', -165);
+  }
+  if (fw === 'back') {
+    if (d === -135 || d === 180) return at('hook', 'back');
+    if (d === -90) return at('loftedAttack', 'back', -85);
+  }
+  return at('loftedAttack', fw, d === 180 ? -160 : d);
+}
+
+export function shotFromInput(action: BatAction, dir: ScreenDirection, lofted: boolean, hand: Hand): ShotAttempt {
+  if (action === 'leave') return at('leave', 'front');
+  const fw: Footwork = action === 'back' ? 'back' : action === 'feet' ? 'out' : 'front';
+  const d = directionOf(dir, hand);
+  if (lofted) return loftedShot(fw, d);
+  if (d === undefined) return at('block', fw);
+  return groundShot(fw, d);
 }

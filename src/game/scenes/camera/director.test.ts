@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { STROKE_HOLD, TIGHT, WIDE, direct, type DirectorInput } from './director.ts';
+import { CHASE_CAMERAS, STROKE_HOLD, TIGHT, WIDE, chaseCamera, direct, type DirectorInput } from './director.ts';
 import { STRIKER_STUMPS_Z } from '../../data/field.ts';
 
 const base: DirectorInput = {
@@ -58,5 +58,31 @@ describe('camera director', () => {
   it('stays tight on a ball that is left, missed or padded', () => {
     const s = direct({ ...base, phase: 'dead', time: 2.6, ball: { x: 0.2, y: 0.8, z: STRIKER_STUMPS_Z + 1 } });
     expect(s.name).toBe('delivery');
+  });
+
+  it('television: a long-lens close-up of the batter between balls, then a cut to the main camera as the bowler runs in', () => {
+    const close = direct({ ...base, phase: undefined, subject: { x: -0.45, y: 0, z: 9.3 }, previous: 'chase' });
+    expect(close.name).toBe('closeUp');
+    expect(close.cut).toBe(true);
+    expect(close.fov).toBeLessThan(5);
+    const run = direct({ ...base, time: 0, previous: 'closeUp' });
+    expect(run.name).toBe('runUp');
+    expect(run.cut).toBe(true);
+    // The main camera is far back and high: a broadcast long lens.
+    expect(WIDE.pos.z).toBeLessThan(-70);
+    expect(TIGHT.fov).toBeLessThan(7);
+  });
+
+  it('chases from the fixed camera looking across at the ball, and stays on it', () => {
+    expect(chaseCamera({ x: 30, y: 0, z: -5 })).toBe('squareMinus');
+    expect(chaseCamera({ x: -30, y: 0, z: -5 })).toBe('squarePlus');
+    expect(chaseCamera({ x: 2, y: 0, z: -40 })).toBe('reverse');
+    expect(chaseCamera({ x: 20, y: 0, z: 20 })).toBe('main');
+    const first = direct({ ...base, phase: 'struck', time: 4, contactTime: 3, ball: { x: 30, y: 1, z: -5 }, previous: 'stroke' });
+    expect(first.cam).toBe('squareMinus');
+    expect(first.pos).toEqual(CHASE_CAMERAS.squareMinus);
+    // The ball runs on behind square: the director stays on the same camera.
+    const later = direct({ ...base, phase: 'struck', time: 5, contactTime: 3, ball: { x: 30, y: 0.1, z: 15 }, previous: 'chase', previousCam: first.cam });
+    expect(later.cam).toBe('squareMinus');
   });
 });

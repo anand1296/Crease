@@ -365,9 +365,10 @@ export class Match {
         const c = this.cycle;
         if (!c) break;
         const before = c.phase;
+        const waiting = c.awaitingThrowSince !== undefined;
         c.step(dt);
         if (before !== 'dead' && c.phase === 'dead' && c.outcome) this.record(c.outcome);
-        else if (before !== c.phase) this.emit();
+        else if (before !== c.phase || waiting !== (c.awaitingThrowSince !== undefined)) this.emit();
         if (c.finished) this.afterBall();
         break;
       }
@@ -451,6 +452,19 @@ export class Match {
   get lockedPace(): number | undefined {
     const c = this.cycle;
     return c?.releaseLocked ? c.plan.effort : undefined;
+  }
+
+  /** Fielding: the ball is in a fielder's hands with the batters running, waiting for the human's throw. */
+  get awaitingThrow(): boolean {
+    return this.humanBowling && this.phase === 'delivery' && this.cycle?.awaitingThrowSince !== undefined;
+  }
+
+  /** Fielding: throw the ball in to the keeper's ('striker') or bowler's end, power 0–1.2. */
+  throwBall(end: 'striker' | 'bowler', power: number): boolean {
+    if (!this.awaitingThrow || this.paused) return false;
+    const ok = this.cycle?.throwBall(end, power) ?? false;
+    if (ok) this.emit();
+    return ok;
   }
 
   /** Human captain picks the bowler for the next over. */
@@ -656,6 +670,7 @@ export class Match {
       fatigue: this.bowlerFatigue,
       rng: this.rng.fork(`ball-${this.ballNumber}`),
       manualRunning: this.humanBatting,
+      humanFielding: this.humanBowling,
       ...(releaseQuality !== undefined ? { releaseQuality } : {}),
       ...(!this.humanBatting ? { battingAi: { difficulty: DIFFICULTIES[this.config.difficulty], intent: this.battingIntent() } } : {}),
     });

@@ -147,6 +147,20 @@ export class AvatarRig {
     return out.copy(this.p(`Bip01_${side}_Hand`)).multiplyScalar(0.01);
   }
 
+  /**
+   * Where the palm closes round a handle: the wrist carried on along the
+   * forearm by `palm` metres (model space, metres).
+   */
+  palm(side: 'L' | 'R', out: Vector3, palm = 0.075): Vector3 {
+    const wrist = this.p(`Bip01_${side}_Hand`);
+    const elbow = this.p(`Bip01_${side}_Forearm`);
+    const along = tv.copy(wrist).sub(elbow);
+    const len = along.length();
+    out.copy(wrist);
+    if (len > 1e-3) out.addScaledVector(along, (palm * 100) / len);
+    return out.multiplyScalar(0.01);
+  }
+
   update(pose: Pose, frames: RigFrames, root: Object3D): void {
     const now = performance.now() / 1000;
     const dt = this.lastTime < 0 ? 0 : Math.min(0.1, now - this.lastTime);

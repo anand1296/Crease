@@ -100,6 +100,12 @@ export const Cricketer = forwardRef<HumanoidHandle, CricketerProps>(function Cri
         built.rig.hand(side, out);
         return r.localToWorld(out);
       },
+      gripWorld(side, out) {
+        const r = driver.current?.root;
+        if (!r) return out.set(0, 0, 0);
+        built.rig.palm(side, out);
+        return r.localToWorld(out);
+      },
       headwear(visible: boolean) {
         if (built.headwear && built.headwear.visible !== visible) built.headwear.visible = visible;
       },

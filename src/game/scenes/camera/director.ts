@@ -1,4 +1,4 @@
-import { BOWLER_STUMPS_Z, FIELD, STRIKER_STUMPS_Z } from '../../data/field.ts';
+import { BOWLER_STUMPS_Z, STRIKER_STUMPS_Z } from '../../data/field.ts';
 
 /**
  * The broadcast director: which camera is "on air" and where it points,
@@ -22,7 +22,9 @@ export interface Vec {
 }
 
 export interface Shot {
-  readonly name: 'wide' | 'aim' | 'runUp' | 'delivery' | 'stroke' | 'chase' | 'stumps' | 'hold';
+  readonly name: 'wide' | 'aim' | 'closeUp' | 'runUp' | 'delivery' | 'stroke' | 'chase' | 'stumps' | 'hold';
+  /** Which fixed camera a chase shot uses (so the director stays on it for the rest of the ball). */
+  readonly cam?: string;
   readonly pos: Vec;
   readonly look: Vec;
   /** Vertical field of view, degrees. */
@@ -55,6 +57,10 @@ export interface DirectorInput {
    * from there.
    */
   readonly humanBowling?: boolean;
+  /** Between balls on television: who to show in close-up (the striker), if anyone. */
+  readonly subject?: Vec | undefined;
+  /** The fixed camera the previous chase shot used. */
+  readonly previousCam?: string | undefined;
 }
 
 const smooth = (u: number) => {
@@ -63,18 +69,49 @@ const smooth = (u: number) => {
 };
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
-/** Behind the bowler's arm, wide: the whole pitch and the close field. */
+/**
+ * The television main camera: high in the stand behind the bowler's arm on a
+ * long lens (≈70 m back, 17 m up), which is what gives broadcast cricket its
+ * compressed look — the pitch short and steep, the players large. Between
+ * balls it shows the whole pitch and the close field.
+ */
 export const WIDE: Readonly<{ pos: Vec; look: Vec; fov: number }> = {
-  pos: { x: 0, y: 12.5, z: BOWLER_STUMPS_Z - 46 },
-  look: { x: 0, y: 0.6, z: 0 },
-  fov: 15,
+  pos: { x: 0, y: 17, z: BOWLER_STUMPS_Z - 70 },
+  look: { x: 0, y: 0.6, z: 1.5 },
+  fov: 10,
 };
-/** Same camera, tight on the striker at the moment of release. */
+/** The same camera zoomed in through the run-up: by release, the bowler at the foot of the frame and the batter at the top. */
 export const TIGHT: Readonly<{ pos: Vec; look: Vec; fov: number }> = {
-  pos: { x: 0, y: 8.6, z: BOWLER_STUMPS_Z - 36 },
-  look: { x: 0, y: 1.05, z: STRIKER_STUMPS_Z - 1.6 },
-  fov: 9.5,
+  pos: { x: 0, y: 15.5, z: BOWLER_STUMPS_Z - 66 },
+  look: { x: 0, y: 1.0, z: STRIKER_STUMPS_Z - 3.5 },
+  fov: 6.2,
 };
+
+/**
+ * The fixed cameras the director cuts to after the ball is hit, as on
+ * television: high in the stands square of the wicket on either side, and
+ * high at the keeper's end for the ball hit straight. The one used is the
+ * one looking across the ground at where the ball is going, and it stays on
+ * it for the rest of the ball.
+ */
+export const CHASE_CAMERAS: Readonly<Record<string, Vec>> = {
+  // On gantries at the front of the stands (r ≈ 82 m), under the roof.
+  squarePlus: { x: 82, y: 15, z: -4 },
+  squareMinus: { x: -82, y: 15, z: -4 },
+  reverse: { x: 0, y: 15, z: STRIKER_STUMPS_Z + 72 },
+  main: { x: 0, y: 17, z: BOWLER_STUMPS_Z - 70 },
+};
+
+/** Picks the fixed camera for a ball travelling to `ball` (from the striker). */
+export function chaseCamera(ball: Vec): string {
+  const dz = ball.z - STRIKER_STUMPS_Z;
+  // Behind square: the main camera looks straight at it.
+  if (dz > -4) return 'main';
+  // Straight down the ground: from the keeper's end.
+  if (Math.abs(ball.x) < Math.abs(dz) * 0.42) return 'reverse';
+  // Square: from across the ground.
+  return ball.x >= 0 ? 'squareMinus' : 'squarePlus';
+}
 
 /** Classic (Cricket 07) framing: lower and closer behind the bowler's arm. */
 export const CLASSIC_WIDE: Readonly<{ pos: Vec; look: Vec; fov: number }> = {
@@ -106,6 +143,19 @@ export function direct(input: DirectorInput): Shot {
   const TIGHT_ = classic ? CLASSIC_TIGHT : TIGHT;
 
   if (phase === undefined) {
+    // Television, between balls: a long-lens close-up of the batter.
+    if (!classic && !input.humanBowling && input.subject) {
+      const sub = input.subject;
+      return {
+        name: 'closeUp',
+        // High enough that the background is outfield grass, not the advertising boards.
+        pos: { x: sub.x + 9, y: 9, z: BOWLER_STUMPS_Z - 40 },
+        look: { x: sub.x, y: 1.3, z: sub.z },
+        fov: 3.4,
+        cut: input.previous !== 'closeUp',
+        ease: 4,
+      };
+    }
     const name = input.humanBowling ? 'aim' : 'wide';
     return {
       name,
@@ -125,7 +175,8 @@ export function direct(input: DirectorInput): Shot {
       pos: { x: lerp(WIDE_.pos.x, TIGHT_.pos.x, u), y: lerp(WIDE_.pos.y, TIGHT_.pos.y, u), z: lerp(WIDE_.pos.z, TIGHT_.pos.z, u) },
       look: { x: lerp(WIDE_.look.x, TIGHT_.look.x, u), y: lerp(WIDE_.look.y, TIGHT_.look.y, u), z: lerp(WIDE_.look.z, TIGHT_.look.z, u) },
       fov: lerp(WIDE_.fov, TIGHT_.fov, u),
-      cut: false,
+      // From the close-up, cut back to the main camera as the bowler sets off.
+      cut: input.previous === 'closeUp' || input.previous === 'chase' || input.previous === 'stumps',
       // Follow the dolly closely: it is already smooth.
       ease: 12,
     };
@@ -151,27 +202,38 @@ export function direct(input: DirectorInput): Shot {
   const since = time - input.contactTime;
   const fromBat = Math.hypot(ball.x, ball.z - STRIKER_STUMPS_Z);
   if (since < STROKE_HOLD || fromBat < 12) {
+    if (!classic) {
+      // Television: the main camera operator stays on his tripod, pans with the ball and zooms out.
+      return {
+        name: 'stroke',
+        pos: { ...TIGHT.pos },
+        look: { x: ball.x * 0.85, y: Math.max(0.6, ball.y * 0.75), z: lerp(STRIKER_STUMPS_Z - 3, ball.z, 0.85) },
+        fov: Math.min(22, TIGHT.fov + fromBat * 0.75 + ball.y * 0.4),
+        cut: false,
+        ease: 6,
+      };
+    }
     // The stroke, from the bowler's end: widen and pan with the ball.
     return {
       name: 'stroke',
-      pos: { x: ball.x * 0.15, y: (classic ? 4 : 9) + Math.min(10, fromBat * 0.4), z: BOWLER_STUMPS_Z - (classic ? 20 : 36) },
+      pos: { x: ball.x * 0.15, y: 4 + Math.min(10, fromBat * 0.4), z: BOWLER_STUMPS_Z - 20 },
       look: { x: ball.x * 0.8, y: Math.max(0.6, ball.y * 0.7), z: lerp(STRIKER_STUMPS_Z - 1.6, ball.z, 0.8) },
-      fov: Math.min(classic ? 45 : 30, (classic ? 20 : 10) + fromBat * 1.1),
+      fov: Math.min(45, 20 + fromBat * 1.1),
       cut: false,
       ease: 5,
     };
   }
 
-  // The chase: a high camera on the boundary, square to the ball's path, framing ball and fielder.
-  const side = ball.x >= 0 ? -1 : 1;
-  const r = FIELD.boundaryRadius + 12;
-  const camZ = Math.max(-r * 0.6, Math.min(r * 0.6, ball.z * 0.5));
-  const pos = { x: side * Math.sqrt(Math.max(0, r * r - camZ * camZ)), y: 26, z: camZ };
+  // The chase: a fixed high camera looking across the ground at the ball, framing ball and fielder.
+  const cam = input.previous === 'chase' && input.previousCam ? input.previousCam : chaseCamera(ball);
+  const fixed = CHASE_CAMERAS[cam] ?? CHASE_CAMERAS.squareMinus ?? { x: -88, y: 26, z: -4 };
+  const pos = { ...fixed };
   const target = input.chaser ? { x: (ball.x + input.chaser.x) / 2, y: 0.8, z: (ball.z + input.chaser.z) / 2 } : { x: ball.x, y: Math.max(0.5, ball.y * 0.8), z: ball.z };
   const spread = input.chaser ? Math.hypot(ball.x - input.chaser.x, ball.z - input.chaser.z) : 0;
   const dist = Math.hypot(pos.x - target.x, pos.y - target.y, pos.z - target.z);
   // Field of view that keeps ball and chaser (plus a margin, and any height of a lofted ball) in frame.
-  const span = Math.max(10, spread + 8, ball.y * 1.6 + 6);
+  // Tight on the fielder, as television is: just the ball, the man going for it, and a little room.
+  const span = Math.max(6.5, spread + 5, ball.y * 1.6 + 4);
   const fov = Math.min(55, Math.max(8, ((2 * Math.atan(span / 2 / dist)) * 180) / Math.PI));
-  return { name: 'chase', pos, look: target, fov, cut: input.previous === 'stroke', ease: 3.5 };
+  return { name: 'chase', cam, pos, look: target, fov, cut: input.previous === 'stroke', ease: 4.5 };
 }
