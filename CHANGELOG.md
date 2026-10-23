@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.14.0 — Real batting shapes, arrows by the batter's sides, shuffling across, a build-up to the first ball, and game controllers (2026-10-23)
+
+- **Elbows that bend the right way**: the batter's arms are now solved with a batter's elbows — the top-hand elbow up and pointing down the pitch, the bottom-hand elbow tucked down by the hip — instead of wherever the simplified skeleton put them, which had them flaring out or bending backwards.
+- **Stance and strokes**: a lower, wider stance with the knees flexed. Drives come down the line of the ball (the bat passing behind the batter, face to the bowler) and follow through up the line before finishing high over the shoulder, instead of swinging round sideways; cuts and pulls sweep through the line before they wrap round.
+- **Arrows by the batter's sides**: → is always the off side and ← the leg side, for right- and left-handers; ↑ is fine, behind the batter. So ↑→ on the back foot is the late cut to third man, ↑← the pull (the hook, lofted) round to fine leg and backward square, and ↑← on the front foot the slog sweep; ↑ alone is the sweep fine on the front foot and the glance on the back. A button under the field map switches back to screen arrows (stored in the browser).
+- **Shuffle across the crease**: as the bowler runs in, **Q** / **E** move the batter towards leg or off (in steps, up to about half a metre). The pads and body move with him and the ball is judged from where he now stands: across to off covers the off stump and lets you work balls outside off to leg, but leaves leg stump bare and puts the pads in front.
+- **A build-up to the first ball**: after the start card, the bowler paces out the end of his run-up from the stumps, scratches his mark with his boot, turns and shines the ball, while the batter takes guard — on a long lens from the bowler's end — and the game waits for **Space** / **Enter**. The gap before each run-up is longer with a human playing (1.7 s, from 0.9 s).
+- **Tighter camera**: the run-up frame, the wide shot, the batter's close-up and the chase cameras are all closer in.
+- **Game controllers**: Xbox, PlayStation and Switch Pro pads through the browser's Gamepad API. Batting: stick or d-pad to aim, A front foot, X back foot, Y use your feet / run, B leave / send back, RT loft, LT run, LB / RB shuffle. Bowling: A each step, B back, LB / RB delivery, X field, Y side, LT place the field. A carries on between balls; Start pauses; View changes the camera. In the menus the stick moves between buttons and A presses them. The controls panel shows the pad's buttons while it is in use.
+
 ## 0.13.1 — A saved match always resumes on the start card (2026-10-23)
 
 - A match saved while the game was waiting for "Next ball" now loads on the card to start again from, like any other save (it used to come back to the bare prompt).

@@ -17,6 +17,8 @@ export interface CreaseDebug {
   lastHeadline?: () => string | undefined;
   /** Runs the simulation on by this many seconds without drawing. */
   advance?: (seconds: number) => void;
+  /** Holds the striker in a stroke (k: 0–1 into the downswing, follow: 0–1 through) for captures; undefined releases him. */
+  strokePose?: (spec: { shot: string; footwork?: string; k: number; follow: number; x?: number; y?: number } | undefined) => void;
   /** Slows or speeds the simulation (tests and frame-by-frame captures only). */
   setSpeed?: (speed: number) => void;
   /** Pins the camera (tests and close-up captures only); undefined releases it. */

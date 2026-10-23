@@ -9,13 +9,38 @@ import type { Hand } from '../model/player.ts';
  *   D  use your feet: step out and play (D alone: smother it)
  *   A  leave
  *   Shift (hold)  lofted version of the shot
- *   Arrows        direction, as you see it on screen from behind the bowler:
- *                 ↓ straight back past the bowler, ← / → square on either
- *                 side, ↙ ↘ in front of square, ↖ ↗ behind square.
+ *   Arrows        direction. ↓ straight back past the bowler, ↑ behind
+ *                 the batter (fine), and sideways by the batter's sides:
+ *                 → is always the off side and ← the leg side, for right-
+ *                 and left-handers alike ("batter" arrows, the default).
+ *                 So ↑→ on the back foot is the late cut to third man, ↑←
+ *                 the pull (the hook, lofted) round to fine leg, and ↑← on
+ *                 the front foot the slog sweep.
  *
- * Which side is off depends on the batter's hand, so the same arrows send
- * the ball the same way on screen for left- and right-handers.
+ *                 "Screen" arrows instead follow the picture from behind the
+ *                 bowler: ← is screen-left (a right-hander's off side, a
+ *                 left-hander's leg side).
  */
+export type ArrowScheme = 'batter' | 'screen';
+
+const ARROWS_KEY = 'crease.arrows';
+
+export function readArrowScheme(): ArrowScheme {
+  try {
+    return localStorage.getItem(ARROWS_KEY) === 'screen' ? 'screen' : 'batter';
+  } catch {
+    return 'batter';
+  }
+}
+
+export function saveArrowScheme(s: ArrowScheme): void {
+  try {
+    localStorage.setItem(ARROWS_KEY, s);
+  } catch {
+    // Not persisted.
+  }
+}
+
 export type BatAction = 'front' | 'back' | 'feet' | 'leave';
 
 export interface ScreenDirection {
@@ -27,9 +52,13 @@ export interface ScreenDirection {
 
 type Side = 'off' | 'leg' | 'none';
 
-/** Screen-left is world +x, which is the off side of a right-hander. */
-export function sideOf(dirX: -1 | 0 | 1, hand: Hand): Side {
+/**
+ * Batter arrows: right is the off side. Screen arrows: screen-left is world
+ * +x, which is the off side of a right-hander.
+ */
+export function sideOf(dirX: -1 | 0 | 1, hand: Hand, scheme: ArrowScheme = 'batter'): Side {
   if (dirX === 0) return 'none';
+  if (scheme === 'batter') return dirX === 1 ? 'off' : 'leg';
   const left = dirX === -1;
   return left === (hand === 'right') ? 'off' : 'leg';
 }
@@ -38,8 +67,8 @@ export function sideOf(dirX: -1 | 0 | 1, hand: Hand): Side {
  * Batter-relative direction (degrees from straight, + off side) for an arrow
  * combination, or undefined for no arrow.
  */
-export function directionOf(dir: ScreenDirection, hand: Hand): number | undefined {
-  const side = sideOf(dir.x, hand);
+export function directionOf(dir: ScreenDirection, hand: Hand, scheme: ArrowScheme = 'batter'): number | undefined {
+  const side = sideOf(dir.x, hand, scheme);
   if (side === 'none') return dir.y === -1 ? 0 : dir.y === 1 ? 180 : undefined;
   const s = side === 'off' ? 1 : -1;
   return s * (dir.y === -1 ? 45 : dir.y === 0 ? 90 : 135);
@@ -78,8 +107,10 @@ function groundShot(fw: Footwork, d: number): ShotAttempt {
     case 45: return at('coverDrive', 'front');
     case 90: return at('coverDrive', 'front', 80);
     case 135: return at('lateCut', 'front');
-    case 180: return at('legGlance', 'front');
-    case -135: return at('sweep', 'front');
+    // Fine leg along the ground: the sweep (the glance is on the back foot).
+    case 180: return at('sweep', 'front', -150);
+    // Behind square on the leg side off the front foot: the slog sweep.
+    case -135: return at('slogSweep', 'front');
     case -90: return at('flick', 'front');
     default: return at('onDrive', 'front');
   }
@@ -101,10 +132,10 @@ function loftedShot(fw: Footwork, d: number | undefined): ShotAttempt {
   return at('loftedAttack', fw, d === 180 ? -160 : d);
 }
 
-export function shotFromInput(action: BatAction, dir: ScreenDirection, lofted: boolean, hand: Hand): ShotAttempt {
+export function shotFromInput(action: BatAction, dir: ScreenDirection, lofted: boolean, hand: Hand, scheme: ArrowScheme = 'batter'): ShotAttempt {
   if (action === 'leave') return at('leave', 'front');
   const fw: Footwork = action === 'back' ? 'back' : action === 'feet' ? 'out' : 'front';
-  const d = directionOf(dir, hand);
+  const d = directionOf(dir, hand, scheme);
   if (lofted) return loftedShot(fw, d);
   if (d === undefined) return at('block', fw);
   return groundShot(fw, d);

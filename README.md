@@ -33,23 +33,28 @@ Browser tests: to test a deployed build use `E2E_BASE_URL=https://… npm run te
 
 **The toss** (with *Toss for it*): the two captains meet the match referee on the pitch. Call <kbd>H</kbd> heads or <kbd>T</kbd> tails, watch the coin come down, and if you win choose <kbd>B</kbd> bat or <kbd>L</kbd> bowl; if you lose, the other captain decides.
 
-**Pace of play**: after each ball the game waits for <kbd>Enter</kbd> / <kbd>Space</kbd> (*Next ball*). At the end of every over you get an over summary with the scorecard, and after every wicket a dismissal card (how out, fall of wicket, partnership, next batter) with the scorecard. Wickets and boundaries are replayed in slow motion first (<kbd>Enter</kbd> skips; *Replays* can be switched off in the menus). **Game speed** in match setup: Relaxed, Normal (default, 0.8×) or Real time. The controls panel on the left of the screen shows the keys at all times, lights them as you press them, and names the stroke you are about to play.
+**Pace of play**: before the first ball of an innings the bowler paces out his run-up, scratches his mark and shines the ball while the batter takes guard; the game waits for <kbd>Space</kbd> / <kbd>Enter</kbd> when you're ready. After each ball the game waits for <kbd>Enter</kbd> / <kbd>Space</kbd> (*Next ball*). At the end of every over you get an over summary with the scorecard, and after every wicket a dismissal card (how out, fall of wicket, partnership, next batter) with the scorecard. Wickets and boundaries are replayed in slow motion first (<kbd>Enter</kbd> skips; *Replays* can be switched off in the menus). **Game speed** in match setup: Relaxed, Normal (default, 0.8×) or Real time. The controls panel on the left of the screen shows the keys at all times, lights them as you press them, and names the stroke you are about to play.
 
 Each bowler may bowl at most a fifth of the overs (rounded up) and never two overs in a row. Out of overs, all out, or the target reached ends an innings; the result screen shows the margin, top performers and both scorecards. <kbd>H</kbd> shows the controls in the game.
 
 ### Batting
 
-The controls follow EA Sports Cricket 07's keyboard scheme. Hold an arrow for direction, then press a shot key **as the ball arrives**: the key press is when you commit, and the bat reaches the ball a fraction of a second later (each stroke has its own swing time). Arrows are screen directions from behind the bowler, whichever hand the batter uses: <kbd>↓</kbd> straight back past the bowler, <kbd>←</kbd>/<kbd>→</kbd> square, <kbd>↙</kbd><kbd>↘</kbd> in front of square, <kbd>↖</kbd><kbd>↗</kbd> behind square. A white marker shows where the bowler is aiming to pitch it from the start of his run-up; the timing gauge shows how early or late you were.
+The controls follow EA Sports Cricket 07's keyboard scheme. Hold an arrow for direction, then press a shot key **as the ball arrives**: the key press is when you commit, and the bat reaches the ball a fraction of a second later (each stroke has its own swing time). Arrows follow the batter's sides, for right- and left-handers alike: <kbd>↓</kbd> straight back past the bowler, <kbd>↑</kbd> fine behind him, <kbd>→</kbd> the off side, <kbd>←</kbd> the leg side, and the diagonals in front of (<kbd>↘</kbd><kbd>↙</kbd>) or behind (<kbd>↗</kbd><kbd>↖</kbd>) square. So <kbd>W</kbd>+<kbd>↗</kbd> is the late cut to third man, <kbd>W</kbd>+<kbd>↖</kbd> the pull (the hook with Shift) and <kbd>S</kbd>+<kbd>↖</kbd> the slog sweep. (A button under the field map on the controls panel switches to screen arrows, ← being screen-left.) A white marker shows where the bowler is aiming to pitch it from the start of his run-up; the timing gauge shows how early or late you were.
 
 | Key | Shot |
 | --- | --- |
-| <kbd>S</kbd> | Front-foot shot: ↓ straight drive, ↙ cover drive, ← square drive, ↖ late cut, ↘ on drive, → flick, ↗ sweep. Alone: forward defence |
-| <kbd>W</kbd> | Back-foot shot: ↓ punch, ↙ back-foot drive, ← square cut, ↖ late cut, ↘ on drive, → pull, ↗ fine pull. Alone: back-foot defence |
+| <kbd>S</kbd> | Front-foot shot: ↓ straight drive, ↘ cover drive, → square drive, ↗ late cut, ↙ on drive, ← flick, ↖ slog sweep, ↑ sweep fine. Alone: forward defence |
+| <kbd>W</kbd> | Back-foot shot: ↓ punch, ↘ back-foot drive, → square cut, ↗ late cut, ↙ worked to midwicket, ← pull, ↖ pull behind square, ↑ glance. Alone: back-foot defence |
 | <kbd>D</kbd> | Use your feet: step down the pitch and drive or work it to leg (miss it and you may be stumped). Alone: smother it |
 | <kbd>A</kbd> | Leave |
-| <kbd>Shift</kbd> (hold) | Lofted version: lofted drive, over cover or midwicket, slog sweep (S+↗), reverse sweep (S+↖), hook (W+↗), upper cut (W+↖) |
+| <kbd>Shift</kbd> (hold) | Lofted version: lofted drive, over cover or midwicket, slog sweep (S+↖), reverse sweep (S+↗), hook (W+↖ or W+↑), upper cut (W+↗) |
+| <kbd>Q</kbd> / <kbd>E</kbd> | As the bowler runs in: shuffle across the crease towards leg / off. Across to off covers off stump and opens up the leg side, but leaves leg stump bare and the pads in front |
 | <kbd>Space</kbd> / <kbd>D</kbd> after the hit | Run. Press again for each further run. Boundaries need no running; anything else only counts if you run it, and if the throw beats you, you are run out. Byes, leg byes (if you offered a stroke) and overthrows are run the same way |
 | <kbd>A</kbd> after the hit | "No!" — send your partner back, calling off the run under way (in its first half; if the ball beats you back, it's a run-out) |
+
+### Game controller
+
+Any standard controller (Xbox, PlayStation, Switch Pro) works: press a button once it is connected. Batting: the stick or d-pad aims, A front foot, X back foot, Y use your feet (and run once it's hit), B leave (and send him back), RT lofted, LT run, LB / RB shuffle. Bowling: A for each step (choose, place, run in, lock the pace), B back, LB / RB the delivery, the stick for the marker and the amount, X field, Y over or round, LT place your own field. Between balls A carries on; Start pauses; View / Select changes the camera. In the menus the stick moves between buttons and A presses them. The controls panel shows the pad's buttons while you use it.
 
 ### Bowling
 

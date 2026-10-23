@@ -10,6 +10,7 @@ import type { PitchId } from '../game/data/pitches.ts';
 import { TEAMS, type Team } from '../game/data/teams.ts';
 import type { DeliveryTypeId } from '../game/bowling/deliveryTypes.ts';
 import { keyboard } from '../game/input/keyboardInstance.ts';
+import { type ArrowScheme, readArrowScheme, saveArrowScheme } from '../game/input/battingControls.ts';
 import { type AimStep, type Autoplay, type BowlingSetup, GAME_SPEEDS, type GameSpeed, Match, type MatchPhase, type Review, type MatchResult, type InningsState, type BattingCard, type BowlingCard, type SideId } from '../game/match/match.ts';
 import { DELIVERY_TYPES } from '../game/bowling/deliveryTypes.ts';
 import { stockSpeed } from '../game/bowling/execute.ts';
@@ -163,6 +164,11 @@ export interface GameState {
   readonly muted: boolean;
   readonly quality: Quality;
   readonly commentaryOn: boolean;
+  /** How the arrows aim a stroke: by the batter's sides (→ off side) or by the screen. */
+  readonly arrows: ArrowScheme;
+  /** A game controller is connected (its name), and whether it is the device in use (the panels show its buttons). */
+  readonly padName: string | undefined;
+  readonly padActive: boolean;
   /**
    * True from pressing Start until the new match's shaders are compiled and
    * its textures uploaded: a loading screen covers the game meanwhile, so
@@ -210,6 +216,9 @@ export interface GameState {
   toggleMute: () => void;
   toggleQuality: () => void;
   toggleCommentary: () => void;
+  toggleArrows: () => void;
+  setPadName: (name: string | undefined) => void;
+  setPadActive: (on: boolean) => void;
 }
 
 const STYLE_NAMES: Record<string, string> = {
@@ -447,6 +456,9 @@ export const useGame = create<GameState>()((set, get) => {
     muted: sound.muted,
     quality: detectQuality(),
     commentaryOn: readCommentaryEnabled(),
+    arrows: readArrowScheme(),
+    padName: undefined,
+    padActive: false,
     warming: false,
     perf: 0,
     setWarming: (warming) => {
@@ -607,6 +619,13 @@ export const useGame = create<GameState>()((set, get) => {
       const quality: Quality = get().quality === 'high' ? 'low' : 'high';
       saveQuality(quality);
       set({ quality });
+    },
+    setPadName: (padName) => set({ padName, ...(padName ? {} : { padActive: false }) }),
+    setPadActive: (padActive) => set({ padActive }),
+    toggleArrows: () => {
+      const arrows: ArrowScheme = get().arrows === 'batter' ? 'screen' : 'batter';
+      saveArrowScheme(arrows);
+      set({ arrows });
     },
     toggleCommentary: () => {
       const commentaryOn = !get().commentaryOn;

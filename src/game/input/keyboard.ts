@@ -104,7 +104,8 @@ export class KeyboardInput {
   private readonly bindings: Bindings;
   private readonly codes: Set<string>;
   private target: Window | null = null;
-  onPress: (action: GameAction, event: KeyboardEvent) => void = () => undefined;
+  /** `event` is absent for keys pressed on the player's behalf (a game controller). */
+  onPress: (action: GameAction, event?: KeyboardEvent) => void = () => undefined;
   /** When false (menus), keys pass through to the page untouched. */
   enabled = true;
   /** The most recent action pressed and when (for the on-screen key indicator). */
@@ -183,6 +184,26 @@ export class KeyboardInput {
   private readonly handleUp = (e: KeyboardEvent): void => {
     if (this.held.delete(e.code)) this.changed();
   };
+
+  /**
+   * A key pressed by another device on the player's behalf (a game controller
+   * maps its buttons to keys): held, and its actions fired, as if typed.
+   */
+  press(code: string): void {
+    if (!this.enabled || !this.codes.has(code) || this.held.has(code)) return;
+    this.held.add(code);
+    for (const action of GAME_ACTIONS) {
+      if (this.bindings[action].includes(code)) {
+        this.lastPress = { action, at: performance.now() };
+        this.onPress(action);
+      }
+    }
+    this.changed();
+  }
+
+  release(code: string): void {
+    if (this.held.delete(code)) this.changed();
+  }
 }
 
 const sign = (v: number): -1 | 0 | 1 => (v > 0 ? 1 : v < 0 ? -1 : 0);

@@ -8,7 +8,7 @@ import { keyboard } from '../input/keyboardInstance.ts';
 import { exposeDebug } from '../debug.ts';
 import { BOWLER_STUMPS_Z, FIELD, STRIKER_POPPING_Z, STRIKER_STUMPS_Z } from '../data/field.ts';
 import type { Team } from '../data/teams.ts';
-import { SHOTS } from '../batting/shots.ts';
+import { type Footwork, SHOTS, type ShotAttempt, type ShotId } from '../batting/shots.ts';
 import { DRS_PATH, DRS_TIMES, type Match } from '../match/match.ts';
 import { type Player, offSideSign } from '../model/player.ts';
 import { isOnPitch } from '../physics/ball.ts';
@@ -159,6 +159,9 @@ function Driver({ match, recorder }: { match: Match; recorder: ReplayRecorder })
         balls: () => match.history.length,
         score: () => ({ runs: match.current.runs, wickets: match.current.wickets, balls: match.current.balls }),
         lastHeadline: () => match.lastOutcome?.headline,
+        strokePose: (spec) => {
+          debugStroke = spec ? ({ ...spec } as typeof debugStroke) : undefined;
+        },
         // Tests: run the simulation on by this many seconds without drawing (waits for the player still wait).
         advance: (seconds: number) => {
           for (let i = 0; i < seconds * 240 && match.phase !== 'complete'; i++) match.step(1 / 240);
@@ -556,6 +559,9 @@ function Players({ match, recorder, bowlerHand }: { match: Match; recorder: Repl
         const card = match.current.battingCards.find((b) => b.player.id === id);
         m.guardFrom = !c && id === strikerId && ((card?.balls ?? 0) === 0 || match.current.balls % 6 === 0) ? now : undefined;
       }
+      // The build-up to the first ball: he takes guard while the bowler marks out his run.
+      const mk = id === strikerId ? markingScript(match) : undefined;
+      if (mk && mk.rt < 0.1 && (m.guardFrom === undefined || now - m.guardFrom > 3)) m.guardFrom = now + 1.2;
       if (id === outId && walkingOff) {
         // Off to the pavilion, head down.
         const toX = (m.pos.x >= 0 ? 1 : -1) * 45;
@@ -583,7 +589,7 @@ function Players({ match, recorder, bowlerHand }: { match: Match; recorder: Repl
         poseStriker(match, m, batState, dt);
         p.grip = 1;
         p.look = look;
-        if (!c && m.guardFrom !== undefined && now - m.guardFrom < 2.6) {
+        if (!c && m.guardFrom !== undefined && now >= m.guardFrom && now - m.guardFrom < 2.6) {
           // Taking guard: square on to the umpire, bat upright on the crease, a few taps to mark it.
           const u = (now - m.guardFrom) / 2.6;
           takeGuard(p, u);
@@ -846,10 +852,61 @@ function bowlerMark(match: Match): { x: number; z: number } {
  * strides from motion capture); the delivery stride and follow-through
  * (bowlingAction, keyed to the release time); then off to field.
  */
+/** The camera on the bowler marking his run-up, while there is something to see. */
+function markingShot(match: Match, bowler: { x: number; z: number; id?: string | undefined }): { bowler: { x: number; y: number; z: number }; t: number; until: number } | undefined {
+  const mk = markingScript(match);
+  if (!mk || bowler.id !== match.bowler.id) return undefined;
+  return { bowler: { x: bowler.x, y: 0, z: bowler.z }, t: mk.rt, until: mk.show };
+}
+
+/**
+ * Before the first ball: the bowler paces out the last of his run-up from
+ * the stumps, scratches his mark with a boot, turns, and shines the ball.
+ * Times are seconds since the build-up began.
+ */
+function markingScript(match: Match): { rt: number; fromZ: number; walk: number; scratch: number; show: number } | undefined {
+  const r = match.review;
+  if (match.phase !== 'review' || r?.kind !== 'ready') return undefined;
+  const g = bowlerGeometry(match);
+  const dist = Math.min(7.5, Math.max(2, BOWLER_STUMPS_Z - 0.5 - g.mark.z));
+  const walk = dist / 1.25;
+  return { rt: match.time - r.since, fromZ: g.mark.z + dist, walk, scratch: walk + 1.4, show: walk + 3.4 };
+}
+
 function poseBowler(match: Match, m: Motion, dt: number, t: number, fieldMoving?: { x: number; z: number }): void {
   const c = match.cycle;
   const g = bowlerGeometry(match);
   const p = m.pose;
+  const mk = markingScript(match);
+  if (mk) {
+    const prev = tmpB.copy(m.pos);
+    if (mk.rt < mk.walk) {
+      // Counting his strides back from the stumps, ball in hand.
+      const u = Math.max(0, mk.rt) / mk.walk;
+      m.pos.set(g.mark.x, 0, mk.fromZ + (g.mark.z - mk.fromZ) * u);
+      m.facing = Math.PI;
+      stride(m, prev.distanceTo(m.pos) > 1 ? 0 : prev.distanceTo(m.pos), dt, 7);
+      p.look = undefined;
+    } else if (mk.rt < mk.scratch) {
+      // Marking it: the boot scraped back across the turf, head down.
+      m.pos.set(g.mark.x, 0, g.mark.z);
+      resetPose(p);
+      const u = (mk.rt - mk.walk) / (mk.scratch - mk.walk);
+      const scrape = Math.sin(Math.min(1, u * 1.25) * Math.PI * 2);
+      const kick = g.right ? p.legR : p.legL;
+      kick.pitch = -0.25 + 0.45 * scrape;
+      kick.bend = 0.25 + 0.2 * Math.abs(scrape);
+      p.lean = 0.3;
+      p.look = tmpLook.set(g.mark.x, 0, g.mark.z - 0.4);
+    } else {
+      // Turns for the stumps, shining the ball on his trousers.
+      m.pos.set(g.mark.x, 0, g.mark.z);
+      idle(m, t, 'breathe');
+      m.facing = turnTowards(m.facing, 0, dt * 3);
+      polishBall(p, g.right, t);
+    }
+    return;
+  }
   if (!c || (match.phase !== 'delivery' && match.phase !== 'appeal' && match.phase !== 'drs')) {
     // Back to the mark between balls.
     const moved = approach(m, g.mark.x, g.mark.z, 2.6, dt);
@@ -922,21 +979,43 @@ function poseBowler(match: Match, m: Motion, dt: number, t: number, fieldMoving?
  * Striker: side-on stance, then the stroke. Hands and bat are placed so the
  * bat's sweet spot meets the ball at the simulated contact point and time.
  */
+/** Tests and captures: hold the striker in a stroke at a given moment. */
+let debugStroke: { shot: ShotId; footwork?: Footwork; k: number; follow: number; x?: number; y?: number } | undefined;
+
 function poseStriker(match: Match, m: Motion, bat: { body: Vector3; hands: Vector3; dir: Vector3 }, dt: number): void {
   const off = offSideSign(match.striker.battingHand) > 0 ? 1 : -1;
   const c = match.cycle;
   const play = c?.play;
-  const stroke = play?.strokeInfo;
+  const ds = debugStroke;
+  const stroke = ds
+    ? {
+        attempt: { shot: ds.shot, footwork: ds.footwork ?? 'front' } as ShotAttempt,
+        pressTime: 0,
+        batTime: 1,
+        planeZ: STRIKER_POPPING_Z - (ds.footwork === 'back' ? -0.2 : 0.55),
+        expected: { x: (ds.x ?? 0.2) * off, y: ds.y ?? 0.45 },
+      }
+    : play?.strokeInfo;
   const p = m.pose;
   battingStance(p);
   const frontLeg = off > 0 ? p.legL : p.legR;
   const backLeg = off > 0 ? p.legR : p.legL;
-  const stanceBody = tmpA.set(-off * 0.45, 0, STRIKER_POPPING_Z + 0.22);
+  // His guard, and wherever he has shuffled to across the crease since.
+  const stanceBody = tmpA.set(-off * 0.45 + (c?.guard ?? 0) * off, 0, STRIKER_POPPING_Z + 0.22);
   // Side-on: chest towards the off side.
   m.facing = off > 0 ? Math.PI / 2 : -Math.PI / 2;
 
-  if (!stroke || !play) {
-    m.pos.lerp(stanceBody, Math.min(1, dt * 4));
+  if (!stroke || (!play && !ds)) {
+    // A shuffle across: small steps, the leading foot first.
+    const gap = (stanceBody.x - m.pos.x) * off;
+    if (Math.abs(gap) > 0.02) {
+      const lead = gap > 0 ? backLeg : frontLeg;
+      lead.bend += 0.35 * Math.min(1, Math.abs(gap) / 0.12);
+      lead.pitch += 0.1 * Math.sign(gap) * off;
+    }
+    m.pos.x += (stanceBody.x - m.pos.x) * Math.min(1, dt * 7);
+    m.pos.y += (stanceBody.y - m.pos.y) * Math.min(1, dt * 4);
+    m.pos.z += (stanceBody.z - m.pos.z) * Math.min(1, dt * 4);
     // Stance: bat grounded behind the toe, hands at the top of the thigh; a tap as the bowler runs in.
     const tap = c?.phase === 'runUp' ? Math.max(0, Math.sin(c.time * 7)) * 0.04 : 0;
     bat.hands.set(m.pos.x + off * 0.27, 0.88 + tap, m.pos.z - 0.1);
@@ -944,9 +1023,9 @@ function poseStriker(match: Match, m: Motion, bat: { body: Vector3; hands: Vecto
     if (c?.phase === 'runUp') p.bob = Math.sin(c.time * 6) * 0.01;
   } else {
     const def = SHOTS[stroke.attempt.shot];
-    const tt = play.time;
-    const k = Math.min(1, Math.max(0, (tt - stroke.pressTime) / Math.max(0.05, stroke.batTime - stroke.pressTime)));
-    const follow = Math.max(0, (tt - stroke.batTime) / 0.38);
+    const tt = play?.time ?? 0;
+    const k = ds ? ds.k : Math.min(1, Math.max(0, (tt - stroke.pressTime) / Math.max(0.05, stroke.batTime - stroke.pressTime)));
+    const follow = ds ? ds.follow : Math.max(0, (tt - stroke.batTime) / 0.38);
     const contact = new Vector3(stroke.expected.x, Math.min(1.9, Math.max(0.06, stroke.expected.y)), stroke.planeZ);
     const f = strokeFrame({
       attempt: stroke.attempt,
@@ -1003,6 +1082,16 @@ function poseStriker(match: Match, m: Motion, bat: { body: Vector3; hands: Vecto
   // For a right-hander the left hand is on top.
   p.handL = wrist(off > 0 ? top : bottom);
   p.handR = wrist(off > 0 ? bottom : top);
+  // Elbows as a batter's are: the top-hand (front) elbow up and pointing down the pitch at the bowler;
+  // the bottom-hand elbow tucked down by the back hip. Without this the arms solve with the elbows
+  // flared out or bent backwards.
+  // Poles hang off the middle of each arm so they follow the hands through the stroke.
+  const frontHand = off > 0 ? p.handL : p.handR;
+  const backHand = off > 0 ? p.handR : p.handL;
+  const frontPole = frontHand.clone().add(shoulder).multiplyScalar(0.5).add(new Vector3(off * 0.1, 0.12, -0.6));
+  const backPole = backHand.clone().add(shoulder).multiplyScalar(0.5).add(new Vector3(-off * 0.08, -0.55, 0.2));
+  p.poleL = off > 0 ? frontPole : backPole;
+  p.poleR = off > 0 ? backPole : frontPole;
 }
 
 
@@ -1787,6 +1876,7 @@ function CameraRig({ match, recorder }: { match: Match; recorder: ReplayRecorder
         bowler: live && liveBowler.id === match.bowler.id ? { x: liveBowler.x, y: 0, z: liveBowler.z } : undefined,
         celebrate: celebrationShot(match),
         throwing: throwing(live),
+        marking: markingShot(match, liveBowler),
       });
       last.current = shot.name;
       lastCam.current = shot.cam;

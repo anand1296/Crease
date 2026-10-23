@@ -333,7 +333,8 @@ export class AvatarRig {
         const shoulder = this.p(`Bip01_${s}_UpperArm`);
         const goal = tv.copy(target);
         root.worldToLocal(goal).multiplyScalar(100);
-        const pole = tv2.copy(s === 'L' ? f.elbowL : f.elbowR).multiplyScalar(100);
+        const hint = s === 'L' ? pose.poleL : pose.poleR;
+        const pole = hint ? root.worldToLocal(tv2.copy(hint)).multiplyScalar(100) : tv2.copy(s === 'L' ? f.elbowL : f.elbowR).multiplyScalar(100);
         this.solveArm(s, shoulder, goal, pole);
       } else {
         if (ua.r0) this.setWorld(`Bip01_${s}_UpperArm`, tq.copy(upperFrame).multiply(ua.r0));

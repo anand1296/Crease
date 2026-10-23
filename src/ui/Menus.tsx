@@ -529,9 +529,11 @@ export function HowToPlay({ onClose }: { onClose: () => void }) {
       <div className="panel wide">
         <h2>Batting</h2>
         <p>
-          The Cricket 07 keys. Hold an arrow for where you want to hit it — <kbd>↓</kbd> is straight back past the bowler, <kbd>←</kbd>/
-          <kbd>→</kbd> square, the diagonals in front of or behind square, as you see it on screen — then press a shot key just before
-          the ball reaches the batter. Too early or too late changes where it goes and how cleanly it comes off the bat: the timing
+          The Cricket 07 keys. Hold an arrow for where you want to hit it — <kbd>↓</kbd> is straight back past the bowler, <kbd>↑</kbd>{' '}
+          fine behind the batter, <kbd>→</kbd> the off side and <kbd>←</kbd> the leg side whichever hand he bats with, the diagonals in front
+          of or behind square — then press a shot key just before the ball reaches the batter. So <kbd>↑</kbd><kbd>→</kbd> with <kbd>W</kbd>{' '}
+          is the late cut to third man, <kbd>↑</kbd><kbd>←</kbd> with <kbd>W</kbd> the pull (the hook, with Shift), and with <kbd>S</kbd> the
+          slog sweep. (The arrows can follow the screen instead: the button under the field map on the controls panel switches them.) Too early or too late changes where it goes and how cleanly it comes off the bat: the timing
           gauge shows you which. The white marker is where the bowler is aiming to pitch it.
         </p>
         <table className="keys">
@@ -559,6 +561,13 @@ export function HowToPlay({ onClose }: { onClose: () => void }) {
             <tr>
               <td><kbd>Space</kbd></td>
               <td>Run. Press again to go for the next one. Get caught short and you are run out.</td>
+            </tr>
+            <tr>
+              <td><kbd>Q</kbd> <kbd>E</kbd></td>
+              <td>
+                As the bowler runs in, shuffle across the crease towards leg (Q) or off (E). Across to off covers off stump and opens up the leg
+                side, but leaves leg stump bare and puts your pads in front.
+              </td>
             </tr>
           </tbody>
         </table>
@@ -601,6 +610,14 @@ export function HowToPlay({ onClose }: { onClose: () => void }) {
         <p>
           After the hit, <kbd>A</kbd> sends your partner back. When bowling, <kbd>G</kbd> lets you place your own field. A no-ball brings a free
           hit, a second bouncer in an over is a no-ball, leg byes count only off a stroke, and a tie goes to a super over.
+        </p>
+        <h2>Game controller</h2>
+        <p>
+          Plug in or pair a controller and press any button. Batting: the stick or d-pad aims, <kbd>A</kbd> front foot, <kbd>X</kbd> back
+          foot, <kbd>Y</kbd> use your feet (and run), <kbd>B</kbd> leave (and send him back), <kbd>RT</kbd> loft it, <kbd>LT</kbd> run,{' '}
+          <kbd>LB</kbd>/<kbd>RB</kbd> shuffle. Bowling: <kbd>A</kbd> for each step, <kbd>B</kbd> back, <kbd>LB</kbd>/<kbd>RB</kbd> the
+          delivery, <kbd>X</kbd> field, <kbd>Y</kbd> over or round, <kbd>LT</kbd> place the field. Between balls <kbd>A</kbd> carries on;{' '}
+          <kbd>Start</kbd> pauses, <kbd>View</kbd> changes the camera. In the menus the stick moves between buttons and <kbd>A</kbd> presses.
         </p>
         <h2>Practice and saving</h2>
         <p>

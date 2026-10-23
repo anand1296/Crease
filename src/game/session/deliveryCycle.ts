@@ -165,8 +165,21 @@ const MAX_RUNS = 5;
 /** Seconds the outcome stays on screen (ball in the fielder's hands) before the next ball. */
 const DEAD_SECONDS = 2.4;
 
+/** How far a batter can move across from his guard before the ball is bowled, metres (towards the off side, towards leg). */
+export const SHUFFLE_OFF = 0.54;
+export const SHUFFLE_LEG = 0.36;
+const SHUFFLE_STEP = 0.18;
+
 export class DeliveryCycle {
   phase: CyclePhase = 'runUp';
+  /**
+   * Where the striker has moved to from his guard as the bowler runs in,
+   * metres towards his off side (negative: towards leg). Across to off
+   * covers the off stump and opens up the leg side, but leaves the leg stump
+   * bare and the pads in front; back towards leg makes room to hit through
+   * the off side.
+   */
+  guard = 0;
   /** Seconds since the start of the run-up. */
   time = 0;
   readonly releaseTime: number;
@@ -342,6 +355,7 @@ export class DeliveryCycle {
       ground: this.ground,
       rng: this.rng.fork('contact'),
       ...(form ? { timingScale: timingScale(form), powerScale: powerScale(form) } : {}),
+      ...(this.guard !== 0 ? { guard: this.guard } : {}),
     });
     this.phase = 'inFlight';
     if (o.battingAi) {
@@ -627,6 +641,15 @@ export class DeliveryCycle {
     const r = this.recall;
     if (r && current === undefined && t >= r.at && t < r.back) current = r.progress * (1 - (t - r.at) / (r.back - r.at));
     return { completed, current };
+  }
+
+  /** Human batter: a shuffle across the crease (+1 towards off, −1 towards leg), before the ball is bowled. */
+  shuffle(dir: 1 | -1): boolean {
+    if (this.phase !== 'runUp') return false;
+    const next = Math.round((this.guard + dir * SHUFFLE_STEP) * 100) / 100;
+    if (next > SHUFFLE_OFF + 1e-6 || next < -SHUFFLE_LEG - 1e-6) return false;
+    this.guard = next;
+    return true;
   }
 
   /**

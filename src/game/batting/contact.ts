@@ -43,6 +43,8 @@ export interface ContactInput {
   /** The batter's form: multiplies the timing window (confidence, tiredness) and the bat speed (tiredness). */
   readonly timingScale?: number;
   readonly powerScale?: number;
+  /** The batter has moved across from his guard, metres towards his off side: the ball's line is judged from where he now stands. */
+  readonly guard?: number;
   readonly rng: Rng;
 }
 
@@ -292,7 +294,7 @@ export function resolveContact(input: ContactInput): ContactResult {
   const off = offSideSign(batter.battingHand);
   const bat = batter.batting;
   const ballSpeed = Math.max(5, length3(u));
-  const line = input.ballPosition.x * off;
+  const line = input.ballPosition.x * off - (input.guard ?? 0);
   const height = input.ballPosition.y;
 
   // --- 1. Quality ---------------------------------------------------------

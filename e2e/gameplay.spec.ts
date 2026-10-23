@@ -6,6 +6,20 @@ async function takeTheField(page: Page): Promise<void> {
   await expect(page.getByTestId('warming')).toBeHidden({ timeout: 120_000 });
 }
 
+/** The autoplay buttons' mode, skipping any replay that hides them. */
+async function autoplayMode(page: Page): Promise<string | null> {
+  if (await page.getByTestId('replay').isVisible()) await page.keyboard.press('Enter');
+  return page.getByTestId('autoplay').getAttribute('data-mode', { timeout: 1000 }).catch(() => null);
+}
+
+/** From the start card: Enter, then the build-up in the middle (the bowler marks his run), and Enter again when ready. */
+async function startPlay(page: Page): Promise<void> {
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('ready-prompt')).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('ready-prompt')).toBeHidden();
+}
+
 /**
  * Plays the actual game: menus → match setup → squad → batting through the
  * keyboard (strokes timed to the live ball) → pause → a second match bowling,
@@ -83,11 +97,16 @@ test.describe('gameplay', () => {
     await expect(page.getByTestId('review')).toBeVisible();
     await page.keyboard.press('Enter');
     await expect(page.getByTestId('review')).toBeHidden();
+    // The build-up: the bowler marks his run-up and the controls are already on screen; Space or Enter starts.
+    await expect(page.getByTestId('ready-prompt')).toBeVisible();
+    await expect(page.getByTestId('controls-panel')).toBeVisible();
+    await page.keyboard.press('Space');
+    await expect(page.getByTestId('ready-prompt')).toBeHidden();
     await expect(page.getByTestId('controls-panel')).toBeVisible();
 
-    // Three strokes, Cricket 07 keys: S+↓ front-foot straight drive, W+← back-foot cut (off side for a
-    // right-hander), S alone forward defence.
-    const strokes = [{ hold: 'ArrowDown', press: 'KeyS' }, { hold: 'ArrowLeft', press: 'KeyW' }, { press: 'KeyS' }];
+    // Three strokes, Cricket 07 keys: S+↓ front-foot straight drive, W+→ back-foot cut (→ is the off side,
+    // whichever hand), S alone forward defence.
+    const strokes = [{ hold: 'ArrowDown', press: 'KeyS' }, { hold: 'ArrowRight', press: 'KeyW' }, { press: 'KeyS' }];
     for (const [i, stroke] of strokes.entries()) {
       await playStroke(page, stroke, 0.24);
       // Call a run if the ball was hit; harmless otherwise.
@@ -121,9 +140,8 @@ test.describe('gameplay', () => {
     expect(await page.evaluate(() => window.__crease?.renderInfo?.().programs)).toBe(programs);
 
     // Autoplay: Y hands the rest of the over to the computer; it plays on without waiting, until Y takes it back.
-    // (A replay hides the buttons: skip it if one is playing.)
-    if (await page.getByTestId('replay').isVisible()) await page.keyboard.press('Enter');
-    await expect(page.getByTestId('autoplay')).toHaveAttribute('data-mode', 'off', { timeout: 30_000 });
+    // (A replay hides the buttons, and may start a moment after the ball: skip any until the buttons are there.)
+    await expect.poll(() => autoplayMode(page), { timeout: 60_000 }).toBe('off');
     const before = await balls(page);
     await page.keyboard.press('KeyY');
     await expect(page.getByTestId('autoplay')).toHaveAttribute('data-mode', 'over');
@@ -135,7 +153,7 @@ test.describe('gameplay', () => {
     await page.keyboard.press('KeyY');
     await expect.poll(() => page.evaluate(() => window.__crease?.phase?.()), { timeout: 180_000 }).toBe('review');
     await page.evaluate(() => window.__crease?.setSpeed?.(1));
-    await expect(page.getByTestId('autoplay')).toHaveAttribute('data-mode', 'off');
+    await expect.poll(() => autoplayMode(page), { timeout: 60_000 }).toBe('off');
     const score = await page.evaluate(() => window.__crease?.score?.());
     expect((score?.balls ?? 0) + 3).toBeGreaterThanOrEqual(3);
 
@@ -168,7 +186,7 @@ test.describe('gameplay', () => {
     await page.getByRole('button', { name: 'We bat' }).click();
     await page.getByTestId('start-match').click();
     await takeTheField(page);
-    await page.keyboard.press('Enter');
+    await startPlay(page);
     await expect.poll(() => page.evaluate(() => window.__crease?.ballPhase?.()), { timeout: 90_000 }).toBe('inFlight');
     await page.keyboard.press('KeyA');
     await expect(page.getByTestId('appeal')).toBeVisible({ timeout: 90_000 });
@@ -224,7 +242,7 @@ test.describe('gameplay', () => {
     await takeTheField(page);
     await expect(page.getByTestId('role')).toContainText('You are bowling');
     await expect(page.getByTestId('review')).toBeVisible();
-    await page.keyboard.press('Enter');
+    await startPlay(page);
 
     await expect(page.getByTestId('bowler-choice')).toBeVisible({ timeout: 20_000 });
     // G opens the field editor: the captain places his own field (Esc closes it).
@@ -279,11 +297,20 @@ test.describe('gameplay', () => {
     await page.getByRole('button', { name: 'Under lights', exact: true }).click();
     await page.getByTestId('start-match').click();
     await takeTheField(page);
-    await page.keyboard.press('Enter');
+    await startPlay(page);
     // Let a ball go by (leave it), then save.
     await expect.poll(() => page.evaluate(() => window.__crease?.ballPhase?.()), { timeout: 90_000 }).toBe('inFlight');
     await page.keyboard.press('KeyA');
-    await expect.poll(() => balls(page), { timeout: 120_000 }).toBe(1);
+    // (Pads in front can bring an lbw appeal: accept the decision rather than wait out the review clock.)
+    await expect
+      .poll(
+        async () => {
+          if ((await page.evaluate(() => window.__crease?.phase?.())) === 'appeal') await page.keyboard.press('Enter');
+          return balls(page);
+        },
+        { timeout: 120_000 },
+      )
+      .toBe(1);
     const before = await page.evaluate(() => window.__crease?.score?.());
     await page.keyboard.press('KeyP');
     await page.getByTestId('save-match').click();
@@ -306,7 +333,7 @@ test.describe('gameplay', () => {
     await expect(page.getByTestId('practice-menu')).toContainText('Hit the markers');
     await page.getByTestId('challenge-survive').click();
     await takeTheField(page);
-    await page.keyboard.press('Enter');
+    await startPlay(page);
     await expect(page.getByTestId('challenge')).toContainText('Survive the over');
     await expect(page.getByTestId('challenge')).toContainText('6 balls left');
     // Let the computer bat it out, quickly.

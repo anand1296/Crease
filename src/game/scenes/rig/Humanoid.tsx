@@ -50,6 +50,9 @@ export interface Pose {
   /** Optional world-space hand targets: the arm is aimed at them (e.g. holding a bat). */
   handL?: Vector3 | undefined;
   handR?: Vector3 | undefined;
+  /** With hand targets: world points the elbows bend towards (a batter's front elbow to the bowler, the back one down by the hip). */
+  poleL?: Vector3 | undefined;
+  poleR?: Vector3 | undefined;
   /**
    * Play a motion-captured clip instead of the procedural pose (skinned
    * models only; the primitive rig ignores it). `time` in seconds.

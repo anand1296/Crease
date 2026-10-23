@@ -22,6 +22,8 @@ export function resetPose(p: Pose): void {
   setLimb(p.legR, 0, 0, 0);
   p.handL = undefined;
   p.handR = undefined;
+  p.poleL = undefined;
+  p.poleR = undefined;
   p.clip = undefined;
   p.armLayer = undefined;
   p.look = undefined;
@@ -267,10 +269,11 @@ export function bowlingAction(p: Pose, tau: number, kind: ActionKind, rightArmed
 /** Batter's stance: side-on, knees flexed, slight crouch. */
 export function battingStance(p: Pose): void {
   resetPose(p);
-  p.drop = 0.1;
-  p.lean = 0.35;
-  setLimb(p.legL, 0.15, 0.22, 0.35);
-  setLimb(p.legR, -0.05, 0.22, 0.3);
+  // Knees flexed, feet a little wider than the shoulders, weight on the balls of the feet.
+  p.drop = 0.13;
+  p.lean = 0.38;
+  setLimb(p.legL, 0.2, 0.26, 0.5);
+  setLimb(p.legR, -0.08, 0.26, 0.42);
 }
 
 /**

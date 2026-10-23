@@ -95,6 +95,11 @@ export function useGameControls(): void {
         return;
       }
       if (m.humanBatting) {
+        // As the bowler runs in, Q and E shuffle across the crease (E towards the off side, Q towards leg).
+        if ((action === 'prevDelivery' || action === 'nextDelivery') && m.cycle?.phase === 'runUp') {
+          m.shuffle(action === 'nextDelivery' ? 1 : -1);
+          return;
+        }
         // Once the ball has been hit, D (as in Cricket 07) or Space calls a run.
         const struck = m.cycle?.phase === 'struck';
         if (action === 'run' || (struck && action === 'shotFeet')) {
@@ -108,12 +113,12 @@ export function useGameControls(): void {
         }
         if (action === 'shotFront' || action === 'shotBack' || action === 'shotFeet' || action === 'leave') {
           const kind = action === 'shotFront' ? 'front' : action === 'shotBack' ? 'back' : action === 'shotFeet' ? 'feet' : 'leave';
-          if (m.playShot(shotFromInput(kind, keyboard.direction(), keyboard.isHeld('lofted'), m.striker.battingHand))) lastStroke = kind;
+          if (m.playShot(shotFromInput(kind, keyboard.direction(), keyboard.isHeld('lofted'), m.striker.battingHand, useGame.getState().arrows))) lastStroke = kind;
           return;
         }
         // An arrow (or Shift) a moment after the shot key still aims it: keys pressed "together" are never quite.
         if (lastStroke && lastStroke !== 'leave' && (action === 'left' || action === 'right' || action === 'up' || action === 'down' || action === 'lofted')) {
-          m.reaimShot(shotFromInput(lastStroke, keyboard.direction(), keyboard.isHeld('lofted'), m.striker.battingHand));
+          m.reaimShot(shotFromInput(lastStroke, keyboard.direction(), keyboard.isHeld('lofted'), m.striker.battingHand, useGame.getState().arrows));
         }
         return;
       }

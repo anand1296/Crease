@@ -52,6 +52,9 @@ const SHOULDER_Y = 1.42;
 export const REACH = 0.62;
 
 interface Shape {
+  /** Optional bat directions the swing passes through: half-way down from the backlift, and half-way into the finish. */
+  readonly downVia?: readonly [number, number, number];
+  readonly throughVia?: readonly [number, number, number];
   /** Hands relative to the shoulders at contact (S, F, U). */
   readonly contactHands: readonly [number, number, number];
   /** Bat direction (hands → toe) at contact, in S, F, U before normalising. */
@@ -69,6 +72,9 @@ interface Shape {
 
 const SHAPES: Readonly<Record<StrokeFamily, Shape>> = {
   drive: {
+    // Down the line (the bat behind the batter, face to the bowler), and up it after the ball (towards the bowler, rising).
+    downVia: [0.12, -0.9, -0.4],
+    throughVia: [0.02, 0.85, 0.5],
     contactHands: [0.26, 0.24, -0.48],
     contactBat: [0.05, 0.12, -1],
     topHands: [-0.05, -0.22, 0.12],
@@ -79,6 +85,7 @@ const SHAPES: Readonly<Record<StrokeFamily, Shape>> = {
     lean: 0.55,
   },
   cut: {
+    throughVia: [0.25, 0.9, 0.05],
     contactHands: [0.32, 0.08, -0.2],
     contactBat: [0.85, 0.3, -0.42],
     topHands: [-0.02, -0.18, 0.22],
@@ -89,6 +96,7 @@ const SHAPES: Readonly<Record<StrokeFamily, Shape>> = {
     lean: 0.25,
   },
   pull: {
+    throughVia: [-0.55, 0.55, 0.25],
     contactHands: [0.18, 0.3, -0.18],
     contactBat: [0.55, 0.65, -0.25],
     topHands: [-0.02, -0.18, 0.25],
@@ -261,7 +269,13 @@ export function strokeFrame(i: StrokeInput): StrokeFrame {
     const u = 1 - (1 - Math.min(1, i.follow)) ** 2;
     const contactHands = shoulders.clone().add(relC);
     hands.lerpVectors(contactHands, finishHands, u);
-    slerp(batC, finishBat, u, bat);
+    // (Not for the strokes that are held at contact: the late cut and the glance.)
+    const via = s.throughVia && fin.bat !== s.contactBat ? turnBy(world(s.throughVia, off), swivel, off).normalize() : undefined;
+    if (via) {
+      // Through the line of the ball first, then up into the finish.
+      if (u < 0.45) slerp(batC, via, u / 0.45, bat);
+      else slerp(via, finishBat, (u - 0.45) / 0.55, bat);
+    } else slerp(batC, finishBat, u, bat);
   } else if (i.k < 0.38) {
     // Pick-up into the backlift.
     const u = smooth(i.k / 0.38);
@@ -280,7 +294,12 @@ export function strokeFrame(i: StrokeInput): StrokeFrame {
       .multiplyScalar((1 - a) * (1 - a))
       .addScaledVector(ctrl, 2 * a * (1 - a))
       .addScaledVector(contactHands, a * a);
-    slerp(batTop, batC, a, bat);
+    if (s.downVia) {
+      // A straight bat comes down the line: from the backlift, through pointing back at the keeper, to the ball.
+      const via = turnBy(world(s.downVia, off), swivel * 0.5, off).normalize();
+      if (a < 0.5) slerp(batTop, via, a / 0.5, bat);
+      else slerp(via, batC, (a - 0.5) / 0.5, bat);
+    } else slerp(batTop, batC, a, bat);
   }
   // At contact the bat is exactly where the ball is.
   if (fam !== 'leave' && i.k >= 1 && i.follow <= 0) hands.copy(handsC);

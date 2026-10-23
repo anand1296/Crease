@@ -191,6 +191,13 @@ describe('Match (human)', () => {
         }
         waited += 1;
         expect(m.next()).toBe(true);
+        // The start card leads to the build-up in the middle, which waits for the player too.
+        if (r.kind === 'start') {
+          expect(m.review?.kind).toBe('ready');
+          for (let i = 0; i < 2400; i++) m.step(dt);
+          expect(m.phase).toBe('review');
+          expect(m.next()).toBe(true);
+        }
         expect(m.phase).toBe('between');
       }
     }

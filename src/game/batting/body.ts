@@ -51,16 +51,19 @@ export function batterBoxes(
   lineAtContact: number,
   footworkSkill: number,
   pitchZ?: number,
+  /** Moved across from the guard, metres towards the off side. */
+  guard = 0,
 ): Box[] {
   const off = offSideSign(hand);
+  const g = guard * off;
   if (!attempt || attempt.shot === 'leave') {
     const fw = attempt?.footwork ?? 'front';
     // Stance: legs on the leg side of middle stump. A leave on the front foot
     // still plants the pad forward, in line with middle/leg.
     const frontZ = fw === 'front' ? STRIKER_POPPING_Z - 0.3 : STRIKER_POPPING_Z + 0.2;
     const backZ = STRIKER_POPPING_Z + 0.35;
-    const frontX = -off * 0.1;
-    const backX = fw === 'back' ? off * 0.02 : -off * 0.2;
+    const frontX = -off * 0.1 + g;
+    const backX = (fw === 'back' ? off * 0.02 : -off * 0.2) + g;
     return [
       box('pad', frontX, frontZ, PAD_HALF_WIDTH, PAD_HALF_DEPTH, 0, PAD_HEIGHT),
       box('pad', backX, backZ, PAD_HALF_WIDTH, PAD_HALF_DEPTH, 0, PAD_HEIGHT),
@@ -72,9 +75,9 @@ export function batterBoxes(
   if (attempt.footwork === 'front' || attempt.footwork === 'out') {
     // Front pad to the line of the ball, leg side of the bat, just behind it. Out of the crease,
     // the back foot has come down the pitch too.
-    const frontX = clamp(lineAtContact - off * 0.2, -0.5, 0.5);
+    const frontX = clamp(lineAtContact - off * 0.2, -0.5 + g, 0.5 + g);
     const frontZ = zc + 0.18;
-    const backX = -off * 0.2;
+    const backX = -off * 0.2 + g;
     const backZ = attempt.footwork === 'out' ? zc + 0.6 : STRIKER_POPPING_Z + 0.35;
     return [
       box('pad', frontX, frontZ, PAD_HALF_WIDTH, PAD_HALF_DEPTH, 0, PAD_HEIGHT),
@@ -83,9 +86,9 @@ export function batterBoxes(
     ];
   }
   // Back foot: back pad goes back and across towards off stump.
-  const backX = off * 0.02;
+  const backX = off * 0.02 + g;
   const backZ = zc + 0.3;
-  const frontX = -off * 0.15;
+  const frontX = -off * 0.15 + g;
   const frontZ = zc + 0.15;
   return [
     box('pad', frontX, frontZ, PAD_HALF_WIDTH, PAD_HALF_DEPTH, 0, PAD_HEIGHT),

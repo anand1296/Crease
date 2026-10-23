@@ -65,6 +65,8 @@ export interface BallInPlayOptions {
   /** The striker's form (see batting/form.ts): timing window and power multipliers. */
   readonly timingScale?: number;
   readonly powerScale?: number;
+  /** The striker has moved across from his guard, metres towards his off side. */
+  readonly guard?: number;
 }
 
 const STUMP_HALF_WIDTH = FIELD.wicketWidth / 2 + FIELD.ballRadius;
@@ -120,7 +122,7 @@ export class BallInPlay {
     this.delivery = opts.delivery;
     this.ball = createBall(opts.delivery.release, opts.delivery.velocity, opts.delivery.movement);
     this.previous = { ...this.ball.position };
-    this.boxes = batterBoxes(opts.striker.battingHand, null, 0, opts.striker.batting.footwork);
+    this.boxes = batterBoxes(opts.striker.battingHand, null, 0, opts.striker.batting.footwork, undefined, opts.guard ?? 0);
   }
 
   /** Whether a stroke can still be committed to. */
@@ -172,7 +174,7 @@ export class BallInPlay {
     };
     // Pads move with the footwork; their line is fixed when the stroke is chosen.
     const line = predictArrival(this.delivery, planeZ, this.opts.ground)?.x ?? this.ball.position.x;
-    this.boxes = batterBoxes(this.opts.striker.battingHand, attempt, line, this.opts.striker.batting.footwork, pitchZ);
+    this.boxes = batterBoxes(this.opts.striker.battingHand, attempt, line, this.opts.striker.batting.footwork, pitchZ, this.opts.guard ?? 0);
     return true;
   }
 
@@ -306,6 +308,7 @@ export class BallInPlay {
             heightError: (at.y - s.expected.y) * (1 - adjust),
             ...(this.opts.timingScale !== undefined ? { timingScale: this.opts.timingScale } : {}),
             ...(this.opts.powerScale !== undefined ? { powerScale: this.opts.powerScale } : {}),
+            ...(this.opts.guard ? { guard: this.opts.guard } : {}),
             rng: this.opts.rng,
           });
           this.contact = result;

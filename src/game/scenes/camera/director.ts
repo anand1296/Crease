@@ -24,7 +24,7 @@ export interface Vec {
 }
 
 export interface Shot {
-  readonly name: 'wide' | 'aim' | 'closeUp' | 'runUp' | 'delivery' | 'stroke' | 'chase' | 'throw' | 'celebrate' | 'stumps' | 'hold';
+  readonly name: 'wide' | 'aim' | 'mark' | 'closeUp' | 'runUp' | 'delivery' | 'stroke' | 'chase' | 'throw' | 'celebrate' | 'stumps' | 'hold';
   /** Which fixed camera a chase shot uses (so the director stays on it for the rest of the ball). */
   readonly cam?: string;
   readonly pos: Vec;
@@ -70,6 +70,8 @@ export interface DirectorInput {
    * ball left his hand (negative while he winds up).
    */
   readonly throwing?: { readonly from: Vec; readonly target: Vec; readonly since: number } | undefined;
+  /** Before the first ball: the bowler marking out his run-up (seconds into it, and until when to watch him). */
+  readonly marking?: { readonly bowler: Vec; readonly t: number; readonly until: number } | undefined;
   /** After the ball: a celebration to show (a wicket's huddle, a batter raising his bat), and how wide it is. */
   readonly celebrate?: { readonly at: Vec; readonly span: number } | undefined;
 }
@@ -98,7 +100,7 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 export const MAIN_CAMERA: Readonly<Vec> = { x: 0, y: 17, z: BOWLER_STUMPS_Z - 70 };
 
 /** The top of the run-up frame: the batter's head and the keeper behind him. */
-const BATTER_TOP: Readonly<Vec> = { x: 0, y: 2.3, z: STRIKER_STUMPS_Z + 2.2 };
+const BATTER_TOP: Readonly<Vec> = { x: 0, y: 2.15, z: STRIKER_STUMPS_Z + 1.6 };
 /** Where the bowler's feet are at release, as the run-up frame sees them. */
 const RELEASE_FEET_Z = BOWLER_STUMPS_Z + 0.2;
 
@@ -129,15 +131,15 @@ export function frameBetween(cam: Vec, low: Vec, high: Vec, margin = { bottom: 0
 export function runUpFrame(bowler: Vec): { pos: Vec; look: Vec; fov: number } {
   // A stride behind him, so the trailing foot stays in frame; a little below the ground for his shadow.
   const low = { x: bowler.x * 0.5, y: -0.25, z: Math.min(bowler.z, RELEASE_FEET_Z) - 0.9 };
-  const f = frameBetween(MAIN_CAMERA, low, BATTER_TOP);
+  const f = frameBetween(MAIN_CAMERA, low, BATTER_TOP, { bottom: 0.1, top: 0.04 });
   return { pos: { ...MAIN_CAMERA }, look: f.look, fov: f.fov };
 }
 
 /** Between balls: the whole pitch and the close field from the main camera. */
 export const WIDE: Readonly<{ pos: Vec; look: Vec; fov: number }> = {
   pos: { ...MAIN_CAMERA },
-  look: { x: 0, y: 0.6, z: 1.5 },
-  fov: 10,
+  look: { x: 0, y: 0.6, z: 2.5 },
+  fov: 8.2,
 };
 /** The main camera at the moment of release: the bowler at the foot of the frame and the batter at the top. */
 export const TIGHT: Readonly<{ pos: Vec; look: Vec; fov: number }> = runUpFrame({ x: 0, y: 0, z: RELEASE_FEET_Z });
@@ -171,14 +173,14 @@ export function chaseCamera(ball: Vec): string {
 /** Classic (Cricket 07) framing: lower and closer behind the bowler's arm. */
 export const CLASSIC_WIDE: Readonly<{ pos: Vec; look: Vec; fov: number }> = {
   pos: { x: -0.9, y: 5.2, z: BOWLER_STUMPS_Z - 27 },
-  look: { x: 0, y: 0.8, z: 2 },
-  fov: 30,
+  look: { x: 0, y: 0.8, z: 2.5 },
+  fov: 27,
 };
 export const CLASSIC_TIGHT: Readonly<{ pos: Vec; look: Vec; fov: number }> = {
   // High enough that the line to the striker clears the bowler's-end umpire's hat.
   pos: { x: -0.6, y: 3.9, z: BOWLER_STUMPS_Z - 17 },
   look: { x: 0, y: 1.0, z: STRIKER_STUMPS_Z - 1.2 },
-  fov: 19,
+  fov: 17,
 };
 
 /** The bowler's view while setting up a ball: high behind the bowler's arm, the whole pitch in frame. */
@@ -197,6 +199,15 @@ export function direct(input: DirectorInput): Shot {
   const WIDE_ = input.humanBowling ? AIM : classic ? CLASSIC_WIDE : WIDE;
   const TIGHT_ = classic ? CLASSIC_TIGHT : TIGHT;
 
+  if (phase === undefined && input.marking && input.marking.t < input.marking.until) {
+    // The build-up: a long lens from the bowler's end, off to the side, on the bowler pacing out and marking his run.
+    const b = input.marking.bowler;
+    const pos = { x: b.x - 9, y: 4.5, z: BOWLER_STUMPS_Z - 46 };
+    const look = { x: b.x, y: 1.0, z: b.z };
+    const d = Math.hypot(pos.x - look.x, pos.y - look.y, pos.z - look.z);
+    return { name: 'mark', pos, look, fov: (2 * Math.atan(1.6 / d) * 180) / Math.PI, cut: input.previous !== 'mark', ease: 4 };
+  }
+
   if (phase === undefined) {
     // Television, between balls: a long-lens close-up of the batter.
     if (!classic && !input.humanBowling && input.subject) {
@@ -206,7 +217,7 @@ export function direct(input: DirectorInput): Shot {
         // High enough that the background is outfield grass, not the advertising boards.
         pos: { x: sub.x + 9, y: 9, z: BOWLER_STUMPS_Z - 40 },
         look: { x: sub.x, y: 1.3, z: sub.z },
-        fov: 3.4,
+        fov: 2.9,
         cut: input.previous !== 'closeUp',
         ease: 4,
       };
@@ -323,7 +334,7 @@ export function direct(input: DirectorInput): Shot {
   const dist = Math.hypot(pos.x - target.x, pos.y - target.y, pos.z - target.z);
   // Field of view that keeps ball and chaser (plus a margin, and any height of a lofted ball) in frame.
   // Tight on the fielder, as television is: just the ball, the man going for it, and a little room.
-  const span = Math.max(6.5, spread + 5, ball.y * 1.6 + 4);
+  const span = Math.max(5.5, spread + 4.2, ball.y * 1.6 + 3.5);
   const fov = Math.min(55, Math.max(8, ((2 * Math.atan(span / 2 / dist)) * 180) / Math.PI));
   return { name: 'chase', cam, pos, look: target, fov, cut: input.previous === 'stroke', ease: 4.5 };
 }

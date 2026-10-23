@@ -1,3 +1,4 @@
+import { useGamepad } from '../game/input/useGamepad.ts';
 import { lazy, type ReactNode, Suspense, useState } from 'react';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
 import { Hud } from '../ui/Hud.tsx';
@@ -38,6 +39,7 @@ export function App() {
   const quit = useGame((s) => s.quitToMenu);
   const warming = useGame((s) => s.warming);
   useGameControls();
+  useGamepad();
 
   return (
     <div className="app" data-testid="app" data-status={webgl ? status : 'unsupported'} data-screen={screen}>

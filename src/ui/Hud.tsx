@@ -13,7 +13,7 @@ import { HowToPlay } from './Menus.tsx';
 import { useEffect, useRef, useState } from 'react';
 import type { GameAction } from '../game/input/keyboard.ts';
 import { keyboard } from '../game/input/keyboardInstance.ts';
-import { type BatAction, fieldRegion, shotAngle, shotFromInput } from '../game/input/battingControls.ts';
+import { type ArrowScheme, type BatAction, fieldRegion, shotAngle, shotFromInput } from '../game/input/battingControls.ts';
 import { SHOTS, type ShotAttempt } from '../game/batting/shots.ts';
 import type { Hand } from '../game/model/player.ts';
 import { howOut } from './Scorecard.tsx';
@@ -832,8 +832,9 @@ function TimingGauge() {
  * straight down the ground towards the bottom, his off side on the left
  * for a right-hander.
  */
-function FieldRadar({ hand, front, back }: { hand: Hand; front: ShotAttempt; back: ShotAttempt }) {
-  const offLeft = hand === 'right';
+function FieldRadar({ hand, front, back, scheme }: { hand: Hand; front: ShotAttempt; back: ShotAttempt; scheme: ArrowScheme }) {
+  // Drawn the way the arrows read: with batter arrows the off side is always on the right.
+  const offLeft = scheme === 'screen' && hand === 'right';
   const at = (a: ShotAttempt) => {
     const kind = SHOTS[a.shot].kind;
     if (kind === 'leave' || (kind === 'defence' && !a.push)) return undefined;
@@ -856,12 +857,20 @@ function FieldRadar({ hand, front, back }: { hand: Hand; front: ShotAttempt; bac
   );
 }
 
+/** Controller buttons for the keys the panels show (see input/gamepad.ts). */
+const PAD_LABEL: Readonly<Record<string, string>> = { S: 'A', W: 'X', D: 'Y', A: 'B', Shift: 'RT', Space: 'LT', Q: 'LB', E: 'RB' };
+
 function ControlsPanel() {
   const snap = useGame((s) => s.snap);
   const help = useGame((s) => s.showHelp);
   const { held, flash, dir, back } = useKeys();
+  const scheme = useGame((s) => s.arrows);
+  const toggleArrows = useGame((s) => s.toggleArrows);
+  const pad = useGame((s) => s.padActive);
+  // With a controller in hand, its buttons instead of the keys.
+  const K = (key: string) => (pad ? (PAD_LABEL[key] ?? key) : key);
   if (help || !snap || snap.phase === 'inningsBreak' || snap.phase === 'complete' || snap.phase === 'chooseBowler' || snap.phase === 'appeal' || snap.phase === 'drs') return null;
-  if (snap.review && snap.review.kind !== 'ball') return null;
+  if (snap.review && snap.review.kind !== 'ball' && snap.review.kind !== 'ready') return null;
   const lit = (a: GameAction) => held.has(a) || flash === a;
   const arrows = (
     <div className="arrows" aria-hidden="true">
@@ -875,30 +884,34 @@ function ControlsPanel() {
   );
   if (snap.userBatting) {
     const hand = snap.striker.hand;
-    const shot = (a: BatAction) => shotFromInput(a, dir, back, hand);
+    const shot = (a: BatAction) => shotFromInput(a, dir, back, hand, scheme);
     const name = (a: BatAction) => SHOTS[shot(a).shot].name;
     const where = (a: BatAction) => fieldRegion(shot(a));
     const struck = snap.ballPhase === 'struck';
     const rows: { a: GameAction; k: string; label: string; what: string; to?: string }[] = [
-      { a: 'shotFront', k: 'S', what: 'Front foot', label: name('front'), to: where('front') },
-      { a: 'shotBack', k: 'W', what: 'Back foot', label: name('back'), to: where('back') },
+      { a: 'shotFront', k: K('S'), what: 'Front foot', label: name('front'), to: where('front') },
+      { a: 'shotBack', k: K('W'), what: 'Back foot', label: name('back'), to: where('back') },
       struck
-        ? { a: 'shotFeet', k: 'D', what: 'Run', label: snap.runsCalled > 0 ? `${snap.runsCalled} called` : 'call a run' }
-        : { a: 'shotFeet', k: 'D', what: 'Use your feet', label: name('feet'), to: where('feet') },
-      { a: 'leave', k: 'A', what: struck ? 'Send back' : 'Leave', label: struck ? '“No!” — call off the run' : '' },
+        ? { a: 'shotFeet', k: K('D'), what: 'Run', label: snap.runsCalled > 0 ? `${snap.runsCalled} called` : 'call a run' }
+        : { a: 'shotFeet', k: K('D'), what: 'Use your feet', label: name('feet'), to: where('feet') },
+      { a: 'leave', k: K('A'), what: struck ? 'Send back' : 'Leave', label: struck ? '“No!” — call off the run' : '' },
     ];
+    const shuffling = snap.ballPhase === 'runUp';
     return (
       <section className="keys" aria-label="Batting controls" data-testid="controls-panel">
         <div className="keys-head">
           <span>Batting</span>
-          <span className="dim">aim with the arrows, press a shot as the ball arrives</span>
+          <span className="dim">{pad ? 'aim with the stick, press a shot as the ball arrives' : 'aim with the arrows, press a shot as the ball arrives'}</span>
         </div>
         <div className="keys-body">
           <div className="keys-aim">
             {arrows}
-            <FieldRadar hand={hand} front={shot('front')} back={shot('back')} />
+            <FieldRadar hand={hand} front={shot('front')} back={shot('back')} scheme={scheme} />
             <div className="aim-label">{dir.x === 0 && dir.y === 0 ? 'No arrow: defend' : '↓ is straight'}</div>
-            <Key label="Shift" on={lit('lofted')} wide />
+            <button type="button" className="aim-scheme" onClick={toggleArrows} title="Switch how the arrows aim" data-testid="arrow-scheme">
+              {scheme === 'batter' ? '→ off side' : '← screen-left'}
+            </button>
+            <Key label={K('Shift')} on={lit('lofted')} wide />
             <div className="aim-label">{back ? 'Lofted' : 'Along the ground'}</div>
           </div>
           <ul>
@@ -913,9 +926,15 @@ function ControlsPanel() {
               </li>
             ))}
             <li className={lit('run') ? 'on' : ''}>
-              <Key label="Space" on={lit('run')} wide />
+              <Key label={K('Space')} on={lit('run')} wide />
               <span className="what">Run</span>
               <span>{snap.runsCalled > 0 ? `${snap.runsCalled} called` : ''}</span>
+            </li>
+            <li className={`${lit('prevDelivery') || lit('nextDelivery') ? 'on' : ''} ${shuffling ? '' : 'dim'}`}>
+              <Key label={K('Q')} on={lit('prevDelivery')} />
+              <Key label={K('E')} on={lit('nextDelivery')} />
+              <span className="what">Shuffle</span>
+              <span>{shuffling ? 'across the crease, to leg / to off' : 'before the ball is bowled'}</span>
             </li>
           </ul>
         </div>
@@ -1289,11 +1308,19 @@ function SaveButton() {
 /** "Next ball" prompt while the game waits after an ordinary ball. */
 function NextPrompt() {
   const snap = useGame((s) => s.snap);
+  const pad = useGame((s) => s.padActive);
   const match = useGame((s) => s.match);
   const replaying = useGame((s) => s.replaying);
   if (!snap || !match || replaying) return null;
   const waiting = snap.phase === 'review' && snap.review?.kind === 'ball';
   const dead = snap.phase === 'delivery' && snap.ballPhase === 'dead';
+  if (snap.phase === 'review' && snap.review?.kind === 'ready') {
+    return (
+      <button type="button" className="next-prompt ready first-ball" onClick={() => match.next()} data-testid="ready-prompt">
+        Ready? {pad ? <kbd>A</kbd> : <><kbd>Space</kbd> <span className="dim">or</span> <kbd>Enter</kbd></>}
+      </button>
+    );
+  }
   if (!waiting && !dead) return null;
   return (
     <button type="button" className={`next-prompt ${waiting ? 'ready' : ''}`} onClick={() => match.next()} data-testid="next-ball">
@@ -1316,7 +1343,7 @@ function ReviewCard() {
   const match = useGame((s) => s.match);
   const replaying = useGame((s) => s.replaying);
   const review = snap?.review;
-  if (!snap || !match || !review || review.kind === 'ball' || replaying) return null;
+  if (!snap || !match || !review || review.kind === 'ball' || review.kind === 'ready' || replaying) return null;
   const inn = match.current;
   const batting = match.side(inn.batting).team;
   const bowling = match.side(inn.bowling).team;
@@ -1352,8 +1379,8 @@ function ReviewCard() {
             {snap.userBatting ? (
               <ol className="howto">
                 <li>
-                  Hold an <kbd>arrow</kbd> for where to hit it, as you see it on screen: <kbd>↓</kbd> straight, <kbd>←</kbd>/<kbd>→</kbd> square.
-                  Hold <kbd>Shift</kbd> to loft it.
+                  Hold an <kbd>arrow</kbd> for where to hit it: <kbd>↓</kbd> straight, <kbd>→</kbd> the off side, <kbd>←</kbd> the leg side,{' '}
+                  <kbd>↑</kbd> fine. Hold <kbd>Shift</kbd> to loft it. As the bowler runs in, <kbd>Q</kbd>/<kbd>E</kbd> shuffle across the crease.
                 </li>
                 <li>
                   As the ball arrives press <kbd>S</kbd> front foot, <kbd>W</kbd> back foot, <kbd>D</kbd> to come down the pitch, or{' '}

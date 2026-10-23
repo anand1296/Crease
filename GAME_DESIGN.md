@@ -115,7 +115,7 @@ The player commits with a key press; the bat arrives `swingTime` later (0.14–0
 - Perfect timing (within ±0.3 of the window) gives up to 14% extra bat speed; too early (beyond 0.4) closes the face and lifts attacking strokes (+9° per window); too late squeezes them down.
 - The **timing gauge** shows the error in units of the stroke's window (perfect within ±0.3, good within ±0.8) and in milliseconds.
 
-**Controls** follow Cricket 07: S front foot, W back foot, D use your feet, A leave, Shift lofted, and screen-relative arrows (↓ straight). `battingControls.ts` maps each key and arrow combination to a stroke and an aim; every stroke is reachable.
+**Controls** follow Cricket 07: S front foot, W back foot, D use your feet, A leave, Shift lofted, and arrows by the batter's sides (↓ straight, ↑ fine, → off, ← leg, whichever hand; screen arrows optional). Q / E shuffle across the crease before the ball is bowled, which moves the pads and changes where the ball is relative to the bat. A game controller drives the same keys (`input/gamepad.ts`). `battingControls.ts` maps each key and arrow combination to a stroke and an aim; every stroke is reachable.
 
 ### Where the bat goes, and what the batter could see
 

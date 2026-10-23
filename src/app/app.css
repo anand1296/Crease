@@ -1373,6 +1373,22 @@ button.icon {
   color: var(--chalk-dim);
 }
 
+.aim-scheme {
+  font-size: 11px;
+  padding: 2px 8px;
+  min-height: 0;
+  background: transparent;
+  border: 1px solid var(--chalk-dim);
+  color: var(--chalk-dim);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.aim-scheme:hover,
+.aim-scheme:focus-visible {
+  color: inherit;
+  border-color: currentColor;
+}
+
 kbd.k {
   display: inline-grid;
   place-items: center;
@@ -1418,6 +1434,10 @@ kbd.k.on {
 
 .keys li.on {
   color: var(--chalk);
+}
+
+.keys li.dim {
+  opacity: 0.55;
 }
 
 .keys li kbd.k {

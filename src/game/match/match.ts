@@ -235,6 +235,12 @@ const AI_REVIEW_THINK = 1.4;
  */
 export type Review =
   | { readonly kind: 'start' }
+  /**
+   * Before the first ball of an innings (and after loading): the bowler
+   * marks out his run-up and shines the ball, the batter takes guard, and
+   * the game waits for the player to say he is ready.
+   */
+  | { readonly kind: 'ready'; readonly since: number }
   | { readonly kind: 'ball' }
   | {
       readonly kind: 'wicket';
@@ -263,6 +269,8 @@ export type GameSpeed = keyof typeof GAME_SPEEDS;
 export const LINE_RANGE = { min: -0.75, max: 1.1 } as const;
 export const LENGTH_RANGE = { min: 0.3, max: 12.5 } as const;
 const BETWEEN_BALLS = 0.9;
+/** With a human playing: a breath before the bowler sets off, to settle in. */
+const BETWEEN_BALLS_HUMAN = 1.7;
 const AUTO_BREAK = 3;
 
 /** Runs the batters actually ran (or hit) on a ball: off the bat, byes and leg byes (wides and no-balls aside). */
@@ -686,6 +694,12 @@ export class Match {
     return this.cycle?.reaimShot(shot) ?? false;
   }
 
+  /** Human batter: move across the crease before the ball is bowled (+1 towards off, −1 towards leg). */
+  shuffle(dir: 1 | -1): boolean {
+    if (!this.humanBatting || this.paused || this.phase !== 'delivery') return false;
+    return this.cycle?.shuffle(dir) ?? false;
+  }
+
   /** Human batter: call off the run under way ("No! Go back!"). */
   sendBack(): boolean {
     if (!this.humanBatting || this.paused) return false;
@@ -886,6 +900,12 @@ export class Match {
   next(): boolean {
     if (this.paused) return false;
     if (this.phase === 'review') {
+      // From the start card to the middle: the build-up to the first ball, until the player is ready.
+      if (this.review?.kind === 'start') {
+        this.review = { kind: 'ready', since: this.time };
+        this.emit();
+        return true;
+      }
       this.review = undefined;
       this.enterBetween();
       return true;
@@ -972,7 +992,7 @@ export class Match {
 
   private enterBetween(): void {
     this.phase = 'between';
-    this.phaseTimer = BETWEEN_BALLS;
+    this.phaseTimer = this.humanInvolved ? BETWEEN_BALLS_HUMAN : BETWEEN_BALLS;
     this.emit();
   }
 

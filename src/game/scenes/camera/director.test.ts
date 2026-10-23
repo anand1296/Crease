@@ -169,4 +169,18 @@ describe('camera director', () => {
     expect(2 * d * Math.tan((s.fov * Math.PI) / 360)).toBeCloseTo(9, 1);
     expect(direct({ ...base, phase: 'dead', time: 5.1, contactTime: 3, previous: 'celebrate', celebrate: { at, span: 9 } }).cut).toBe(false);
   });
+
+  it('before the first ball, a long lens on the bowler marking his run-up, then back to the batter', () => {
+    const bowler = { x: 1, y: 0, z: BOWLER_STUMPS_Z - 14 };
+    const s = direct({ ...base, phase: undefined, marking: { bowler, t: 1, until: 6 }, subject: { x: -0.45, y: 0, z: STRIKER_STUMPS_Z } });
+    expect(s.name).toBe('mark');
+    expect(s.cut).toBe(true);
+    expect(s.look.z).toBeCloseTo(bowler.z, 5);
+    // About a man's height fills the frame.
+    const d = Math.hypot(s.pos.x - bowler.x, s.pos.y - 1, s.pos.z - bowler.z);
+    expect(2 * d * Math.tan((s.fov * Math.PI) / 360)).toBeCloseTo(3.2, 1);
+    expect(direct({ ...base, phase: undefined, previous: 'mark', marking: { bowler, t: 2, until: 6 } }).cut).toBe(false);
+    const after = direct({ ...base, phase: undefined, previous: 'mark', marking: { bowler, t: 6.5, until: 6 }, subject: { x: -0.45, y: 0, z: STRIKER_STUMPS_Z } });
+    expect(after.name).toBe('closeUp');
+  });
 });
