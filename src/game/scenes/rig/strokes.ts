@@ -75,14 +75,17 @@ const SHAPES: Readonly<Record<StrokeFamily, Shape>> = {
     // Down the line (the bat behind the batter, face to the bowler), and up it after the ball (towards the bowler, rising).
     downVia: [0.12, -0.9, -0.4],
     throughVia: [0.02, 0.85, 0.5],
-    contactHands: [0.26, 0.24, -0.48],
-    contactBat: [0.05, 0.12, -1],
+    // At contact: hands ahead of the blade and close to the front pad, the bat angled so the toe trails;
+    // the head (and so the shoulders) down over the ball.
+    contactHands: [0.24, 0.3, -0.46],
+    contactBat: [0.05, -0.05, -1],
     topHands: [-0.05, -0.22, 0.12],
     topBat: [0.3, -0.55, 0.75],
-    finishHands: [0.1, 0.3, 0.3],
-    finishBat: [0, -0.45, 0.9],
-    drop: 0.14,
-    lean: 0.55,
+    // High finish: hands above the front shoulder, the bat over the back.
+    finishHands: [0.08, 0.28, 0.38],
+    finishBat: [-0.1, -0.5, 0.86],
+    drop: 0.24,
+    lean: 0.68,
   },
   cut: {
     throughVia: [0.25, 0.9, 0.05],

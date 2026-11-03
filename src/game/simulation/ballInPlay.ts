@@ -1,3 +1,4 @@
+import type { BattingAssist } from '../model/difficulty.ts';
 import type { Rng } from '../core/rng.ts';
 import { type Vec3, copyVec3, vec3 } from '../core/vec3.ts';
 import { FIELD, STRIKER_STUMPS_Z } from '../data/field.ts';
@@ -67,6 +68,8 @@ export interface BallInPlayOptions {
   readonly powerScale?: number;
   /** The striker has moved across from his guard, metres towards his off side. */
   readonly guard?: number;
+  /** A human batter's help (see BattingAssist). */
+  readonly assist?: BattingAssist;
 }
 
 const STUMP_HALF_WIDTH = FIELD.wicketWidth / 2 + FIELD.ballRadius;
@@ -84,6 +87,12 @@ interface Stroke {
   readonly expected: { readonly x: number; readonly y: number };
   /** Whether the ball had already pitched when the batter committed. */
   readonly sawBounce: boolean;
+  /**
+   * How early (−) or late (+) the press was, seconds: when the bat would have
+   * met the ball on its normal swing, against when the ball got there. Before
+   * any help from the assist.
+   */
+  readonly pressError: number | undefined;
   arrival?: number;
   resolved: boolean;
 }
@@ -136,10 +145,17 @@ export class BallInPlay {
 
   /** Stroke timing and placement, for animating the bat in sync with the simulation. */
   get strokeInfo():
-    | { readonly attempt: ShotAttempt; readonly pressTime: number; readonly batTime: number; readonly planeZ: number; readonly expected: { readonly x: number; readonly y: number } }
+    | {
+        readonly attempt: ShotAttempt;
+        readonly pressTime: number;
+        readonly batTime: number;
+        readonly planeZ: number;
+        readonly expected: { readonly x: number; readonly y: number };
+        readonly pressError: number | undefined;
+      }
     | undefined {
     const s = this.stroke;
-    return s ? { attempt: s.attempt, pressTime: s.pressTime, batTime: s.batTime, planeZ: s.planeZ, expected: s.expected } : undefined;
+    return s ? { attempt: s.attempt, pressTime: s.pressTime, batTime: s.batTime, planeZ: s.planeZ, expected: s.expected, pressError: s.pressError } : undefined;
   }
 
   /**
@@ -162,14 +178,24 @@ export class BallInPlay {
     const pitchZ = this.delivery.actual.pitch?.z;
     const planeZ = contactPlaneZ(attempt, this.opts.striker.batting.footwork, pitchZ);
     const expected = this.perceivedAt(planeZ);
+    // Stepping out takes a moment longer: down the pitch, then the bat comes down.
+    let batTime = atTime + def.swingTime + (attempt.footwork === 'out' ? STEP_OUT_TIME : 0);
+    const due = predictArrival(this.delivery, planeZ, this.opts.ground)?.t;
+    const pressError = due === undefined ? undefined : batTime - due;
+    const a = this.opts.assist;
+    if (a && pressError !== undefined) {
+      // The downswing hurries or waits to meet the ball, within limits (and never quicker than a flick of the wrists).
+      batTime -= pressError > 0 ? Math.min(pressError, a.lateAbsorb) : -Math.min(-pressError, a.earlyAbsorb);
+      batTime = Math.max(atTime + 0.09, batTime);
+    }
     this.stroke = {
       attempt,
       pressTime: atTime,
-      // Stepping out takes a moment longer: down the pitch, then the bat comes down.
-      batTime: atTime + def.swingTime + (attempt.footwork === 'out' ? STEP_OUT_TIME : 0),
+      batTime,
       planeZ,
       expected,
       sawBounce: this.ball.bounces > 0,
+      pressError,
       resolved: false,
     };
     // Pads move with the footwork; their line is fixed when the stroke is chosen.
@@ -304,9 +330,10 @@ export class BallInPlay {
             ballVelocity: b.velocity,
             // Arriving while a defensive bat waits in place is perfectly timed.
             timingError: !early ? readyTime - s.arrival : s.arrival > s.batTime ? s.batTime - s.arrival : readyTime === s.batTime ? s.batTime - s.arrival : 0,
-            lineError: (at.x - s.expected.x) * off * (1 - adjust),
-            heightError: (at.y - s.expected.y) * (1 - adjust),
-            ...(this.opts.timingScale !== undefined ? { timingScale: this.opts.timingScale } : {}),
+            lineError: (at.x - s.expected.x) * off * (1 - adjust) * (this.opts.assist?.misread ?? 1),
+            heightError: (at.y - s.expected.y) * (1 - adjust) * (this.opts.assist?.misread ?? 1),
+            ...(this.opts.timingScale !== undefined || this.opts.assist ? { timingScale: (this.opts.timingScale ?? 1) * (this.opts.assist?.tolerance ?? 1) } : {}),
+            ...(this.opts.assist ? { reachScale: this.opts.assist.reach } : {}),
             ...(this.opts.powerScale !== undefined ? { powerScale: this.opts.powerScale } : {}),
             ...(this.opts.guard ? { guard: this.opts.guard } : {}),
             rng: this.opts.rng,

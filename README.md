@@ -39,7 +39,7 @@ Each bowler may bowl at most a fifth of the overs (rounded up) and never two ove
 
 ### Batting
 
-The controls follow EA Sports Cricket 07's keyboard scheme. Hold an arrow for direction, then press a shot key **as the ball arrives**: the key press is when you commit, and the bat reaches the ball a fraction of a second later (each stroke has its own swing time). Arrows follow the batter's sides, for right- and left-handers alike: <kbd>↓</kbd> straight back past the bowler, <kbd>↑</kbd> fine behind him, <kbd>→</kbd> the off side, <kbd>←</kbd> the leg side, and the diagonals in front of (<kbd>↘</kbd><kbd>↙</kbd>) or behind (<kbd>↗</kbd><kbd>↖</kbd>) square. So <kbd>W</kbd>+<kbd>↗</kbd> is the late cut to third man, <kbd>W</kbd>+<kbd>↖</kbd> the pull (the hook with Shift) and <kbd>S</kbd>+<kbd>↖</kbd> the slog sweep. (A button under the field map on the controls panel switches to screen arrows, ← being screen-left.) A white marker shows where the bowler is aiming to pitch it from the start of his run-up; the timing gauge shows how early or late you were.
+The controls follow EA Sports Cricket 07's keyboard scheme. Hold an arrow for direction, then press a shot key **as the ball arrives**: the key press is when you commit, and the bat reaches the ball a fraction of a second later (each stroke has its own swing time). Arrows are the batter's own directions: <kbd>↓</kbd> straight back past the bowler, <kbd>↑</kbd> fine behind him, <kbd>→</kbd> his right, <kbd>←</kbd> his left, and the diagonals in front of (<kbd>↘</kbd><kbd>↙</kbd>) or behind (<kbd>↗</kbd><kbd>↖</kbd>) square. For a right-hander <kbd>W</kbd>+<kbd>↗</kbd> is the late cut to third man, <kbd>W</kbd>+<kbd>↖</kbd> the pull (the hook with Shift) and <kbd>S</kbd>+<kbd>↖</kbd> the slog sweep; a left-hander's right is his leg side, so for him the keys mirror. (A button under the field map on the controls panel switches to screen arrows, ← being screen-left.) A white marker shows where the bowler is aiming to pitch it from the start of his run-up; the timing gauge shows how early or late you were.
 
 | Key | Shot |
 | --- | --- |
@@ -51,6 +51,8 @@ The controls follow EA Sports Cricket 07's keyboard scheme. Hold an arrow for di
 | <kbd>Q</kbd> / <kbd>E</kbd> | As the bowler runs in: shuffle across the crease towards leg / off. Across to off covers off stump and opens up the leg side, but leaves leg stump bare and the pads in front |
 | <kbd>Space</kbd> / <kbd>D</kbd> after the hit | Run. Press again for each further run. Boundaries need no running; anything else only counts if you run it, and if the throw beats you, you are run out. Byes, leg byes (if you offered a stroke) and overthrows are run the same way |
 | <kbd>A</kbd> after the hit | "No!" — send your partner back, calling off the run under way (in its first half; if the ball beats you back, it's a run-out) |
+| <kbd>Shift</kbd> (hold) after the hit | Sprint: the run is run flat out, if the batter has the legs (it tires him more) |
+| <kbd>S</kbd> after the hit | Dive for the crease, near the end of a run: a fifth of a second sooner, but a moment to get up again |
 
 ### Game controller
 
@@ -88,6 +90,12 @@ A no-ball is followed by a **free hit** (the batter can only be run out); a seco
 **Ground** and **Conditions** are chosen in the match setup (the ground behind the menu shows them): Crease Park, Lord's, the MCG, Eden Gardens or Wankhede; sunny, overcast (more swing and seam), under lights (dew in the second innings: the ball skids on and spinners can't grip it) or hot and humid.
 
 **Practice challenges** (main menu) are a single over against the computer, batting or bowling: survive the over, fifteen off it, two boundaries, a six, middle four balls; take a wicket, a tight over, two yorkers, two bouncers, two slower balls, or hit the markers on the pitch.
+
+**Coaching nets** (in Practice): pick a ball — full outside off, a half-volley, good length, short and wide, short at the body, a bouncer, on the pads, a yorker, an outswinger, a slower ball, a spinner flighted or dragged short — and it is bowled again exactly the same until you ask for another, so you can work out the timing and try different strokes to it. After every attempt the coach says what the ball was, what went wrong (early or late and by how much, the wrong foot, the wrong line, too far from the ball) and which keys play it; the attempts are listed with their timing and sweet spot, with your first few against your last few.
+
+**After every stroke**, in matches too, a card on the right shows how early or late you were (a meter in milliseconds), how much of the sweet spot you found, and the strokes that suit that ball. **Difficulty** helps a human batter: on Easy the swing meets a press that is a little early or late half-way, and the timing window is wider.
+
+**Achievements** (main menu) are kept in the browser: the first six, a fifty, a hundred, a dive that made it, a yorker wicket, a hat-trick, a maiden, a chase, and more. The pause screen's **Stats** tab has a **wagon wheel** of the innings.
 
 **Saving**: *Save match* in the pause menu; *Continue a saved match* on the main menu. A save made during a ball goes back to the start of that ball.
 

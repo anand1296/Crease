@@ -7,15 +7,15 @@ const DOWN = -1;
 const UP = 1;
 
 describe('batting controls (Cricket 07 scheme)', () => {
-  it('batter arrows: → is the off side and ← the leg side, for both hands', () => {
+  it("batter arrows: → is the batter's right — a right-hander's off side, a left-hander's leg side", () => {
     expect(sideOf(1, 'right')).toBe('off');
-    expect(sideOf(1, 'left')).toBe('off');
+    expect(sideOf(1, 'left')).toBe('leg');
     expect(sideOf(-1, 'right')).toBe('leg');
-    expect(sideOf(-1, 'left')).toBe('leg');
+    expect(sideOf(-1, 'left')).toBe('off');
     expect(directionOf(D(0, DOWN), 'right')).toBe(0);
-    expect(directionOf(D(1, 0), 'left')).toBe(90);
+    expect(directionOf(D(1, 0), 'left')).toBe(-90);
     expect(directionOf(D(1, UP), 'right')).toBe(135);
-    expect(directionOf(D(-1, UP), 'left')).toBe(-135);
+    expect(directionOf(D(-1, UP), 'left')).toBe(135);
   });
 
   it('screen arrows: screen-left is the off side for a right-hander and the leg side for a left-hander', () => {
@@ -31,20 +31,20 @@ describe('batting controls (Cricket 07 scheme)', () => {
     expect(directionOf(D(0, 0), 'right', 'screen')).toBeUndefined();
   });
 
-  it('↑→ on the back foot is the late cut to third man; ↑← is the pull (hook lofted); ↑← on the front foot the slog sweep — either hand', () => {
+  it('↑→ on the back foot is the late cut to third man for a right-hander, ↑← the pull, S ↑← the slog sweep; a left-hander mirrors it', () => {
     for (const hand of ['right', 'left'] as const) {
-      const cut = shotFromInput('back', D(1, UP), false, hand);
+      const toOff = hand === 'right' ? 1 : -1;
+      const toLeg = -toOff as 1 | -1;
+      const cut = shotFromInput('back', D(toOff as 1 | -1, UP), false, hand);
       expect(cut.shot).toBe('lateCut');
       expect(fieldRegion(cut)).toBe('third man');
-      const pull = shotFromInput('back', D(-1, UP), false, hand);
+      const pull = shotFromInput('back', D(toLeg, UP), false, hand);
       expect(pull.shot).toBe('pull');
       expect(['backward square leg', 'square leg', 'fine leg']).toContain(fieldRegion(pull));
-      expect(shotFromInput('back', D(-1, UP), true, hand).shot).toBe('hook');
-      expect(shotFromInput('back', D(-1, 0), false, hand).shot).toBe('pull');
-      const slog = shotFromInput('front', D(-1, UP), false, hand);
-      expect(slog.shot).toBe('slogSweep');
-      expect(shotFromInput('front', D(-1, UP), true, hand).shot).toBe('slogSweep');
-      expect(shotFromInput('front', D(1, DOWN), false, hand).shot).toBe('coverDrive');
+      expect(shotFromInput('back', D(toLeg, UP), true, hand).shot).toBe('hook');
+      expect(shotFromInput('back', D(toLeg, 0), false, hand).shot).toBe('pull');
+      expect(shotFromInput('front', D(toLeg, UP), false, hand).shot).toBe('slogSweep');
+      expect(shotFromInput('front', D(toOff as 1 | -1, DOWN), false, hand).shot).toBe('coverDrive');
     }
   });
 
@@ -74,9 +74,9 @@ describe('batting controls (Cricket 07 scheme)', () => {
     const rh = shotFromInput('front', D(1, DOWN), true, 'right');
     const lh = shotFromInput('front', D(1, DOWN), true, 'left');
     expect(rh.shot).toBe('loftedAttack');
-    // → is the off side for both.
+    // → is his right: the off side for a right-hander, the leg side for a left-hander.
     expect(rh.aimDeg ?? 0).toBeGreaterThan(0);
-    expect(lh.aimDeg ?? 0).toBeGreaterThan(0);
+    expect(lh.aimDeg ?? 0).toBeLessThan(0);
     const screen = shotFromInput('front', D(-1, DOWN), true, 'left', 'screen');
     expect(screen.aimDeg ?? 0).toBeLessThan(0);
   });
@@ -108,7 +108,7 @@ describe('batting controls (Cricket 07 scheme)', () => {
 describe('where the shot goes', () => {
   it('names a region all round the ground, and every region is reachable from the keys', () => {
     expect(fieldRegion(shotFromInput('front', D(1, DOWN), false, 'right'))).toBe('cover');
-    expect(fieldRegion(shotFromInput('front', D(1, DOWN), false, 'left'))).toBe('cover');
+    expect(fieldRegion(shotFromInput('front', D(-1, DOWN), false, 'left'))).toBe('cover');
     expect(fieldRegion(shotFromInput('front', D(-1, DOWN), false, 'left', 'screen'))).toBe('mid-on');
     expect(fieldRegion(shotFromInput('back', D(1, UP), false, 'right'))).toBe('third man');
     expect(fieldRegion(shotFromInput('front', D(0, UP), false, 'right'))).toBe('fine leg');

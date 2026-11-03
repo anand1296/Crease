@@ -63,6 +63,9 @@ Simulation (core, physics,        deterministic TypeScript — no React or three
 | `game/scenes/Landmarks.tsx`, `game/scenes/SkyDome.tsx` | Lord's Pavilion and Media Centre, tents, canopies, trees; night sky and cloud cover |
 | `game/match/save.ts` | Saving and loading a match (generic state encoding, per-ball checkpoints, browser save slots) |
 | `game/practice/challenges.ts` | Practice challenges: one over with a goal, judged from the ball-by-ball record |
+| `game/practice/nets.ts`, `game/batting/coaching.ts` | Coaching nets (one delivery bowled again and again) and the ball-by-ball coach: what the ball was, what went wrong, and which keys play it, worked out from the game's own stroke model |
+| `game/achievements.ts` | Achievements: what a ball or a result earns, kept in the browser |
+| `game/scenes/batModel.ts` | The bat: a lofted blade (flat face, thick edges, a spine), grip and stickers, built once and shared |
 | `game/match/toss.ts` | The toss: the coin's face from the seed, the computer captain's choice, and the coin's flight (pure, unit-tested) |
 | `game/scenes/TossView.tsx` | The toss scene: captains and referee on the pitch, the flicked coin, the toss cameras |
 | `game/scenes/rig/kits.ts` | Kits, models and skin tones for players (shared by the match and the toss) |

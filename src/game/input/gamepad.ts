@@ -72,6 +72,7 @@ export const PAD_KEYS: Readonly<Record<Exclude<PadContext, 'menu'>, Readonly<Par
     [PAD.b]: 'Enter',
     [PAD.x]: 'KeyT',
     [PAD.y]: 'KeyY',
+    [PAD.rb]: 'KeyN',
     [PAD.start]: 'Escape',
     [PAD.select]: 'KeyC',
   },

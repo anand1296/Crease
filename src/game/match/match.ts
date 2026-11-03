@@ -1,3 +1,6 @@
+import { type NetsBall, type NetsBallId, type NetsConfig, netsBall, netsBowler } from '../practice/nets.ts';
+import { type CoachInput, type Coaching, coachBall } from '../batting/coaching.ts';
+import type { ArrowScheme } from '../input/battingControls.ts';
 import { FixedStepClock } from '../core/fixedStep.ts';
 import { type WeatherId, pitchInConditions } from '../data/weather.ts';
 import { decodeInto, encodeSnapshot, playersOf, snapshotMatch } from './save.ts';
@@ -22,7 +25,7 @@ import type { BowlingSide } from '../bowling/runUp.ts';
 import { type FieldPreset, checkField, customPosition, findPreset, legalPresets } from '../fielding/presets.ts';
 import { fatigueAfterBall, fatigueAfterRest } from '../bowling/fatigue.ts';
 import { type Fielder, buildField, rebuildField } from '../fielding/plan.ts';
-import { DIFFICULTIES, type DifficultyId } from '../model/difficulty.ts';
+import { BATTING_ASSIST, DIFFICULTIES, type DifficultyId } from '../model/difficulty.ts';
 import { type Player, isSpinner, offSideSign } from '../model/player.ts';
 import { type BallOutcome, DeliveryCycle, type WicketKind } from '../session/deliveryCycle.ts';
 import { type Decision, type LbwTracking, REVIEWS_PER_INNINGS, REVIEW_WINDOW, type ReviewResult, review, reviewConfidence } from '../simulation/tracking.ts';
@@ -62,6 +65,8 @@ export interface MatchConfig {
   readonly venue?: VenueId;
   /** A practice challenge: one innings of one over, ending as soon as it is won or lost. */
   readonly practice?: ChallengeId;
+  /** Coaching nets: the human bats against chosen balls, again and again; nothing is scored. */
+  readonly nets?: NetsConfig;
 }
 
 export interface Dismissal {
@@ -295,6 +300,8 @@ export class Match {
   result: MatchResult | undefined;
   recent: string[] = [];
   readonly history: BallOutcome[] = [];
+  /** Every scoring stroke, for the wagon wheel: innings, batter, direction (degrees, + his off side), runs. */
+  readonly wagon: { readonly innings: number; readonly batterId: string; readonly deg: number; readonly runs: number; readonly boundary?: 4 | 6 }[] = [];
   setup: BowlingSetup;
   /** Which step of setting up the ball the human bowler is on (phase 'aiming'). */
   aimStep: AimStep = 'type';
@@ -350,6 +357,7 @@ export class Match {
     if (config.home.xi.length !== 11 || config.away.xi.length !== 11) throw new Error('Each side needs exactly 11 players');
     this.config = config;
     this.rng = new Rng(config.seed);
+    if (config.nets) this.netsBallId = config.nets.ball;
     this.commentator = new Commentator(config.seed);
     this.startInnings(config.battingFirst);
     this.setup = defaultSetup(this.bowler);
@@ -460,6 +468,14 @@ export class Match {
 
   /** A ball is over: an lbw appeal the losing side can still review waits for them; anything else is scored. */
   private ballDead(o: BallOutcome): void {
+    this.noteStroke(o);
+    if (this.config.nets) {
+      // The nets: nothing is scored; the ball is looked at and bowled again.
+      this.lastOutcome = o;
+      this.netsAttempts += 1;
+      this.emit();
+      return;
+    }
     const a = o.appeal;
     if (a) {
       const reviewer: SideId = a.onField === 'out' ? this.current.batting : this.current.bowling;
@@ -471,6 +487,81 @@ export class Match {
       }
     }
     this.record(o);
+  }
+
+  /** What the coach needs about the human batter's last ball. */
+  private lastStroke: Omit<CoachInput, 'scheme' | 'pad'> | undefined;
+  private coachingCache: { key: string; value: Coaching } | undefined;
+  /** Every ball faced in the nets (and in matches, the last ones), for the coach's history. */
+  readonly strokeLog: Coaching[] = [];
+  private loggedStroke: unknown;
+
+  private noteStroke(o: BallOutcome): void {
+    const c = this.cycle;
+    const play = c?.play;
+    if (!this.humanBatting || !c || !play || o.wide) {
+      this.lastStroke = undefined;
+      return;
+    }
+    const info = play.strokeInfo;
+    this.lastStroke = {
+      delivery: play.delivery,
+      batter: this.striker,
+      ground: c.ground,
+      guard: c.guard,
+      attempt: info?.attempt,
+      pressError: info?.pressError,
+      contact: play.contact,
+      runs: o.runs,
+      out: o.wicket && o.wicket.batter === 'striker' ? o.wicket.kind : undefined,
+      reachScale: BATTING_ASSIST[this.config.difficulty].reach,
+      tooLate: c.pressedTooLate,
+    };
+    this.coachingCache = undefined;
+  }
+
+  /** The coach on the human batter's last ball (keys shown in the player's arrow scheme). */
+  coaching(scheme: ArrowScheme, pad = false): Coaching | undefined {
+    const s = this.lastStroke;
+    if (!s) return undefined;
+    const key = `${scheme}:${pad}`;
+    if (this.coachingCache?.key === key) return this.coachingCache.value;
+    const value = coachBall({ ...s, scheme, pad });
+    this.coachingCache = { key, value };
+    if (this.loggedStroke !== s) {
+      this.loggedStroke = s;
+      this.strokeLog.push(value);
+      if (this.strokeLog.length > 60) this.strokeLog.shift();
+    }
+    return value;
+  }
+
+  // --- Nets ---------------------------------------------------------------------------
+
+  private netsBallId: NetsBallId = 'driveOff';
+  private netsVariant = 0;
+  /** Balls faced in the nets. */
+  netsAttempts = 0;
+
+  get nets(): { readonly ball: NetsBall; readonly variant: number; readonly attempts: number } | undefined {
+    return this.config.nets ? { ball: netsBall(this.netsBallId), variant: this.netsVariant, attempts: this.netsAttempts } : undefined;
+  }
+
+  /** The nets: bowl this kind of ball from now on (the coach's history starts again for it). */
+  setNetsBall(id: NetsBallId): void {
+    if (!this.config.nets || this.netsBallId === id) return;
+    this.netsBallId = id;
+    this.netsVariant = 0;
+    this.strokeLog.length = 0;
+    this.emit();
+  }
+
+  /** The nets: another ball of the same kind (a slightly different line, length or movement). */
+  newNetsVariant(): void {
+    if (!this.config.nets) return;
+    this.netsVariant += 1;
+    this.strokeLog.length = 0;
+    this.emit();
   }
 
   /** Take it upstairs: the third umpire reviews the decision. */
@@ -698,6 +789,18 @@ export class Match {
   shuffle(dir: 1 | -1): boolean {
     if (!this.humanBatting || this.paused || this.phase !== 'delivery') return false;
     return this.cycle?.shuffle(dir) ?? false;
+  }
+
+  /** Human batter: sprint (held) between the wickets. */
+  sprint(on: boolean): boolean {
+    if (!this.humanBatting || this.paused) return false;
+    return this.cycle?.sprint(on) ?? false;
+  }
+
+  /** Human batter: dive for the crease. */
+  diveForCrease(): boolean {
+    if (!this.humanBatting || this.paused) return false;
+    return this.cycle?.dive() ?? false;
   }
 
   /** Human batter: call off the run under way ("No! Go back!"). */
@@ -1037,6 +1140,14 @@ export class Match {
       this.emit();
       return;
     }
+    if (this.config.nets && this.humanBatting) {
+      // The same ball, exactly, until the player asks for another.
+      const ball = netsBall(this.netsBallId);
+      const bowler = netsBowler(this.bowlingSide.xi, ball.spin);
+      if (bowler) this.bowlerId = bowler.id;
+      this.startCycle(ball.plan(this.bowler), 1, new Rng(`${this.config.seed}:nets:${ball.id}:${this.netsVariant}`));
+      return;
+    }
     const rng = this.rng.fork(`bowl-ai-${this.ballNumber}`);
     const difficulty = DIFFICULTIES[this.config.difficulty];
     if (this.humanBatting) {
@@ -1053,7 +1164,7 @@ export class Match {
 
   private needsBowlerChoice = true;
 
-  private startCycle(plan: DeliveryPlan, releaseQuality?: number): void {
+  private startCycle(plan: DeliveryPlan, releaseQuality?: number, fixedRng?: Rng): void {
     const bowler = this.bowler;
     const overNumber = this.innings.length * 1000 + Math.floor(this.current.balls / 6);
     if (this.ballsThisOver === 0 && this.announcedOver !== overNumber) {
@@ -1071,8 +1182,9 @@ export class Match {
       pitch: pitchInConditions(PITCHES[this.config.pitch], this.config.weather ?? 'sunny', this.innings.length - 1),
       plan,
       fatigue: this.bowlerFatigue,
-      rng: this.rng.fork(`ball-${this.ballNumber}`),
+      rng: fixedRng ?? this.rng.fork(`ball-${this.ballNumber}`),
       manualRunning: this.humanBatting,
+      ...(this.humanBatting ? { assist: BATTING_ASSIST[this.config.difficulty] } : {}),
       humanFielding: this.humanBowling,
       ...(this.freeHit ? { freeHit: true } : {}),
       bouncersThisOver: this.bouncersThisOver,
@@ -1189,6 +1301,10 @@ export class Match {
     this.departing = outPlayer ? { id: outPlayer.id, ball: this.history.length + 1 } : undefined;
     this.history.push(o);
     this.strikerAt.push(striker.id);
+    const hit = o.contact;
+    if (hit && hit.kind !== 'miss' && hit.kind !== 'leave' && o.runs > 0 && !o.byes && !o.legByes) {
+      this.wagon.push({ innings: this.innings.length - 1, batterId: striker.id, deg: hit.directionDeg, runs: o.runs, ...(o.boundary ? { boundary: o.boundary } : {}) });
+    }
     this.lastOutcome = o;
     const def = this.cycle?.delivery?.type;
     const spell = this.spells.get(bowler.id);
@@ -1257,10 +1373,13 @@ export class Match {
       ranRuns: ran,
     });
     s.fatigue = fatigueAfter(s.fatigue, ran, card?.balls ?? 0, total, striker.batting.footwork);
+    // Sprinting and diving cost more.
+    const effort = 0.018 * (this.cycle?.sprints ?? 0) + 0.012 * (this.cycle?.dives.length ?? 0);
+    s.fatigue = Math.min(1, s.fatigue + effort);
     const partner = this.nonStriker;
     if (partner.id !== striker.id) {
       const n = this.formOf(partner);
-      n.fatigue = fatigueAfter(n.fatigue, ran, 0, total, partner.batting.footwork);
+      n.fatigue = Math.min(1, fatigueAfter(n.fatigue, ran, 0, total, partner.batting.footwork) + effort);
     }
     if (o.boundary) for (const f of this.form.values()) f.fatigue = rested(f.fatigue, 0.01);
   }
@@ -1356,7 +1475,7 @@ export class Match {
   }
 
   /** The striker's scoring shots this match, batter-relative (for the captain). */
-  private wagon(batter: Player): WagonShot[] {
+  private wagonOf(batter: Player): WagonShot[] {
     const out: WagonShot[] = [];
     this.history.forEach((o, i) => {
       if (this.strikerAt[i] !== batter.id || o.runs === 0 || !o.contact || o.contact.kind === 'miss' || o.contact.kind === 'leave') return;
@@ -1369,6 +1488,13 @@ export class Match {
   private readonly strikerAt: string[] = [];
 
   private afterBall(): void {
+    if (this.config.nets) {
+      this.cycle = undefined;
+      this.review = { kind: 'ball' };
+      this.phase = 'review';
+      this.emit();
+      return;
+    }
     const o = this.lastOutcome;
     this.cycle = undefined;
     this.incoming = undefined;
@@ -1635,7 +1761,7 @@ export class Match {
         overs: this.config.overs,
         ballsBowled: this.current.balls,
         spinner: isSpinner(bowler.bowlingStyle),
-        wagon: this.wagon(this.striker),
+        wagon: this.wagonOf(this.striker),
       });
       this.fieldCache = { key, decision };
     }

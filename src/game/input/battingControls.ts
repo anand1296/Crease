@@ -9,13 +9,15 @@ import type { Hand } from '../model/player.ts';
  *   D  use your feet: step out and play (D alone: smother it)
  *   A  leave
  *   Shift (hold)  lofted version of the shot
- *   Arrows        direction. ↓ straight back past the bowler, ↑ behind
- *                 the batter (fine), and sideways by the batter's sides:
- *                 → is always the off side and ← the leg side, for right-
- *                 and left-handers alike ("batter" arrows, the default).
- *                 So ↑→ on the back foot is the late cut to third man, ↑←
- *                 the pull (the hook, lofted) round to fine leg, and ↑← on
- *                 the front foot the slog sweep.
+ *   Arrows        direction, from the batter's point of view: ↓ straight
+ *                 back past the bowler, ↑ behind him (fine), → his right
+ *                 and ← his left ("batter" arrows, the default). For a
+ *                 right-hander his right is the off side, so ↑→ on the
+ *                 back foot is the late cut to third man and ↑← the pull
+ *                 (the hook, lofted) round to fine leg, and ↑← on the
+ *                 front foot the slog sweep. A left-hander's right is his
+ *                 leg side, so it all mirrors: ↑← is his late cut, ↑→ his
+ *                 pull.
  *
  *                 "Screen" arrows instead follow the picture from behind the
  *                 bowler: ← is screen-left (a right-hander's off side, a
@@ -53,12 +55,14 @@ export interface ScreenDirection {
 type Side = 'off' | 'leg' | 'none';
 
 /**
- * Batter arrows: right is the off side. Screen arrows: screen-left is world
+ * Batter arrows: → is the batter's right (a right-hander's off side, a
+ * left-hander's leg side). Screen arrows: screen-left is world
  * +x, which is the off side of a right-hander.
  */
 export function sideOf(dirX: -1 | 0 | 1, hand: Hand, scheme: ArrowScheme = 'batter'): Side {
   if (dirX === 0) return 'none';
-  if (scheme === 'batter') return dirX === 1 ? 'off' : 'leg';
+  // His right hand side is the off side for a right-hander, the leg side for a left-hander.
+  if (scheme === 'batter') return (dirX === 1) === (hand === 'right') ? 'off' : 'leg';
   const left = dirX === -1;
   return left === (hand === 'right') ? 'off' : 'leg';
 }

@@ -55,7 +55,7 @@ const basisZ = new Vector3();
 
 export class AvatarRig {
   private readonly bones = new Map<BoneName, BoneInfo>();
-  private readonly fingers: { bone: Object3D; bind: Quaternion; thumb: boolean; side: 'L' | 'R' }[] = [];
+  private readonly fingers: { bone: Object3D; bind: Quaternion; thumb: boolean; index: boolean; side: 'L' | 'R' }[] = [];
   /** World transform of Bip01's parent, model space (constant). */
   private readonly p0Q = new Quaternion();
   private readonly p0Pos = new Vector3();
@@ -119,7 +119,7 @@ export class AvatarRig {
       for (const f of ['0', ...FINGERS]) {
         for (const seg of ['', '1', '2']) {
           const bone = byName.get(`Bip01_${s}_Finger${f}${seg}`);
-          if (bone) this.fingers.push({ bone, bind: bone.quaternion.clone(), thumb: f === '0', side: s });
+          if (bone) this.fingers.push({ bone, bind: bone.quaternion.clone(), thumb: f === '0', index: f === '1', side: s });
         }
       }
     }
@@ -205,7 +205,7 @@ export class AvatarRig {
       tv.set(0, this.rootYOut, 0).sub(this.p0Pos).applyQuaternion(tq.copy(this.p0Q).invert());
       bip.position.copy(tv);
     }
-    this.grip(pose.grip ?? 0);
+    this.grip(pose.grip ?? 0, pose.point);
     // Keep world positions (for hands) in step with what is drawn.
     this.forward(this.out, bip.position);
   }
@@ -396,9 +396,9 @@ export class AvatarRig {
   }
 
   /** Curls the fingers (and folds the thumb) by `amount` 0–1. */
-  private grip(amount: number): void {
+  private grip(amount: number, point?: 'L' | 'R'): void {
     for (const f of this.fingers) {
-      if (amount <= 0.001) {
+      if (amount <= 0.001 || (point === f.side && f.index)) {
         f.bone.quaternion.copy(f.bind);
         continue;
       }

@@ -16,6 +16,13 @@ export interface PoseSnap {
   readonly look: readonly number[] | undefined;
   readonly clip: { readonly name: NonNullable<Pose['clip']>['name']; readonly time: number } | undefined;
   readonly grip: number | undefined;
+  readonly poleL?: readonly number[] | undefined;
+  readonly poleR?: readonly number[] | undefined;
+  readonly armLayer?: Pose['armLayer'];
+  readonly point?: Pose['point'];
+  readonly roll?: number | undefined;
+  readonly lift?: number | undefined;
+  readonly dip?: number | undefined;
 }
 
 export interface ReplayFrame {
@@ -38,6 +45,13 @@ export function snapPose(p: Pose): PoseSnap {
     look: p.look ? p.look.toArray() : undefined,
     clip: p.clip ? { name: p.clip.name, time: p.clip.time } : undefined,
     grip: p.grip,
+    poleL: p.poleL ? p.poleL.toArray() : undefined,
+    poleR: p.poleR ? p.poleR.toArray() : undefined,
+    armLayer: p.armLayer,
+    point: p.point,
+    roll: p.roll,
+    lift: p.lift,
+    dip: p.dip,
   };
 }
 
@@ -48,7 +62,7 @@ const setLimb = (l: LimbPose, n: readonly number[], i: number) => {
 };
 
 /** Writes a snapshot back into a pose (reusing its vectors). */
-export function restorePose(s: PoseSnap, p: Pose, vectors: { handL: Vector3; handR: Vector3; look: Vector3 }): Pose {
+export function restorePose(s: PoseSnap, p: Pose, vectors: { handL: Vector3; handR: Vector3; look: Vector3; poleL?: Vector3; poleR?: Vector3 }): Pose {
   const n = s.n;
   p.x = n[0] ?? 0;
   p.z = n[1] ?? 0;
@@ -67,6 +81,13 @@ export function restorePose(s: PoseSnap, p: Pose, vectors: { handL: Vector3; han
   p.look = s.look ? vectors.look.fromArray(s.look) : undefined;
   p.clip = s.clip ? { name: s.clip.name, time: s.clip.time } : undefined;
   p.grip = s.grip;
+  p.poleL = s.poleL ? (vectors.poleL ??= new Vector3()).fromArray(s.poleL) : undefined;
+  p.poleR = s.poleR ? (vectors.poleR ??= new Vector3()).fromArray(s.poleR) : undefined;
+  p.armLayer = s.armLayer;
+  p.point = s.point;
+  p.roll = s.roll;
+  p.lift = s.lift;
+  p.dip = s.dip;
   return p;
 }
 

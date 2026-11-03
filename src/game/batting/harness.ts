@@ -1,3 +1,4 @@
+import type { BattingAssist } from '../model/difficulty.ts';
 import { Rng } from '../core/rng.ts';
 import { STRIKER_STUMPS_Z } from '../data/field.ts';
 import { PITCHES, type PitchId, groundFor } from '../data/pitches.ts';
@@ -24,6 +25,8 @@ export interface StrokeScenario {
   readonly seed: string | number;
   /** Fix the delivery (same ball every time) and vary only the stroke's randomness. */
   readonly deliverySeed?: string | number;
+  /** A human batter's help (see BattingAssist). */
+  readonly assist?: BattingAssist;
 }
 
 /** Whether the bat touched the ball before time `t`. */
@@ -46,6 +49,8 @@ export interface StrokeSummary {
   readonly end: StrokeEnd;
   /** Distance from the striker's stumps where the ball ended. */
   readonly distance: number;
+  /** Where it ended across the ground, world x (+x is a right-hander's off side). */
+  readonly endX: number;
   /** True if the ball was in the air above 0.3 m beyond 12 m from the bat: a catchable chance. */
   readonly airborneChance: boolean;
 }
@@ -63,7 +68,7 @@ export function simulateStroke(s: StrokeScenario): StrokeSummary {
   });
   const planeZ = contactPlaneZ(s.attempt, s.batter.batting.footwork, delivery.actual.pitch?.z);
   const arrival = predictArrival(delivery, planeZ, ground);
-  const play = new BallInPlay({ delivery, striker: s.batter, ground, rng: new Rng(`stroke:${String(s.seed)}`) });
+  const play = new BallInPlay({ delivery, striker: s.batter, ground, rng: new Rng(`stroke:${String(s.seed)}`), ...(s.assist ? { assist: s.assist } : {}) });
   const press = (arrival?.t ?? 0.5) - SHOTS[s.attempt.shot].swingTime + s.timingMs / 1000;
 
   let airborneChance = false;
@@ -122,6 +127,7 @@ export function simulateStroke(s: StrokeScenario): StrokeSummary {
     apex: play.apex,
     end,
     distance: dist(endPos.x, endPos.z),
+    endX: endPos.x,
     airborneChance,
   };
 }

@@ -72,6 +72,14 @@ export function useGameControls(): void {
         if (action === 'confirm' || action === 'bowl') m.next();
         return;
       }
+      // The nets: N bowls another ball of the same kind.
+      if (action === 'netsNext') {
+        if (m.nets && m.phase === 'review' && m.review?.kind === 'ball') {
+          m.newNetsVariant();
+          m.next();
+        }
+        return;
+      }
       // Between balls the game waits for the player: Enter or Space moves on.
       if (m.phase === 'review') {
         if (action === 'confirm' || action === 'bowl' || action === 'run') m.next();
@@ -109,6 +117,15 @@ export function useGameControls(): void {
         // Once it is hit, A sends your partner back: "No!"
         if (struck && action === 'leave') {
           m.sendBack();
+          return;
+        }
+        // Running: Shift (held) sprints, S dives for the crease at the end of a run.
+        if (struck && action === 'lofted') {
+          m.sprint(true);
+          return;
+        }
+        if (struck && action === 'shotFront') {
+          m.diveForCrease();
           return;
         }
         if (action === 'shotFront' || action === 'shotBack' || action === 'shotFeet' || action === 'leave') {

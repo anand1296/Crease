@@ -183,4 +183,31 @@ describe('camera director', () => {
     const after = direct({ ...base, phase: undefined, previous: 'mark', marking: { bowler, t: 6.5, until: 6 }, subject: { x: -0.45, y: 0, z: STRIKER_STUMPS_Z } });
     expect(after.name).toBe('closeUp');
   });
+
+  it('an lbw appeal: a long lens on the umpire as he gives it, finger and all', () => {
+    const at = { x: -0.3, y: 0, z: BOWLER_STUMPS_Z - 2.1 };
+    const s = direct({ ...base, phase: 'dead', time: 3, contactTime: undefined, umpire: { at, since: 0.5, out: true } });
+    expect(s.name).toBe('umpire');
+    expect(s.look.z).toBeCloseTo(at.z, 5);
+    // From the batter's end, looking back at him.
+    expect(s.pos.z).toBeGreaterThan(at.z + 10);
+    // Head to waist, with room for the raised arm: about 2.5 m of picture.
+    const d = Math.hypot(s.pos.x - s.look.x, s.pos.y - s.look.y, s.pos.z - s.look.z);
+    expect(2 * d * Math.tan((s.fov * Math.PI) / 360)).toBeCloseTo(2.5, 1);
+    expect(direct({ ...base, phase: 'dead', time: 6, umpire: { at, since: 3.6, out: true } }).name).not.toBe('umpire');
+  });
+
+  it('between balls on television: a sequence of shots that changes ball by ball, no empty stands', () => {
+    const bowler = { x: 1, y: 0, z: BOWLER_STUMPS_Z - 10 };
+    const subject = { x: -0.45, y: 0, z: STRIKER_STUMPS_Z };
+    const names = (seq: number, crowd = true) =>
+      [0.5, 4, 7.5, 11].map((t) => direct({ ...base, phase: undefined, subject, filler: { t, seq, bowler, crowd } }).name);
+    const a = names(0);
+    const b = names(1);
+    expect(a).not.toEqual(b);
+    expect(new Set([...a, ...b])).toEqual(new Set(['closeUp', 'walkBack', 'crowd', 'aerial']));
+    expect(names(0, false)).not.toContain('crowd');
+    // Bowling, the player needs the set-up view, not cutaways.
+    expect(direct({ ...base, phase: undefined, subject, humanBowling: true, filler: { t: 4, seq: 0, bowler } }).name).toBe('aim');
+  });
 });

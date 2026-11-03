@@ -1,3 +1,5 @@
+import { ACHIEVEMENTS, readAchievements } from '../game/achievements.ts';
+import { NETS_BALLS } from '../game/practice/nets.ts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { TEAMS, type Team } from '../game/data/teams.ts';
 import { PITCHES, type PitchId } from '../game/data/pitches.ts';
@@ -27,6 +29,7 @@ export function MainMenu() {
   const [help, setHelp] = useState(false);
   const [saved, setSaved] = useState(false);
   const [practice, setPractice] = useState(false);
+  const [trophies, setTrophies] = useState(false);
   const saves = useGame((s) => s.saves);
   return (
     <div className="menu-shell">
@@ -44,6 +47,9 @@ export function MainMenu() {
           ) : null}
           <button type="button" onClick={() => setPractice(true)} data-testid="menu-practice">
             Practice challenges
+          </button>
+          <button type="button" onClick={() => setTrophies(true)} data-testid="menu-achievements">
+            Achievements
           </button>
           <button type="button" onClick={() => setHelp(true)}>
             How to play
@@ -65,6 +71,43 @@ export function MainMenu() {
       {help ? <HowToPlay onClose={() => setHelp(false)} /> : null}
       {saved ? <SavedMatches onClose={() => setSaved(false)} /> : null}
       {practice ? <PracticeMenu onClose={() => setPractice(false)} /> : null}
+      {trophies ? <Achievements onClose={() => setTrophies(false)} /> : null}
+    </div>
+  );
+}
+
+/** Every achievement, the ones won ticked with the day they were won. */
+function Achievements({ onClose }: { onClose: () => void }) {
+  const have = readAchievements();
+  const won = ACHIEVEMENTS.filter((a) => have[a.id]).length;
+  return (
+    <div className="overlay" role="dialog" aria-label="Achievements" data-testid="achievements">
+      <div className="panel">
+        <h2>Achievements</h2>
+        <p className="dim">
+          {won} of {ACHIEVEMENTS.length}, in matches, practice and the nets.
+        </p>
+        <ul className="trophies">
+          {ACHIEVEMENTS.map((a) => {
+            const when = have[a.id];
+            return (
+              <li key={a.id} className={when ? 'won' : ''}>
+                <span className="trophy-mark" aria-hidden="true">
+                  {when ? '★' : '☆'}
+                </span>
+                <span>
+                  <strong>{a.title}</strong>
+                  <span className="dim"> {a.how}</span>
+                </span>
+                <span className="dim small">{when ? new Date(when).toLocaleDateString() : ''}</span>
+              </li>
+            );
+          })}
+        </ul>
+        <button type="button" onClick={onClose} autoFocus>
+          Back
+        </button>
+      </div>
     </div>
   );
 }
@@ -72,6 +115,7 @@ export function MainMenu() {
 /** Practice challenges: one over each, batting or bowling, against the teams chosen in the match setup. */
 function PracticeMenu({ onClose }: { onClose: () => void }) {
   const start = useGame((s) => s.startPractice);
+  const startNets = useGame((s) => s.startNets);
   const setup = useGame((s) => s.setup);
   const done = completedChallenges();
   const group = (role: 'bat' | 'bowl') => (
@@ -96,6 +140,24 @@ function PracticeMenu({ onClose }: { onClose: () => void }) {
         <p className="dim">
           One over in the middle, {findTeam(setup.userTeamId).name} against {findTeam(setup.opponentId).name}, at {VENUES[setup.venue].name} ({WEATHER[setup.weather].name.toLowerCase()}). Change the teams, ground or conditions in the match setup.
         </p>
+        <section className="nets-pick" data-testid="nets-menu">
+          <h3>Coaching nets</h3>
+          <p className="dim small">
+            The same ball, again and again, until you have it. The coach tells you after every ball what went wrong and which keys play it —
+            and lists your attempts so you can see yourself get it right. Change the ball whenever you like.
+          </p>
+          <ul className="nets-balls">
+            {NETS_BALLS.map((b) => (
+              <li key={b.id}>
+                <button type="button" onClick={() => startNets(b.id)} data-testid={`nets-${b.id}`}>
+                  <span className="challenge-name">{b.name}</span>
+                  <span className="dim small">{b.lesson}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+        <h3>Challenges</h3>
         <div className="practice-cols">
           <section>
             <h3>Batting</h3>
@@ -529,12 +591,14 @@ export function HowToPlay({ onClose }: { onClose: () => void }) {
       <div className="panel wide">
         <h2>Batting</h2>
         <p>
-          The Cricket 07 keys. Hold an arrow for where you want to hit it — <kbd>↓</kbd> is straight back past the bowler, <kbd>↑</kbd>{' '}
-          fine behind the batter, <kbd>→</kbd> the off side and <kbd>←</kbd> the leg side whichever hand he bats with, the diagonals in front
-          of or behind square — then press a shot key just before the ball reaches the batter. So <kbd>↑</kbd><kbd>→</kbd> with <kbd>W</kbd>{' '}
-          is the late cut to third man, <kbd>↑</kbd><kbd>←</kbd> with <kbd>W</kbd> the pull (the hook, with Shift), and with <kbd>S</kbd> the
-          slog sweep. (The arrows can follow the screen instead: the button under the field map on the controls panel switches them.) Too early or too late changes where it goes and how cleanly it comes off the bat: the timing
-          gauge shows you which. The white marker is where the bowler is aiming to pitch it.
+          The Cricket 07 keys. Hold an arrow for where you want to hit it, as the batter sees it — <kbd>↓</kbd> straight back past the
+          bowler, <kbd>↑</kbd> fine behind him, <kbd>→</kbd> his right and <kbd>←</kbd> his left, the diagonals in front of or behind square —
+          then press a shot key just before the ball reaches him. For a right-hander his right is the off side: <kbd>↑</kbd><kbd>→</kbd>{' '}
+          with <kbd>W</kbd> is the late cut to third man, <kbd>↑</kbd><kbd>←</kbd> with <kbd>W</kbd> the pull (the hook, with Shift), and
+          with <kbd>S</kbd> the slog sweep. A left-hander's right is his leg side, so for him it all mirrors. (The arrows can follow the
+          screen instead: the button under the field map on the controls panel switches them.) The card on the right shows, after every
+          stroke, how early or late you were, how much of the sweet spot you found and what to try next. After the hit, hold{' '}
+          <kbd>Shift</kbd> to sprint (if he has the legs) and press <kbd>S</kbd> near the end of a run to dive for the crease.
         </p>
         <table className="keys">
           <tbody>

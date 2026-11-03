@@ -178,7 +178,7 @@ describe('coach', () => {
     ];
     const notes = battingNotes(log);
     expect(notes[0]?.title).toMatch(/early — by about 3\d ms/);
-    expect(notes.some((n) => /nemesis: the yorker/.test(n.title) && /block it \(S\)/.test(n.detail))).toBe(true);
+    expect(notes.some((n) => /nemesis: the yorker/.test(n.title) && /block it \(S alone\)/.test(n.detail))).toBe(true);
   });
 
   it('tells a bowler which ball works and which is being punished', () => {

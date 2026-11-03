@@ -10,6 +10,7 @@ import type { PitchId } from '../game/data/pitches.ts';
 import { TEAMS, type Team } from '../game/data/teams.ts';
 import type { DeliveryTypeId } from '../game/bowling/deliveryTypes.ts';
 import { keyboard } from '../game/input/keyboardInstance.ts';
+import { type AchievementId, earned, earnedByResult, unlock } from '../game/achievements.ts';
 import { type ArrowScheme, readArrowScheme, saveArrowScheme } from '../game/input/battingControls.ts';
 import { type AimStep, type Autoplay, type BowlingSetup, GAME_SPEEDS, type GameSpeed, Match, type MatchPhase, type Review, type MatchResult, type InningsState, type BattingCard, type BowlingCard, type SideId } from '../game/match/match.ts';
 import { DELIVERY_TYPES } from '../game/bowling/deliveryTypes.ts';
@@ -20,11 +21,13 @@ import type { DifficultyId } from '../game/model/difficulty.ts';
 import type { Hand, Player } from '../game/model/player.ts';
 import type { BallOutcome } from '../game/session/deliveryCycle.ts';
 import type { ContactResult } from '../game/batting/contact.ts';
+import type { Coaching } from '../game/batting/coaching.ts';
 import type { VenueId } from '../game/data/venues.ts';
 import type { WeatherId } from '../game/data/weather.ts';
 import { type BatterState, timingScale } from '../game/batting/form.ts';
 import { type SavedMatch, deleteSave, listSaves, writeSave } from '../game/match/save.ts';
 import { type ChallengeId, type ChallengeStatus, challenge } from '../game/practice/challenges.ts';
+import type { NetsBall, NetsBallId } from '../game/practice/nets.ts';
 import { COIN_SETTLED, type CoinFace, type TossChoice, coinFor, computerChoice, flightTime, tossLine } from '../game/match/toss.ts';
 
 /**
@@ -119,6 +122,12 @@ export interface MatchSnapshot {
   readonly lastOutcome: BallOutcome | undefined;
   /** The stroke's contact (timing, quality) for the timing gauge: this ball's once it is hit, else the last ball's. */
   readonly contact: ContactResult | undefined;
+  /** The coach on the human batter's last ball, once it is over (until the next one is bowled). */
+  readonly coaching: Coaching | undefined;
+  /** Coaching nets: the ball, how many faced, and the coach's read of each (latest last). */
+  readonly nets: { readonly ball: NetsBall; readonly variant: number; readonly attempts: number; readonly log: readonly Coaching[] } | undefined;
+  /** This ball's stroke, as soon as the bat has come down: how early (−) or late (+) the press was, ms. */
+  readonly stroke: { readonly pressMs: number | undefined; readonly shot: string } | undefined;
   readonly ballCount: number;
   /** Set while the game waits for the player between balls. */
   readonly review: Review | undefined;
@@ -169,6 +178,11 @@ export interface GameState {
   /** A game controller is connected (its name), and whether it is the device in use (the panels show its buttons). */
   readonly padName: string | undefined;
   readonly padActive: boolean;
+  /** Achievements just unlocked, announced on screen. */
+  readonly toast: { readonly ids: readonly AchievementId[]; readonly at: number } | undefined;
+  dismissToast: () => void;
+  /** The coach's points and the keys for each ball, under the timing (on by default). */
+  readonly coachTips: boolean;
   /**
    * True from pressing Start until the new match's shaders are compiled and
    * its textures uploaded: a loading screen covers the game meanwhile, so
@@ -193,6 +207,9 @@ export interface GameState {
   startMatch: () => void;
   /** The practice challenge being played (or last played), if any. */
   readonly practice: ChallengeId | undefined;
+  /** Coaching nets being played (the first ball chosen), if any. */
+  readonly nets: NetsBallId | undefined;
+  startNets: (ball: NetsBallId) => void;
   startPractice: (id: ChallengeId) => void;
   /** Saves the match in this browser (as it stood before the ball in play, if one is). */
   saveMatch: () => boolean;
@@ -219,6 +236,7 @@ export interface GameState {
   toggleArrows: () => void;
   setPadName: (name: string | undefined) => void;
   setPadActive: (on: boolean) => void;
+  toggleCoachTips: () => void;
 }
 
 const STYLE_NAMES: Record<string, string> = {
@@ -235,6 +253,14 @@ export function styleName(p: Player): string {
   return `${arm} ${s}`;
 }
 
+function readCoachTips(): boolean {
+  try {
+    return localStorage.getItem('crease.coachTips') !== '0';
+  } catch {
+    return true;
+  }
+}
+
 export function findTeam(id: string): Team {
   const t = TEAMS.find((x) => x.id === id) ?? TEAMS[0];
   if (!t) throw new Error('No teams');
@@ -245,6 +271,11 @@ const ids = (players: readonly Player[]) => players.map((p) => p.id);
 
 function snapshot(m: Match, toss: string): MatchSnapshot {
   const inn = m.current;
+  // (Computed first: reading it also adds it to the nets history.)
+  const coaching =
+    (m.phase === 'delivery' && m.cycle?.phase === 'dead') || m.phase === 'review' || m.phase === 'between' || m.phase === 'appeal'
+      ? m.coaching(useGame.getState().arrows, useGame.getState().padActive)
+      : undefined;
   const card = (p: Player) => inn.battingCards.find((c) => c.player.id === p.id);
   const bowler = m.bowler;
   const chase = m.chase;
@@ -294,6 +325,12 @@ function snapshot(m: Match, toss: string): MatchSnapshot {
     },
     lastOutcome: m.lastOutcome,
     contact: m.humanBatting ? (m.cycle?.play?.contact ?? (m.phase === 'review' ? m.lastOutcome?.contact : undefined)) : undefined,
+    nets: m.nets ? { ...m.nets, log: m.strokeLog.slice() } : undefined,
+    stroke: (() => {
+      const info = m.humanBatting && m.cycle?.play?.contact ? m.cycle.play.strokeInfo : undefined;
+      return info ? { pressMs: info.pressError === undefined ? undefined : Math.round(info.pressError * 1000), shot: info.attempt.shot } : undefined;
+    })(),
+    coaching,
     ballCount: m.history.length,
     review: m.phase === 'review' ? m.review : undefined,
     commentary: m.commentary[m.commentary.length - 1],
@@ -362,14 +399,17 @@ function pick(team: Team, xiIds: readonly string[]): Player[] {
   return chosen.length === 11 ? chosen : defaultXi(team);
 }
 
-function createMatch(setup: MatchSetup, seed: string, decided?: { battingFirst: SideId; toss: string }, practice?: ChallengeId): { match: Match; toss: string } {
+function createMatch(setup: MatchSetup, seed: string, decided?: { battingFirst: SideId; toss: string }, practice?: ChallengeId, nets?: NetsBallId): { match: Match; toss: string } {
   const user = findTeam(setup.userTeamId);
   const opp = findTeam(setup.opponentId);
   const userXi = pick(user, setup.userXi);
   const oppXi = pick(opp, setup.opponentXi);
   let battingFirst: SideId;
   let toss: string;
-  if (practice) {
+  if (nets) {
+    battingFirst = 'home';
+    toss = 'Coaching nets: the same ball until you ask for another. Nothing is scored.';
+  } else if (practice) {
     const c = challenge(practice);
     battingFirst = c.role === 'bat' ? 'home' : 'away';
     toss = `Practice: ${c.name}. ${c.goal}`;
@@ -398,6 +438,7 @@ function createMatch(setup: MatchSetup, seed: string, decided?: { battingFirst: 
     weather: setup.weather,
     venue: setup.venue,
     ...(practice ? { practice } : {}),
+    ...(nets ? { nets: { ball: nets } } : {}),
   });
   match.speed = GAME_SPEEDS[setup.speed];
   return { match, toss };
@@ -426,7 +467,53 @@ function saveFlag(key: string, on: boolean): void {
 export const useGame = create<GameState>()((set, get) => {
   const attach = (match: Match, toss: string) => {
     unsubscribe?.();
-    unsubscribe = match.subscribe(() => set({ snap: snapshot(match, toss) }));
+    let seen = match.history.length;
+    let seenNets = 0;
+    let resultSeen = match.phase === 'complete';
+    unsubscribe = match.subscribe(() => {
+      set({ snap: snapshot(match, toss) });
+      // Achievements: every new ball the player took part in, and the result.
+      const fresh: AchievementId[] = [];
+      const nets = match.config.nets !== undefined;
+      if (nets && match.strokeLog.length > seenNets) {
+        seenNets = match.strokeLog.length;
+        let streak = 0;
+        for (let i = match.strokeLog.length - 1; i >= 0 && match.strokeLog[i]?.verdict === 'good'; i--) streak += 1;
+        const o = match.lastOutcome;
+        if (o) fresh.push(...earned({ outcome: o, batting: true, batterRuns: 0, timingMs: o.timingMs, netsStreak: streak }));
+      }
+      while (!nets && match.history.length > seen) {
+        const o = match.history[seen];
+        seen += 1;
+        const side = match.userSide;
+        if (!o || !side) continue;
+        const batting = side === 'batting';
+        const card = match.current.battingCards.find((c) => c.player.id === match.striker.id);
+        const overDone = !batting && match.current.overs.at(-1);
+        fresh.push(
+          ...earned({
+            outcome: o,
+            batting,
+            batterRuns: Math.max(card?.runs ?? 0, ...match.current.battingCards.map((c) => c.runs)),
+            timingMs: o.timingMs,
+            maiden: !!overDone && match.current.balls % 6 === 0 && match.current.balls > 0 && overDone.runs === 0,
+            hatTrick: o.headline === 'HAT-TRICK!',
+            deliveryType: match.cycle?.delivery?.type.id,
+            dived: (match.cycle?.dives.length ?? 0) > 0,
+          }),
+        );
+      }
+      if (!resultSeen && match.phase === 'complete' && match.result && !match.config.practice && !nets) {
+        resultSeen = true;
+        const mine = match.config.home.controller === 'human' ? 'home' : match.config.away.controller === 'human' ? 'away' : undefined;
+        const secondBat = match.innings[1]?.batting;
+        fresh.push(
+          ...earnedByResult({ won: mine !== undefined && match.result.winner === mine, battedSecond: secondBat === mine, superOver: match.innings.length > 2 }),
+        );
+      }
+      const added = unlock(fresh);
+      if (added.length) set({ toast: { ids: added, at: performance.now() } });
+    });
     set({ match, snap: snapshot(match, toss), paused: false, meter: 0.5, screen: 'match', warming: true, toss: undefined });
     keyboard.enabled = true;
   };
@@ -437,7 +524,7 @@ export const useGame = create<GameState>()((set, get) => {
     set({ warming: true });
     afterPaint(() => {
       if (ticket !== pendingStart) return;
-      const { match, toss } = createMatch(get().setup, seed, decided, restore ? undefined : get().practice);
+      const { match, toss } = createMatch(get().setup, seed, decided, restore ? undefined : get().practice, restore ? undefined : get().nets);
       if (restore) match.restoreState(restore);
       attach(match, toss);
     });
@@ -459,6 +546,9 @@ export const useGame = create<GameState>()((set, get) => {
     arrows: readArrowScheme(),
     padName: undefined,
     padActive: false,
+    toast: undefined,
+    dismissToast: () => set({ toast: undefined }),
+    coachTips: readCoachTips(),
     warming: false,
     perf: 0,
     setWarming: (warming) => {
@@ -498,7 +588,7 @@ export const useGame = create<GameState>()((set, get) => {
     // With "Toss for it", to the middle for the toss; otherwise straight to the match.
     startMatch: () => {
       sound.unlock();
-      set({ practice: undefined });
+      set({ practice: undefined, nets: undefined });
       const setup = get().setup;
       if (setup.batFirst === 'toss') {
         // To the middle for the toss first.
@@ -537,9 +627,15 @@ export const useGame = create<GameState>()((set, get) => {
     },
     saves: listSaves(),
     practice: undefined,
+    nets: undefined,
     startPractice: (id) => {
       sound.unlock();
-      set({ practice: id });
+      set({ practice: id, nets: undefined });
+      begin(newSeed());
+    },
+    startNets: (ball) => {
+      sound.unlock();
+      set({ nets: ball, practice: undefined });
       begin(newSeed());
     },
     saveMatch: () => {
@@ -564,7 +660,7 @@ export const useGame = create<GameState>()((set, get) => {
       if (!save) return false;
       const meta = save.meta as unknown as { setup: MatchSetup; toss: string; battingFirst: SideId };
       sound.unlock();
-      set({ setup: { ...DEFAULT_SETUP, ...meta.setup }, practice: undefined });
+      set({ setup: { ...DEFAULT_SETUP, ...meta.setup }, practice: undefined, nets: undefined });
       begin(save.id, { battingFirst: meta.battingFirst, toss: meta.toss }, save.state);
       return true;
     },
@@ -576,7 +672,9 @@ export const useGame = create<GameState>()((set, get) => {
       hush();
       // A practice challenge: the same one again.
       const id = get().practice;
+      const nets = get().nets;
       if (id) get().startPractice(id);
+      else if (nets) get().startNets(nets);
       else get().startMatch();
     },
     quitToMenu: () => {
@@ -622,6 +720,15 @@ export const useGame = create<GameState>()((set, get) => {
     },
     setPadName: (padName) => set({ padName, ...(padName ? {} : { padActive: false }) }),
     setPadActive: (padActive) => set({ padActive }),
+    toggleCoachTips: () => {
+      const coachTips = !get().coachTips;
+      try {
+        localStorage.setItem('crease.coachTips', coachTips ? '1' : '0');
+      } catch {
+        // Not persisted.
+      }
+      set({ coachTips });
+    },
     toggleArrows: () => {
       const arrows: ArrowScheme = get().arrows === 'batter' ? 'screen' : 'batter';
       saveArrowScheme(arrows);

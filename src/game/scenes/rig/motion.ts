@@ -24,6 +24,10 @@ export function resetPose(p: Pose): void {
   p.handR = undefined;
   p.poleL = undefined;
   p.poleR = undefined;
+  p.point = undefined;
+  p.roll = undefined;
+  p.lift = undefined;
+  p.dip = undefined;
   p.clip = undefined;
   p.armLayer = undefined;
   p.look = undefined;
@@ -83,7 +87,8 @@ export function celebrate(p: Pose, t: number): void {
 
 /** Hands together at chest height: taking a catch or gathering the ball. */
 export function gather(p: Pose): void {
-  p.clip = undefined;
+  // Over a running clip only the arms change: the legs keep running (clearing the clip would leave them still, sliding).
+  if (p.clip) p.armLayer = 'both';
   setLimb(p.armL, 1.2, -0.15, 0.9);
   setLimb(p.armR, 1.2, -0.15, 0.9);
   p.lean = Math.max(p.lean, 0.3);
@@ -399,4 +404,77 @@ export function takeGuard(p: Pose, tap: number): void {
   setLimb(p.legL, 0.05, 0.08, 0.1);
   setLimb(p.legR, 0.05, 0.08, 0.1);
   p.grip = 1;
+}
+
+/**
+ * The umpire gives it out: a moment's stillness, then the right arm raised
+ * slowly, straight, the index finger pointing at the sky. `u` 0 → 1 the raise.
+ */
+export function umpireOut(p: Pose, u: number): void {
+  resetPose(p);
+  const k = Math.min(1, Math.max(0, u));
+  const e = k * k * (3 - 2 * k);
+  setLimb(p.armR, 0.1 + 2.95 * e, 0.06, 0.55 * (1 - e) + 0.08);
+  // The other hand stays by his side, or holds his coat.
+  setLimb(p.armL, 0.15, 0.12, 0.5);
+  p.lean = -0.04 * e;
+  p.grip = 0.95 * Math.min(1, k * 3);
+  p.point = 'R';
+}
+
+/** Not out: hands clasped in front, a small shake of the head. */
+export function umpireNotOut(p: Pose): void {
+  resetPose(p);
+  setLimb(p.armL, 0.55, -0.2, 1.3);
+  setLimb(p.armR, 0.55, -0.2, 1.3);
+  p.grip = 0.4;
+}
+
+/**
+ * A dive, full length, to the side: `tau` seconds from when the ball
+ * arrives (negative: launching), `side` +1 to his left, −1 to his right.
+ * Launch (−0.32 … 0), on the ground with the ball (0 … 0.45), up again
+ * (0.45 … 1.05). The arms are stretched past the head towards the ball.
+ */
+export function dive(p: Pose, tau: number, side: 1 | -1): void {
+  resetPose(p);
+  const launch = Math.min(1, Math.max(0, (tau + 0.32) / 0.32));
+  const up = Math.min(1, Math.max(0, (tau - 0.45) / 0.6));
+  const e = (u: number) => u * u * (3 - 2 * u);
+  const out = e(launch) * (1 - e(up));
+  // Rolling about his forward axis: a positive roll tips him to his right, so a dive to the left is negative.
+  p.roll = -side * 1.42 * out;
+  // Airborne in the launch, then down on his side.
+  p.lift = Math.sin(Math.PI * Math.min(1, launch)) * 0.28 * (1 - up) + 0.04 * out;
+  // The leading arm (towards the ball) stretched beyond the head, the other following.
+  const lead = side > 0 ? p.armL : p.armR;
+  const other = side > 0 ? p.armR : p.armL;
+  setLimb(lead, 0.4 * out, 2.6 * out, 0.1);
+  setLimb(other, 0.9 * out, 1.9 * out, 0.35);
+  setLimb(p.legL, 0.1, 0.12 * out, 0.25 + 0.3 * up);
+  setLimb(p.legR, -0.1, 0.12 * out, 0.35 + 0.3 * up);
+  p.drop = 0.3 * up * (1 - up) * 4;
+  p.lean = 0.25 * (1 - out);
+  p.grip = tau > 0 ? 1 : 0.15;
+}
+
+/**
+ * A batter diving for the crease: launched forward full length, bat
+ * stretched out ahead to slide over the line. `tau` seconds since the dive
+ * (0 … 0.3 in the air, then sliding and down, up again from 0.75).
+ */
+export function diveForCrease(p: Pose, tau: number): void {
+  resetPose(p);
+  const e = (u: number) => u * u * (3 - 2 * u);
+  const go = e(Math.min(1, Math.max(0, tau / 0.3)));
+  const up = e(Math.min(1, Math.max(0, (tau - 0.75) / 0.5)));
+  const out = go * (1 - up);
+  p.dip = 1.38 * out;
+  p.lift = Math.sin(Math.PI * Math.min(1, tau / 0.4)) * 0.22 * (1 - up) + 0.05 * out;
+  // Both arms out ahead, the bat at full stretch.
+  setLimb(p.armL, 2.95 * out + 0.3 * (1 - out), 0.15, 0.1);
+  setLimb(p.armR, 2.95 * out + 0.3 * (1 - out), 0.15, 0.1);
+  setLimb(p.legL, -0.15 * out, 0.1, 0.3);
+  setLimb(p.legR, 0.1 * out, 0.1, 0.5 * out);
+  p.grip = 0.9;
 }

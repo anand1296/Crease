@@ -37,7 +37,7 @@ export interface CreaseDebug {
   players?: () => {
     bowler: string;
     mark: { x: number; z: number };
-    at: { id: string; x: number; z: number }[];
+    at: { id: string; x: number; z: number; clip?: string | undefined; clipT?: number | undefined; legL?: number }[];
     field: { id: string; x: number; z: number; role: string }[];
   };
   /** Renderer statistics: draw calls, programs, textures, scene objects, pixel ratio, adaptive level. */

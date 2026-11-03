@@ -24,7 +24,7 @@ export interface Vec {
 }
 
 export interface Shot {
-  readonly name: 'wide' | 'aim' | 'mark' | 'closeUp' | 'runUp' | 'delivery' | 'stroke' | 'chase' | 'throw' | 'celebrate' | 'stumps' | 'hold';
+  readonly name: 'wide' | 'aim' | 'mark' | 'umpire' | 'walkBack' | 'crowd' | 'aerial' | 'closeUp' | 'runUp' | 'delivery' | 'stroke' | 'chase' | 'throw' | 'celebrate' | 'stumps' | 'hold';
   /** Which fixed camera a chase shot uses (so the director stays on it for the rest of the ball). */
   readonly cam?: string;
   readonly pos: Vec;
@@ -70,6 +70,13 @@ export interface DirectorInput {
    * ball left his hand (negative while he winds up).
    */
   readonly throwing?: { readonly from: Vec; readonly target: Vec; readonly since: number } | undefined;
+  /**
+   * Between balls on television: seconds since the ball ended, which ball it
+   * is (so each gap is cut differently), and the bowler (walking back).
+   */
+  readonly filler?: { readonly t: number; readonly seq: number; readonly bowler: Vec; readonly crowd?: boolean } | undefined;
+  /** An appeal: the bowler's-end umpire giving his decision (where he stands, seconds since the appeal). */
+  readonly umpire?: { readonly at: Vec; readonly since: number; readonly out: boolean } | undefined;
   /** Before the first ball: the bowler marking out his run-up (seconds into it, and until when to watch him). */
   readonly marking?: { readonly bowler: Vec; readonly t: number; readonly until: number } | undefined;
   /** After the ball: a celebration to show (a wicket's huddle, a batter raising his bat), and how wide it is. */
@@ -131,7 +138,7 @@ export function frameBetween(cam: Vec, low: Vec, high: Vec, margin = { bottom: 0
 export function runUpFrame(bowler: Vec): { pos: Vec; look: Vec; fov: number } {
   // A stride behind him, so the trailing foot stays in frame; a little below the ground for his shadow.
   const low = { x: bowler.x * 0.5, y: -0.25, z: Math.min(bowler.z, RELEASE_FEET_Z) - 0.9 };
-  const f = frameBetween(MAIN_CAMERA, low, BATTER_TOP, { bottom: 0.1, top: 0.04 });
+  const f = frameBetween(MAIN_CAMERA, low, BATTER_TOP, { bottom: 0.06, top: 0.03 });
   return { pos: { ...MAIN_CAMERA }, look: f.look, fov: f.fov };
 }
 
@@ -143,6 +150,8 @@ export const WIDE: Readonly<{ pos: Vec; look: Vec; fov: number }> = {
 };
 /** The main camera at the moment of release: the bowler at the foot of the frame and the batter at the top. */
 export const TIGHT: Readonly<{ pos: Vec; look: Vec; fov: number }> = runUpFrame({ x: 0, y: 0, z: RELEASE_FEET_Z });
+/** The main camera as the ball reaches the batter: eased in, the batter big in the picture. */
+export const ARRIVAL: Readonly<{ pos: Vec; look: Vec; fov: number }> = runUpFrame({ x: 0, y: 0, z: BOWLER_STUMPS_Z + 5.5 });
 
 /**
  * The fixed cameras the director cuts to after the ball is hit, as on
@@ -191,13 +200,24 @@ export const AIM: Readonly<{ pos: Vec; look: Vec; fov: number }> = {
 };
 
 /** How long the stroke is shown from the bowler's end before the chase camera takes over. */
-export const STROKE_HOLD = 0.45;
+export const STROKE_HOLD = 0.6;
 
 export function direct(input: DirectorInput): Shot {
   const { phase, time, releaseTime, ball } = input;
   const classic = input.style === 'classic';
   const WIDE_ = input.humanBowling ? AIM : classic ? CLASSIC_WIDE : WIDE;
   const TIGHT_ = classic ? CLASSIC_TIGHT : TIGHT;
+
+  const ump = input.umpire;
+  if (ump && ump.since < (ump.out ? 3.4 : 2.2)) {
+    // The decision, as television shows it: a long lens from the batter's end on the umpire, head to waist,
+    // with room above for the finger.
+    const at = ump.at;
+    const pos = { x: at.x + 3.5, y: 2.2, z: at.z + 30 };
+    const look = { x: at.x, y: 1.7, z: at.z };
+    const d = Math.hypot(pos.x - look.x, pos.y - look.y, pos.z - look.z);
+    return { name: 'umpire', pos, look, fov: (2 * Math.atan(1.25 / d) * 180) / Math.PI, cut: input.previous !== 'umpire', ease: 6 };
+  }
 
   if (phase === undefined && input.marking && input.marking.t < input.marking.until) {
     // The build-up: a long lens from the bowler's end, off to the side, on the bowler pacing out and marking his run.
@@ -206,6 +226,11 @@ export function direct(input: DirectorInput): Shot {
     const look = { x: b.x, y: 1.0, z: b.z };
     const d = Math.hypot(pos.x - look.x, pos.y - look.y, pos.z - look.z);
     return { name: 'mark', pos, look, fov: (2 * Math.atan(1.6 / d) * 180) / Math.PI, cut: input.previous !== 'mark', ease: 4 };
+  }
+
+  if (phase === undefined && !classic && !input.humanBowling && input.filler && input.subject) {
+    const shot = fillerShot(input.filler, input.subject, input.previous);
+    if (shot) return shot;
   }
 
   if (phase === undefined) {
@@ -236,9 +261,11 @@ export function direct(input: DirectorInput): Shot {
   if (phase === 'runUp' || (phase === 'inFlight' && input.contactTime === undefined && input.stumpsTime === undefined)) {
     // Where the bowler is: as told, or (without it) an even run from the top of a pace run-up.
     const u = smooth(time / Math.max(0.1, releaseTime));
+    // Once he has let it go the operator eases in on the batter, as the ball goes down (the bowler's end drops out of the bottom).
+    const flight = phase === 'inFlight' ? smooth((time - releaseTime) / 0.55) : 0;
     const bowler =
       phase === 'inFlight'
-        ? { x: 0, y: 0, z: RELEASE_FEET_Z }
+        ? { x: 0, y: 0, z: lerp(RELEASE_FEET_Z, BOWLER_STUMPS_Z + 5.5, flight) }
         : input.bowler ?? { x: 0, y: 0, z: lerp(BOWLER_STUMPS_Z - 18, RELEASE_FEET_Z, u) };
     const name = phase === 'runUp' ? 'runUp' : 'delivery';
     // Cut to the run-up from any other camera; within it, the operator follows the bowler.
@@ -297,7 +324,8 @@ export function direct(input: DirectorInput): Shot {
 
   if (input.contactTime === undefined || !ball) {
     // Beaten, padded or left: stay tight on the batter and the keeper.
-    return { name: 'delivery', pos: { ...TIGHT_.pos }, look: { ...TIGHT_.look }, fov: TIGHT_.fov, cut: false, ease: 3 };
+    const hold = classic ? TIGHT_ : ARRIVAL;
+    return { name: 'delivery', pos: { ...hold.pos }, look: { ...hold.look }, fov: hold.fov, cut: false, ease: 3 };
   }
 
   const since = time - input.contactTime;
@@ -309,7 +337,8 @@ export function direct(input: DirectorInput): Shot {
         name: 'stroke',
         pos: { ...TIGHT.pos },
         look: { x: ball.x * 0.85, y: Math.max(0.6, ball.y * 0.75), z: lerp(STRIKER_STUMPS_Z - 3, ball.z, 0.85) },
-        fov: Math.min(22, TIGHT.fov + fromBat * 0.75 + ball.y * 0.4),
+        // Widening only as fast as the ball needs, so the stroke and its follow-through stay big in the picture.
+        fov: Math.min(22, ARRIVAL.fov + Math.max(0, fromBat - 3) * 0.6 + ball.y * 0.35),
         cut: false,
         ease: 6,
       };
@@ -337,4 +366,56 @@ export function direct(input: DirectorInput): Shot {
   const span = Math.max(5.5, spread + 4.2, ball.y * 1.6 + 3.5);
   const fov = Math.min(55, Math.max(8, ((2 * Math.atan(span / 2 / dist)) * 180) / Math.PI));
   return { name: 'chase', cam, pos, look: target, fov, cut: input.previous === 'stroke', ease: 4.5 };
+}
+
+/** How long each between-ball shot is held, seconds. */
+export const FILLER_SHOT = 3.4;
+type FillerKind = 'closeUp' | 'walkBack' | 'crowd' | 'aerial';
+/** The order the gap between balls is cut in, varied ball by ball. */
+const FILLER_ORDERS: readonly (readonly FillerKind[])[] = [
+  ['closeUp', 'walkBack', 'crowd', 'closeUp'],
+  ['walkBack', 'closeUp', 'aerial', 'closeUp'],
+  ['closeUp', 'crowd', 'walkBack', 'closeUp'],
+  ['aerial', 'closeUp', 'walkBack', 'closeUp'],
+];
+
+/**
+ * Television between balls: the batter in close-up, the bowler walking back
+ * to his mark, the crowd, a shot from the airship — a few seconds each, in
+ * an order that changes from ball to ball.
+ */
+export function fillerShot(f: { t: number; seq: number; bowler: Vec; crowd?: boolean }, batter: Vec, previous: Shot['name'] | undefined): Shot | undefined {
+  const order = FILLER_ORDERS[((f.seq % FILLER_ORDERS.length) + FILLER_ORDERS.length) % FILLER_ORDERS.length] ?? FILLER_ORDERS[0];
+  if (!order) return undefined;
+  const planned = order[Math.min(order.length - 1, Math.floor(f.t / FILLER_SHOT))] ?? 'closeUp';
+  // No crowd drawn (low graphics): the airship instead of empty seats.
+  const kind = planned === 'crowd' && f.crowd === false ? 'aerial' : planned;
+  const local = f.t - Math.floor(f.t / FILLER_SHOT) * FILLER_SHOT;
+  const span = (pos: Vec, look: Vec, metres: number) => (2 * Math.atan(metres / 2 / Math.hypot(pos.x - look.x, pos.y - look.y, pos.z - look.z)) * 180) / Math.PI;
+  switch (kind) {
+    case 'walkBack': {
+      // A long lens from behind the bowler's arm as he walks back towards it, ball in hand.
+      const b = f.bowler;
+      const pos = { x: b.x + 7, y: 6, z: BOWLER_STUMPS_Z - 52 };
+      const look = { x: b.x, y: 1.05, z: b.z };
+      return { name: 'walkBack', pos, look, fov: span(pos, look, 3.6), cut: previous !== 'walkBack', ease: 4 };
+    }
+    case 'crowd': {
+      // From the edge of the field into the stands, panning slowly along them.
+      const a = 0.9 + (f.seq % 5) * 1.17 + local * 0.035;
+      const pos = { x: Math.sin(a) * 58, y: 2.5, z: Math.cos(a) * 58 };
+      const look = { x: Math.sin(a + 0.05) * 90, y: 9, z: Math.cos(a + 0.05) * 90 };
+      return { name: 'crowd', pos, look, fov: 24, cut: previous !== 'crowd', ease: 2.5 };
+    }
+    case 'aerial': {
+      // The airship, circling high over the ground.
+      const a = 0.5 + (f.seq % 7) * 0.9 + local * 0.06;
+      const pos = { x: Math.sin(a) * 135, y: 78, z: Math.cos(a) * 135 };
+      return { name: 'aerial', pos, look: { x: 0, y: 0, z: 0 }, fov: 40, cut: previous !== 'aerial', ease: 2.5 };
+    }
+    default: {
+      const pos = { x: batter.x + 9, y: 9, z: BOWLER_STUMPS_Z - 40 };
+      return { name: 'closeUp', pos, look: { x: batter.x, y: 1.3, z: batter.z }, fov: 2.9, cut: previous !== 'closeUp', ease: 4 };
+    }
+  }
 }

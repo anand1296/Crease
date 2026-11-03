@@ -44,6 +44,8 @@ export interface FieldingPlan {
   readonly returnT?: number;
   /** How difficult the chance or stop was, 0 (easy) – 1 (very hard). */
   readonly difficulty: number;
+  /** He had to dive for it. */
+  readonly dive?: boolean;
 }
 
 export interface PathSample {
@@ -308,13 +310,13 @@ export function planFielding(
       const skill = f.player.fielding.catching / 100;
       const pHold = clamp01(0.97 - (1 - skill) * 0.25 - difficulty * (0.85 - 0.45 * skill));
       if (rng.chance(pHold)) {
-        return { kind: 'caught', fielder: reach.fielder, interceptT: s.t, interceptPos: pos, runs: 0, difficulty };
+        return { kind: 'caught', fielder: reach.fielder, interceptT: s.t, interceptPos: pos, runs: 0, difficulty, ...(reach.dive ? { dive: true } : {}) };
       }
       // Dropped: the ball falls near the fielder and is picked up.
       const returnT = s.t + delay + 1.1 + throwTime(f, pos);
       return {
         kind: 'dropped', fielder: reach.fielder, interceptT: s.t, interceptPos: { ...pos, y: FIELD.ballRadius },
-        runs: safeRuns(returnT, runPace), returnT, difficulty,
+        runs: safeRuns(returnT, runPace), returnT, difficulty, ...(reach.dive ? { dive: true } : {}),
       };
     }
     // Ground fielding: a clean stop is harder off a quick ball or a dive.
@@ -324,7 +326,7 @@ export function planFielding(
       // Gathering a moving ball and setting to throw; longer after a dive.
       const pickup = 0.55 + (reach.dive ? 0.9 : 0) + delay;
       const returnT = s.t + pickup + throwTime(f, pos);
-      return { kind: 'fielded', fielder: reach.fielder, interceptT: s.t, interceptPos: pos, runs: safeRuns(returnT, runPace), returnT, difficulty };
+      return { kind: 'fielded', fielder: reach.fielder, interceptT: s.t, interceptPos: pos, runs: safeRuns(returnT, runPace), returnT, difficulty, ...(reach.dive ? { dive: true } : {}) };
     }
     // Fumble: the ball slows and runs on; others may still get to it.
     delay += 0.8;

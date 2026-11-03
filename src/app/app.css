@@ -2839,3 +2839,339 @@ kbd.k.on {
   background: var(--bad);
   color: #200704;
 }
+
+
+/* ---- The batter's clipboard: timing, sweet spot, the coach ---- */
+.stroke-card {
+  position: absolute;
+  right: 14px;
+  bottom: 74px;
+  width: 330px;
+  max-width: calc(100% - 28px);
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: var(--glass);
+  border-left: 4px solid rgba(241, 238, 227, 0.25);
+  display: grid;
+  gap: 8px;
+  animation: pop 0.18s ease-out;
+}
+.stroke-card.good { border-left-color: var(--good); }
+.stroke-card.ok { border-left-color: var(--ok); }
+.stroke-card.bad { border-left-color: var(--bad); }
+.sc-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.sc-word {
+  font: 800 34px/1 var(--display);
+  letter-spacing: 0.01em;
+}
+.sc-word.good, .stroke-card b.good, .nets-panel b.good { color: var(--good); }
+.sc-word.ok, .stroke-card b.ok { color: var(--ok); }
+.sc-word.bad, .stroke-card b.bad, .stroke-card .bad, .nets-panel b.bad { color: var(--bad); }
+.sc-ms {
+  font: 600 18px var(--display);
+  color: var(--chalk-dim);
+}
+.sc-meter {
+  position: relative;
+  height: 16px;
+  margin: 2px 0 14px;
+  border-radius: 8px;
+  background: rgba(239, 123, 107, 0.28);
+}
+.sc-meter .zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 8px;
+}
+.sc-meter .zone.ok { background: rgba(227, 192, 98, 0.45); }
+.sc-meter .zone.good { background: rgba(127, 212, 155, 0.8); }
+.sc-centre {
+  position: absolute;
+  left: 50%;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--chalk);
+  opacity: 0.6;
+}
+.sc-needle {
+  position: absolute;
+  top: -6px;
+  width: 6px;
+  height: 28px;
+  margin-left: -3px;
+  border-radius: 3px;
+  background: var(--chalk);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.45);
+  transition: left 0.25s ease-out;
+}
+.sc-needle.good { background: var(--good); }
+.sc-needle.ok { background: var(--ok); }
+.sc-needle.bad { background: var(--bad); }
+.sc-end {
+  position: absolute;
+  top: 19px;
+  font-size: 11px;
+  color: var(--chalk-dim);
+}
+.sc-end.left { left: 0; }
+.sc-end.right { right: 0; }
+.sc-facts {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font: 600 16px var(--display);
+}
+.sc-ball {
+  font-size: 13px;
+  color: var(--chalk-dim);
+}
+.sc-points {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  font-size: 13.5px;
+  line-height: 1.35;
+}
+.sc-try {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+}
+.sc-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: rgba(241, 238, 227, 0.08);
+}
+.sc-option kbd {
+  font: 600 12px var(--display);
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(241, 238, 227, 0.16);
+  color: var(--chalk);
+}
+.sc-toggle {
+  justify-self: end;
+  font-size: 12px;
+  padding: 2px 8px;
+  min-height: 0;
+  background: transparent;
+  border: 1px solid rgba(241, 238, 227, 0.25);
+  color: var(--chalk-dim);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* ---- Coaching nets ---- */
+.nets-panel {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 28px));
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: var(--glass);
+  border-bottom: 3px solid var(--brass);
+  display: grid;
+  gap: 8px;
+}
+.nets-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 12px;
+}
+.nets-head strong { font: 700 20px var(--display); }
+.nets-count { font: 600 15px var(--display); color: var(--chalk-dim); white-space: nowrap; }
+.nets-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+}
+.nets-log li {
+  display: grid;
+  min-width: 62px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: rgba(241, 238, 227, 0.06);
+  border-top: 3px solid var(--bad);
+  font-size: 11px;
+  text-align: center;
+}
+.nets-log li.good { border-top-color: var(--good); }
+.nets-log li.ok { border-top-color: var(--ok); }
+.nl-shot { color: var(--chalk-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70px; }
+.nl-ms { font: 700 15px var(--display); }
+.nets-trend { margin: 0; font-size: 13.5px; }
+.nets-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.nets-actions button, .nets-choose button {
+  padding: 5px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(241, 238, 227, 0.2);
+  background: rgba(241, 238, 227, 0.06);
+  color: var(--chalk);
+  font: 600 14px var(--display);
+  cursor: pointer;
+}
+.nets-actions button:disabled { opacity: 0.45; cursor: default; }
+.nets-choose {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 4px;
+}
+.nets-choose button { width: 100%; text-align: left; }
+.nets-choose button.on { border-color: var(--brass); }
+.nets-pick { margin-bottom: 12px; }
+.nets-balls {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px;
+}
+.nets-balls button {
+  width: 100%;
+  display: grid;
+  gap: 2px;
+  padding: 8px 12px;
+  text-align: left;
+  border-radius: 4px;
+  border: 1px solid rgba(241, 238, 227, 0.14);
+  background: rgba(241, 238, 227, 0.04);
+  color: var(--chalk);
+  cursor: pointer;
+}
+.nets-balls button:hover, .nets-balls button:focus-visible { border-color: var(--brass); }
+
+@media (max-width: 900px) {
+  .stroke-card { bottom: auto; top: 70px; width: 280px; }
+}
+
+/* Wagon wheel (pause → Stats). */
+.wagon {
+  margin: 12px 0;
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+.wagon figcaption {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-weight: 600;
+}
+.wagon .wagon-field {
+  fill: #2f6b34;
+  stroke: rgba(255, 255, 255, 0.5);
+  stroke-width: 1;
+}
+.wagon .wagon-ring {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-dasharray: 2 3;
+}
+.wagon .wagon-pitch {
+  fill: #c8b27a;
+}
+.wagon line {
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+.wagon line.wr {
+  stroke: #f2efe6;
+}
+.wagon line.w4 {
+  stroke: #4aa8ff;
+  stroke-width: 1.8;
+}
+.wagon line.w6 {
+  stroke: #ff5a4f;
+  stroke-width: 2;
+}
+
+/* Achievements. */
+.achievement-toast {
+  position: absolute;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(14, 22, 30, 0.92);
+  border: 1px solid #d8a21c;
+  border-radius: 8px;
+  padding: 10px 16px;
+  display: grid;
+  gap: 4px;
+  z-index: 40;
+  animation: toast-in 0.35s ease-out;
+}
+.achievement-toast .at-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+.achievement-toast .at-star,
+.trophies .won .trophy-mark {
+  color: #e7b52c;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .achievement-toast {
+    animation: none;
+  }
+}
+.trophies {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 16px;
+  display: grid;
+  gap: 6px;
+  max-height: 55vh;
+  overflow: auto;
+}
+.trophies li {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+}
+.trophies li:not(.won) {
+  opacity: 0.7;
+}
+
+/* Controls panel: a little wider, labels keep to their own column, the arrow switch is clickable. */
+section.keys {
+  width: 360px;
+}
+section.keys li > span:last-child {
+  flex: 1;
+  min-width: 0;
+}
+section.keys .aim-scheme {
+  pointer-events: auto;
+}

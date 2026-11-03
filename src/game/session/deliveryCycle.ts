@@ -1,3 +1,4 @@
+import { type BattingAssist, INPUT_LAG } from '../model/difficulty.ts';
 import type { Rng } from '../core/rng.ts';
 import type { Vec3 } from '../core/vec3.ts';
 import { BOWLER_STUMPS_Z, FIELD, STRIKER_STUMPS_Z } from '../data/field.ts';
@@ -101,6 +102,8 @@ export interface CycleOptions {
   readonly freeHit?: boolean;
   /** Bouncers already bowled this over (T20: one is allowed; the second is a no-ball). */
   readonly bouncersThisOver?: number;
+  /** A human is batting: help by difficulty (see BattingAssist), and his key presses are dated back for input lag. */
+  readonly assist?: BattingAssist;
 }
 
 /** Which end a throw goes to: the keeper (striker's end) or the bowler. */
@@ -170,6 +173,10 @@ export const SHUFFLE_OFF = 0.54;
 export const SHUFFLE_LEG = 0.36;
 const SHUFFLE_STEP = 0.18;
 
+/** A dive for the crease gets there this much sooner, seconds; getting up again takes this long. */
+export const DIVE_GAIN = 0.2;
+const GET_UP = 0.6;
+
 export class DeliveryCycle {
   phase: CyclePhase = 'runUp';
   /**
@@ -193,10 +200,22 @@ export class DeliveryCycle {
   readonly fielderPos: { x: number; z: number }[];
   /** Index of the fielder holding the ball, if any. */
   carrier?: number;
+  /**
+   * The keeper taking a delivery the batter did not hit: the ball carries on
+   * from where it passed the batter into his gloves (where, and when).
+   */
+  keeperTake: { readonly from: { x: number; y: number; z: number }; readonly to: { x: number; y: number; z: number }; readonly t0: number; readonly t1: number } | undefined;
   /** Time the stroke was committed, cycle time. */
   shotTime?: number;
   /** Cycle times at which each run was started. */
   readonly runStarts: number[] = [];
+  /** Each run's pace (1 normal; less is quicker: a sprint, a dive at the end). */
+  private readonly runScale: number[] = [];
+  /** Runs sprinted, and dives made (run, when) — for the batters' legs and the picture. */
+  sprints = 0;
+  readonly dives: { readonly run: number; readonly at: number; readonly auto?: boolean }[] = [];
+  /** The batter is holding the sprint key: runs called now are sprinted. */
+  sprintHeld = false;
   /** Ball in a fielder's hands: when it was gathered, and when the return reaches the stumps. */
   collectedAt: number | undefined;
   returnAt: number | undefined;
@@ -290,9 +309,15 @@ export class DeliveryCycle {
   }
 
   /** Human batter commits to a stroke now. Ignored before release or once committed. */
+  /** A shot key pressed after the ball had already gone past (for the coach: "far too late"). */
+  pressedTooLate = false;
+
   playShot(shot: ShotAttempt): boolean {
-    if (this.phase !== 'inFlight' || !this.play?.canPlayShot) return false;
-    const ok = this.play.playShot(shot);
+    if (this.phase !== 'inFlight' || !this.play?.canPlayShot) {
+      if (this.play && !this.play.shot && (this.phase === 'inFlight' || this.phase === 'dead' || this.phase === 'struck')) this.pressedTooLate = true;
+      return false;
+    }
+    const ok = this.opts.assist ? this.play.playShot(shot, Math.max(0, this.play.time - INPUT_LAG)) : this.play.playShot(shot);
     if (ok) this.shotTime = this.time;
     return ok;
   }
@@ -304,7 +329,78 @@ export class DeliveryCycle {
 
   /** Seconds for run `i` at the batters' pace. */
   private runLen(i: number): number {
-    return runDuration(i) * this.runPace;
+    return runDuration(i) * this.runPace * (this.runScale[i] ?? 1);
+  }
+
+  /** How much quicker a sprint is (less when tired), or undefined when he has nothing left. */
+  get sprintScale(): number | undefined {
+    const tired = Math.max(this.opts.form?.strikerFatigue ?? 0, this.opts.form?.nonStrikerFatigue ?? 0);
+    if (tired > 0.8) return undefined;
+    return 0.84 + 0.12 * tired;
+  }
+
+  /** Changes run `i`'s duration from now on, keeping where the batters are. */
+  private rescaleRun(i: number, scale: number, endAt?: number): void {
+    const start = this.runStarts[i];
+    if (start === undefined) return;
+    const len = this.runLen(i);
+    const p = Math.min(1, Math.max(0, (this.time - start) / len));
+    let newLen = runDuration(i) * this.runPace * scale;
+    if (endAt !== undefined) newLen = (endAt - this.time) / Math.max(0.05, 1 - p);
+    this.runScale[i] = newLen / (runDuration(i) * this.runPace);
+    if (this.time > start) this.runStarts[i] = this.time - p * newLen;
+    // Runs after it follow on from its new end.
+    for (let k = i + 1; k < this.runStarts.length; k++) {
+      const prevEnd = (this.runStarts[k - 1] ?? 0) + this.runLen(k - 1);
+      const s = this.runStarts[k] ?? prevEnd;
+      if (s < prevEnd || s - prevEnd < 0.05) this.runStarts[k] = prevEnd;
+    }
+  }
+
+  /** The run under way (index and progress 0–1), if any. */
+  private currentRun(): { i: number; p: number } | undefined {
+    for (let i = 0; i < this.runStarts.length; i++) {
+      const s = this.runStarts[i] ?? 0;
+      const len = this.runLen(i);
+      if (this.time >= s && this.time < s + len) return { i, p: (this.time - s) / len };
+    }
+    return undefined;
+  }
+
+  /**
+   * Human batter: sprint (Shift held after the hit). The run under way, and
+   * any run called while it is held, is run flat out — if he has the legs.
+   */
+  sprint(on: boolean): boolean {
+    this.sprintHeld = on;
+    if (!on || this.phase !== 'struck' || !this.opts.manualRunning) return false;
+    const scale = this.sprintScale;
+    if (scale === undefined) return false;
+    const cur = this.currentRun();
+    if (!cur || (this.runScale[cur.i] ?? 1) <= scale) return false;
+    this.rescaleRun(cur.i, scale);
+    this.sprints += 1;
+    return true;
+  }
+
+  /**
+   * Human batter: dive for the crease, in the last third of a run. He gets
+   * there a fifth of a second sooner, but it takes a moment to get up for
+   * another.
+   */
+  dive(): boolean {
+    if (this.phase !== 'struck' || !this.opts.manualRunning) return false;
+    const cur = this.currentRun();
+    if (!cur || cur.p < 0.62 || this.dives.some((d) => d.run === cur.i)) return false;
+    const start = this.runStarts[cur.i] ?? this.time;
+    const end = start + this.runLen(cur.i);
+    this.rescaleRun(cur.i, 1, Math.max(this.time + 0.05, end - DIVE_GAIN));
+    this.dives.push({ run: cur.i, at: this.time });
+    // Up off the ground before the next.
+    const next = this.runStarts[cur.i + 1];
+    const newEnd = (this.runStarts[cur.i] ?? 0) + this.runLen(cur.i);
+    if (next !== undefined && next < newEnd + GET_UP) this.runStarts[cur.i + 1] = newEnd + GET_UP;
+    return true;
   }
 
   /** Re-aims the stroke just played (arrows pressed a moment after the shot key). */
@@ -356,6 +452,7 @@ export class DeliveryCycle {
       rng: this.rng.fork('contact'),
       ...(form ? { timingScale: timingScale(form), powerScale: powerScale(form) } : {}),
       ...(this.guard !== 0 ? { guard: this.guard } : {}),
+      ...(o.assist ? { assist: o.assist } : {}),
     });
     this.phase = 'inFlight';
     if (o.battingAi) {
@@ -473,6 +570,21 @@ export class DeliveryCycle {
         }
         const headline = wide ? 'Wide' : !shot || shot.shot === 'leave' ? 'Left alone' : c?.kind === 'miss' ? 'Beaten!' : 'Dot ball';
         this.carrier = this.opts.field.findIndex((f) => f.keeper);
+        {
+          // The ball goes on into his gloves: he moves across for it, a little lower than it was.
+          const kp = this.fielderPos[this.carrier];
+          const v = play.ball.velocity;
+          const speed = Math.max(8, Math.hypot(v.x, v.y, v.z));
+          const kz = kp?.z ?? STRIKER_STUMPS_Z + 12;
+          const dz = Math.max(0.5, kz - 0.5 - ev.position.z);
+          const t = dz / Math.max(4, v.z || speed);
+          const to = {
+            x: Math.max(-2.2, Math.min(2.2, ev.position.x + v.x * t)),
+            y: Math.max(0.25, Math.min(2.1, ev.position.y + v.y * t - 4.9 * t * t)),
+            z: kz - 0.5,
+          };
+          this.keeperTake = { from: { ...ev.position }, to, t0: this.time, t1: this.time + t };
+        }
         // Down the pitch and beaten: the keeper has the bails off before he can get back.
         const keeper = this.opts.field[this.carrier];
         if (shot?.footwork === 'out' && keeper && this.rng.fork('stumping').chance(0.72 + 0.25 * (keeper.player.fielding.catching / 100))) {
@@ -620,11 +732,19 @@ export class DeliveryCycle {
     if (n === 0) {
       const ready = Math.max(this.time, (this.contactTime ?? this.time) + 0.1, this.recall?.back ?? 0);
       this.runStarts.push(ready + 0.15);
+      if (this.sprintHeld && this.sprintScale !== undefined) {
+        this.runScale[0] = this.sprintScale;
+        this.sprints += 1;
+      }
       return true;
     }
-    const finishLast = (this.runStarts[n - 1] ?? this.time) + this.runLen(n - 1);
+    const finishLast = (this.runStarts[n - 1] ?? this.time) + this.runLen(n - 1) + (this.dives.some((d) => d.run === n - 1) ? GET_UP : 0);
     // Called before the batters reach the other end: they turn and go. Afterwards: from standing.
     this.runStarts.push(this.time < finishLast ? finishLast : this.time + 0.2);
+    if (this.sprintHeld && this.sprintScale !== undefined) {
+      this.runScale[n] = this.sprintScale;
+      this.sprints += 1;
+    }
     return true;
   }
 
@@ -689,6 +809,15 @@ export class DeliveryCycle {
       if (end <= back + 0.05) completed = i + 1;
       else if (shortRun === undefined) shortRun = i;
     });
+    // The computer's batters dive when it is that close (a human has to do it himself).
+    if (shortRun !== undefined && !this.opts.manualRunning && shortRun === attempted.length - 1) {
+      const end = (attempted[shortRun] ?? 0) + this.runLen(shortRun);
+      if (end - back <= DIVE_GAIN && !this.dives.some((d) => d.run === shortRun)) {
+        this.dives.push({ run: shortRun, at: end - DIVE_GAIN - 0.35, auto: true });
+        completed = shortRun + 1;
+        shortRun = undefined;
+      }
+    }
     // Sent back, and the ball came in before they had regained their ground.
     const r = this.recall;
     if (shortRun === undefined && r && back < r.back) shortRun = r.run;
@@ -735,7 +864,9 @@ export class DeliveryCycle {
     const runs = completed;
     const over = this.overthrow ? Math.max(0, runs - this.overthrow.completedBefore) : 0;
     const headline = runs === 0 ? (dropped ? 'Dropped!' : 'Fielded') : `${runs} run${runs > 1 ? 's' : ''}${over ? ` (${over} overthrow${over > 1 ? 's' : ''})` : ''}`;
-    const detail = over ? `${dropped}The throw from ${name} beat everyone and ran away: ${over} overthrow${over > 1 ? 's' : ''}.` : `${dropped}${runs === 0 ? `Stopped by ${name}.` : `Fielded by ${name}.`}`;
+    const dived = runs > 0 && this.dives.some((d) => d.run === runs - 1) ? ' A full-length dive to make his ground!' : '';
+    const quick = runs > 0 && this.sprints > 0 && !dived ? ' Flat out between the wickets.' : '';
+    const detail = (over ? `${dropped}The throw from ${name} beat everyone and ran away: ${over} overthrow${over > 1 ? 's' : ''}.` : `${dropped}${runs === 0 ? `Stopped by ${name}.` : `Fielded by ${name}.`}`) + dived + quick;
     this.finish({ runs, headline, detail, ...(over ? { overthrows: over } : {}) });
   }
 
@@ -943,9 +1074,18 @@ export class DeliveryCycle {
           }
           return out;
         }
-        out.x = p.x;
-        out.y = t || (this.collectedAt !== undefined && this.time - this.collectedAt > 0.3) ? 1.7 : 0.4;
-        out.z = p.z;
+        const k = this.keeperTake;
+        if (k && this.time < k.t1) {
+          // Still on its way into the keeper's gloves.
+          const u = (this.time - k.t0) / Math.max(1e-3, k.t1 - k.t0);
+          out.x = k.from.x + (k.to.x - k.from.x) * u;
+          out.y = k.from.y + (k.to.y - k.from.y) * u;
+          out.z = k.from.z + (k.to.z - k.from.z) * u;
+          return out;
+        }
+        out.x = k ? k.to.x : p.x;
+        out.y = k ? k.to.y : t || (this.collectedAt !== undefined && this.time - this.collectedAt > 0.3) ? 1.7 : 0.4;
+        out.z = k ? k.to.z : p.z;
         return out;
       }
     }

@@ -31,6 +31,7 @@ export const GAME_ACTIONS = [
   'editField',
   'autoInnings',
   'review',
+  'netsNext',
   'pick1',
   'pick2',
   'pick3',
@@ -77,6 +78,8 @@ export const DEFAULT_BINDINGS: Bindings = {
   autoInnings: ['KeyU'],
   // T for the review signal (a T with the arms), as a player asks for the third umpire.
   review: ['KeyT'],
+  // The nets: another ball of the same kind.
+  netsNext: ['KeyN'],
   pick1: ['Digit1'],
   pick2: ['Digit2'],
   pick3: ['Digit3'],

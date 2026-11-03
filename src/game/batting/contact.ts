@@ -45,6 +45,8 @@ export interface ContactInput {
   readonly powerScale?: number;
   /** The batter has moved across from his guard, metres towards his off side: the ball's line is judged from where he now stands. */
   readonly guard?: number;
+  /** Multiplier on the reach for the line and height (a human batter's help). */
+  readonly reachScale?: number;
   readonly rng: Rng;
 }
 
@@ -273,6 +275,29 @@ function noContact(
   };
 }
 
+/**
+ * How far the ball is from where a stroke wants it, normalised by what the
+ * batter can reach (0 = right in its slot; beyond ~2 it is hard to middle,
+ * beyond 3.5 it is missed). `line` is batter-relative (+ off side) from where
+ * he stands; `fallSpeed` is the ball's vertical velocity at contact.
+ */
+export function strokeReach(def: ShotDef, batter: Player, line: number, height: number, fallSpeed: number, reachScale = 1): { reach: number; dLine: number; dHeight: number } {
+  const bat = batter.batting;
+  const technique = def.kind === 'defence' ? (bat.technique + bat.defence) / 2 : bat.technique;
+  const techTol = 0.7 + 0.6 * (technique / 100);
+  const footTol = 0.85 + 0.3 * (bat.footwork / 100);
+  const lineTol = 0.16 * techTol * footTol * reachScale;
+  const heightTol = 0.2 * techTol * reachScale;
+  const dLine = outside(line, def.idealLine.min, def.idealLine.max);
+  // A ball still dropping onto the toes (a yorker) is far harder to get the
+  // bat under than one just bounced up off a full length (a half-volley):
+  // count it as lower than it is.
+  const yorkedBy = fallSpeed < -1 && height < 0.3 ? 0.3 - height : 0;
+  const dHeight = Math.min(outside(height, def.idealHeight.min, def.idealHeight.max), 0) - yorkedBy * 1.3 +
+    Math.max(outside(height, def.idealHeight.min, def.idealHeight.max), 0);
+  return { reach: Math.hypot(dLine / lineTol, dHeight / heightTol), dLine, dHeight };
+}
+
 export function resolveContact(input: ContactInput): ContactResult {
   const { attempt, batter, rng } = input;
   const base = SHOTS[attempt.shot];
@@ -301,18 +326,8 @@ export function resolveContact(input: ContactInput): ContactResult {
   const defensive = def.kind === 'defence';
   const technique = defensive ? (bat.technique + bat.defence) / 2 : bat.technique;
   const timingSkill = defensive ? (bat.timing + bat.defence) / 2 : bat.timing;
-  const techTol = 0.7 + 0.6 * (technique / 100);
-  const footTol = 0.85 + 0.3 * (bat.footwork / 100);
-  const lineTol = 0.16 * techTol * footTol;
-  const heightTol = 0.2 * techTol;
-  const dLine = outside(line, def.idealLine.min, def.idealLine.max);
-  // A ball still dropping onto the toes (a yorker) is far harder to get the
-  // bat under than one just bounced up off a full length (a half-volley):
-  // count it as lower than it is.
+  const { reach, dLine, dHeight } = strokeReach(def, batter, line, height, u.y, input.reachScale);
   const yorkedBy = u.y < -1 && height < 0.3 ? 0.3 - height : 0;
-  const dHeight = Math.min(outside(height, def.idealHeight.min, def.idealHeight.max), 0) - yorkedBy * 1.3 +
-    Math.max(outside(height, def.idealHeight.min, def.idealHeight.max), 0);
-  const reach = Math.hypot(dLine / lineTol, dHeight / heightTol);
   const timing = (input.timingError * ballSpeed) / (def.timingTolerance * (0.7 + 0.6 * (timingSkill / 100)) * (input.timingScale ?? 1));
   const quality = Math.exp(-0.5 * (timing * timing + reach * reach));
   // Spread of execution error: wider for poorer technique and poorer contact.

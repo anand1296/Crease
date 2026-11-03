@@ -62,6 +62,13 @@ export interface Pose {
   look?: Vector3 | undefined;
   /** Curl of the fingers, 0 open … 1 gripping (bat, ball). */
   grip?: number | undefined;
+  /** With grip: this hand's index finger stays straight (an umpire's finger, a fielder pointing). */
+  point?: 'L' | 'R' | undefined;
+  /** The whole body rolled about its forward axis (a dive: + to his left) and lifted off the ground, metres. */
+  roll?: number | undefined;
+  lift?: number | undefined;
+  /** The whole body tipped forward about the feet (a dive for the crease), radians. */
+  dip?: number | undefined;
   /** Seconds to cross-fade into this pose from a different source (default 0.25). */
   fade?: number | undefined;
   /**
@@ -264,8 +271,8 @@ export const Humanoid = forwardRef<RigHandle, { kit: Kit; hidden?: boolean; chil
         const h = hips.current;
         const t = torso.current;
         if (!r || !h || !t) return;
-        r.position.set(p.x, 0, p.z);
-        r.rotation.y = p.facing;
+        r.position.set(p.x, p.lift ?? 0, p.z);
+        r.rotation.set(p.dip ?? 0, p.facing, p.roll ?? 0, 'YXZ');
         h.position.y = HIP_Y - p.drop + p.bob;
         t.rotation.set(p.lean, p.twist, p.tilt, 'YXZ');
         setLeg(hipL.current, kneeL.current, footL.current, p.legL, 1);

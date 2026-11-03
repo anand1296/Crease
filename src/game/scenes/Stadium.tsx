@@ -319,7 +319,7 @@ function Crowd({ venue }: { venue: Venue }) {
   }, [venue]);
   const material = useMemo(() => {
     const m = new MeshLambertMaterial({ map: atlas, alphaTest: 0.5, side: DoubleSide });
-    const uniforms = { uTime: { value: 0 }, uJump: { value: 0 } };
+    const uniforms = { uTime: { value: 0 }, uJump: { value: 0 }, uWave: { value: 0 }, uWaveA: { value: 0 } };
     m.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, uniforms);
       shader.vertexShader = shader.vertexShader
@@ -329,7 +329,9 @@ function Crowd({ venue }: { venue: Venue }) {
 attribute float cell;
 attribute float phase;
 uniform float uTime;
-uniform float uJump;`,
+uniform float uJump;
+uniform float uWave;
+uniform float uWaveA;`,
         )
         .replace(
           '#include <uv_vertex>',
@@ -339,15 +341,24 @@ vMapUv = (vec2(mod(cell, ${CELLS_X}.0), floor(cell / ${CELLS_X}.0)) + vMapUv) / 
         .replace(
           '#include <begin_vertex>',
           `#include <begin_vertex>
-transformed.y += max(0.0, sin(uTime * 9.0 + phase)) * 0.32 * uJump;`,
+transformed.y += max(0.0, sin(uTime * 9.0 + phase)) * 0.32 * uJump;
+// Never quite still: a little shifting about in the seats.
+transformed.y += sin(uTime * 1.7 + phase * 3.0) * 0.02;
+// The Mexican wave: a band of people standing, arms up, travelling round the ground.
+vec4 seat = instanceMatrix[3];
+float seatA = atan(seat.x, seat.z);
+float fromWave = abs(mod(seatA - uWaveA + 3.14159, 6.28318) - 3.14159);
+transformed.y += uWave * 0.5 * exp(-fromWave * fromWave * 30.0);`,
         );
     };
-    m.customProgramCacheKey = () => 'crease-crowd-v1';
+    m.customProgramCacheKey = () => 'crease-crowd-v2';
     return { m, uniforms };
   }, [atlas]);
   useEffect(() => () => material.m.dispose(), [material]);
   const excitement = useRef(0);
   const lastBall = useRef(0);
+  /** A Mexican wave under way: when it started (scene clock), and where. */
+  const wave = useRef<{ from: number; at: number } | undefined>(undefined);
 
   useLayoutEffect(() => {
     const mesh = ref.current;
@@ -380,7 +391,16 @@ transformed.y += max(0.0, sin(uTime * 9.0 + phase)) * 0.32 * uJump;`,
       lastBall.current = snap.ballCount;
       const o = snap.lastOutcome;
       if (o?.boundary || o?.wicket) excitement.current = 3.5;
+      // Now and then, in a quiet moment, somebody starts a wave.
+      if (!o?.boundary && !o?.wicket && snap.ballCount % 23 === 11) wave.current = { from: state.clock.elapsedTime, at: (snap.ballCount * 1.3) % 6.28 };
     }
+    const w = wave.current;
+    if (w) {
+      const since = state.clock.elapsedTime - w.from;
+      if (since > 16) wave.current = undefined;
+      material.uniforms.uWave.value = Math.min(1, since / 1.5, (16 - since) / 1.5);
+      material.uniforms.uWaveA.value = w.at + since * 0.55;
+    } else material.uniforms.uWave.value = 0;
     excitement.current = Math.max(0, excitement.current - dt);
     material.uniforms.uTime.value = state.clock.elapsedTime;
     material.uniforms.uJump.value = Math.min(1, excitement.current);

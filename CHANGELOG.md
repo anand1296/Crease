@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.15.0 — Easier, clearer batting, coaching nets, catches you can see, sprints and dives, the umpire's finger, and the gaps between balls (2026-11-03)
+
+- **Batting you can actually do**: the difficulty now helps a human batter. On Easy a press up to about 90 ms late or 75 ms early is met half-way (the downswing speeds up or waits, as a real batter's does), the timing window is 60% wider, the line you can still middle is wider and the ball's late movement is read better; Normal helps a little, Hard hardly at all. Key presses are also dated for the time it takes a frame to reach the screen (35 ms), so pressing as you see it is no longer always late.
+- **Every stroke explained**: a card on the right, the moment the bat comes down — Early / Perfect / Late with the milliseconds on a big meter, how much of the sweet spot you found and where on the bat it hit, the ball as the coach read it (length, line, whether it was hitting), what went wrong, and the keys for two or three strokes that suit that ball. In matches the coaching lines can be switched on or off.
+- **Coaching nets** (Practice): choose a ball — full outside off, a half-volley, short and wide, a bouncer, a yorker, the outswinger, the slower ball, a spinner tossed up or dragged short, and more — and it is bowled again, exactly the same, until you ask for another. Try different strokes to it, see each attempt listed with its timing and sweet spot, and how your last few compare with your first few; "Another like it" varies it slightly.
+- **Controls checked for both hands**: the arrows are the batter's own directions — → his right, ← his left, ↑ fine, ↓ straight — so a left-hander's keys mirror a right-hander's, and the field map, the shot names and the coach all say the same.
+- **Shirts mended**: the chest no longer shows through gaps in the jerseys.
+- **The stance, as coaches teach it**: knees flexed, the top hand resting on the front thigh with the arms away from the body, the bat grounded by the back toe, its face open to cover. The cover drive has a long stride, the front knee bent with the head over it, the back leg stretched out behind, the bat coming down straight and finishing high; the bat's face now turns with the stroke.
+- **Modern bats**: thick edges, a pronounced spine peaking low in the blade, sloping shoulders, a toe guard, a rubber grip and stickers.
+- **Catches and takes you can see**: hands go out to meet the ball, close on it and give with it; the keeper's take comes into his gloves instead of the ball jumping to him; the ball is drawn in the hands that hold it. Fielders dive full length to the side for catches and stops they can only reach at full stretch.
+- **Running**: hold Shift after the hit to sprint (quicker, if the batter has the legs, at a cost in stamina), and press S near the end of a run to dive for the crease (a fifth of a second sooner, then a moment to get up). The computer's batters dive when it is that close.
+- **The umpire's decision**: on an lbw appeal the camera cuts to the umpire, who considers it, then raises his finger slowly — or shakes his head.
+- **Between balls**: the director cuts between the batter in close-up, the bowler walking back to his mark shining the ball, the crowd, and a shot from the airship, in a different order each ball; the batter plays a shadow drive or wanders out towards square leg and back; the crowd is never quite still, and now and then they start a Mexican wave.
+- **Players no longer slide**: fielders keep running while they gather and look for the throw, crouch only once they reach the ball, and step round when they turn instead of swivelling on the spot.
+- **Broadcast camera**: tighter at the moment of delivery, easing in on the batter as the ball travels and staying close through the stroke; the ball's seam and stitching show as they do on television.
+- **Wagon wheel** in the pause screen's stats, for the innings or any one batter.
+- **Achievements**: sixteen of them (the first six, a fifty, a dive that made it, a yorker wicket, a hat-trick, a maiden, a chase…), announced as you get them and listed from the main menu.
+
 ## 0.14.0 — Real batting shapes, arrows by the batter's sides, shuffling across, a build-up to the first ball, and game controllers (2026-10-23)
 
 - **Elbows that bend the right way**: the batter's arms are now solved with a batter's elbows — the top-hand elbow up and pointing down the pitch, the bottom-hand elbow tucked down by the hip — instead of wherever the simplified skeleton put them, which had them flaring out or bending backwards.

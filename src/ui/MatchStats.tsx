@@ -136,6 +136,7 @@ export function MatchStats({ match }: { match: Match }) {
         <Tile label="Extras" value={String(inn.wides + inn.noBalls)} note={`${inn.wides} wd, ${inn.noBalls} nb`} />
       </div>
       <Manhattan current={inn} first={first} maxOvers={match.config.overs} />
+      <WagonWheel match={match} />
       <div className="cards">
         <table className="stats-table">
           <caption>{batting.name} batting</caption>
@@ -202,5 +203,54 @@ export function MatchStats({ match }: { match: Match }) {
         </table>
       </div>
     </div>
+  );
+}
+
+/**
+ * Where the runs went this innings, as television draws it: the batter in
+ * the middle, straight down the ground at the top, a line for every scoring
+ * shot (fours blue, sixes red), the off side to the right for a
+ * right-hander. Pick a batter to see just his.
+ */
+function WagonWheel({ match }: { match: Match }) {
+  const innings = match.innings.length - 1;
+  const shots = match.wagon.filter((w) => w.innings === innings);
+  const batters = [...new Set(shots.map((s) => s.batterId))];
+  const [who, setWho] = useState<string | undefined>(undefined);
+  if (!shots.length) return null;
+  const card = (id: string) => match.current.battingCards.find((c) => c.player.id === id);
+  const shown = who ? shots.filter((s) => s.batterId === who) : shots;
+  const R = 70;
+  const reach = (s: (typeof shots)[number]) => (s.boundary === 6 ? 1.04 : s.boundary === 4 ? 0.96 : s.runs >= 3 ? 0.72 : s.runs === 2 ? 0.58 : 0.4);
+  return (
+    <figure className="wagon" data-testid="wagon-wheel">
+      <figcaption>
+        Wagon wheel
+        <select value={who ?? ''} onChange={(e) => setWho(e.target.value || undefined)} aria-label="Whose shots">
+          <option value="">Everyone</option>
+          {batters.map((id) => (
+            <option key={id} value={id}>
+              {card(id)?.player.name ?? id} ({card(id)?.runs ?? 0})
+            </option>
+          ))}
+        </select>
+      </figcaption>
+      <svg viewBox="-80 -80 160 160" width="200" height="200" role="img" aria-label={`${shown.length} scoring shots`}>
+        <circle r={R} className="wagon-field" />
+        <circle r={R * 0.42} className="wagon-ring" />
+        <rect x={-2} y={-12} width={4} height={14} className="wagon-pitch" />
+        {shown.map((s, i) => {
+          const hand = card(s.batterId)?.player.battingHand ?? 'right';
+          const a = (s.deg * Math.PI) / 180;
+          const r = R * reach(s);
+          const x = Math.sin(a) * r * (hand === 'right' ? 1 : -1);
+          const y = -Math.cos(a) * r;
+          return <line key={i} x1={0} y1={0} x2={x} y2={y} className={s.boundary === 6 ? 'w6' : s.boundary === 4 ? 'w4' : 'wr'} />;
+        })}
+      </svg>
+      <div className="dim small">
+        {shown.filter((s) => s.boundary === 4).length} fours · {shown.filter((s) => s.boundary === 6).length} sixes · {shown.filter((s) => !s.boundary).length} run shots
+      </div>
+    </figure>
   );
 }

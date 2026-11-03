@@ -45,17 +45,17 @@ export interface CoachNote {
 }
 
 const HOW_TO_PLAY: Partial<Record<DeliveryTypeId, string>> = {
-  yorker: 'Against the yorker, block it (S) or drive straight (D with ↑) — trying to hit it square brings the stumps into play.',
-  bouncer: 'Against the bouncer, leave it (X), or hold Shift for the pull or hook (D or A with →) — front-foot strokes to it go in the air.',
+  yorker: 'Against the yorker, block it (S alone) or squeeze it straight (S + ↓) — trying to hit it square brings the stumps into play.',
+  bouncer: 'Against the bouncer, duck under it (A), or hook it fine with Shift + W + ↑ — front-foot strokes to it go in the air.',
   slower: 'Watch for the slower ball: it arrives later than the run-up suggests, so wait before pressing.',
-  outswinger: 'The outswinger draws edges: leave it (X) when it starts outside off, and drive only when it is full.',
-  inswinger: 'Against the inswinger, play straight or flick it (D with →) — the cover drive leaves the gate open.',
-  googly: 'The googly turns into the right-hander: play it later and straighter.',
-  doosra: 'The doosra turns away: play it later, with a straight bat.',
-  legBreak: 'Against the leg-break, use the sweep (W) to balls on the stumps, or wait and cut the short one.',
-  offBreak: 'Against the off-break, play with the turn — the flick and the sweep (W) are the safe scoring shots.',
-  topSpinner: 'The top-spinner bounces more: get on top of it on the back foot (Shift).',
-  fast: 'Against the stock ball, pick your length: front-foot drives to full balls, back-foot strokes (Shift) to short ones.',
+  outswinger: 'The outswinger draws edges: leave it (A) when it starts outside off, and drive (S, ↓ and the arrow to your off side) only when it is full.',
+  inswinger: 'Against the inswinger, play straight (S + ↓) or flick it (S and the arrow to your leg side) — the cover drive leaves the gate open.',
+  googly: 'The googly turns back into the batter: play it later and straighter.',
+  doosra: 'The doosra turns the other way: play it later, with a straight bat.',
+  legBreak: 'Against the leg-break, sweep (S + ↑) balls on the stumps, or wait and cut (W and the arrow to your off side) the short one.',
+  offBreak: 'Against the off-break, play with the turn — the flick (S to the leg side) and the sweep (S + ↑) are the safe scoring shots.',
+  topSpinner: 'The top-spinner bounces more: get on top of it on the back foot (W).',
+  fast: 'Against the stock ball, pick your length: front-foot drives (S) to full balls, back-foot strokes (W) to short ones.',
 };
 
 const FRONT_FOOT_ATTACK = new Set(['coverDrive', 'offDrive', 'straightDrive', 'onDrive', 'loftedDrive']);
@@ -113,11 +113,11 @@ export function battingNotes(log: readonly BallRecord[]): CoachNote[] {
   const drivesToShort = balls.filter((b) => b.shot && FRONT_FOOT_ATTACK.has(b.shot) && (b.length ?? 0) > 7.5).length;
   const leftAndHit = balls.filter((b) => b.contact === 'leave' && (b.wicket === 'bowled' || b.wicket === 'lbw')).length;
   if (leftAndHit > 0) {
-    notes.push({ title: 'Know where your off stump is', detail: `You were out leaving a ball that hit the stumps${leftAndHit > 1 ? ` ${leftAndHit} times` : ''}. Only leave (X) what is clearly missing.`, tone: 'work-on' });
+    notes.push({ title: 'Know where your off stump is', detail: `You were out leaving a ball that hit the stumps${leftAndHit > 1 ? ` ${leftAndHit} times` : ''}. Only leave (A) what is clearly missing.`, tone: 'work-on' });
   } else if (drivesToShort >= 2) {
     notes.push({
       title: 'Back foot to the short ball',
-      detail: `You drove off the front foot at ${drivesToShort} short balls. Hold Shift for the pull (→) or the cut (←) — the drive needs a full length.`,
+      detail: `You drove off the front foot at ${drivesToShort} short balls. Go back (W) and pull or cut (W with the arrow to the leg or off side) — the drive needs a full length.`,
       tone: 'work-on',
     });
   }

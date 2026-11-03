@@ -1,3 +1,4 @@
+import { achievement } from '../game/achievements.ts';
 import { useGame } from '../state/game.ts';
 import { challenge } from '../game/practice/challenges.ts';
 import { CIRCLE, checkField, customPosition } from '../game/fielding/presets.ts';
@@ -14,6 +15,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { GameAction } from '../game/input/keyboard.ts';
 import { keyboard } from '../game/input/keyboardInstance.ts';
 import { type ArrowScheme, type BatAction, fieldRegion, shotAngle, shotFromInput } from '../game/input/battingControls.ts';
+import { type Coaching, comboLabel } from '../game/batting/coaching.ts';
+import { NETS_BALLS } from '../game/practice/nets.ts';
 import { SHOTS, type ShotAttempt } from '../game/batting/shots.ts';
 import type { Hand } from '../game/model/player.ts';
 import { howOut } from './Scorecard.tsx';
@@ -40,8 +43,10 @@ export function Hud() {
       <BowlerChoice />
       <Commentary />
       <ControlsPanel />
+      <StrokeCard />
       <AutoplayControl />
       <ChallengeCard />
+      <NetsPanel />
       <FieldEditor />
       <AppealPrompt />
       <DrsPanel />
@@ -52,6 +57,7 @@ export function Hud() {
       <Result />
       <HelpOverlay />
       <PauseOverlay />
+      <AchievementToast />
     </>
   );
 }
@@ -201,9 +207,12 @@ function OutcomeBanner() {
   const phase = useGame((s) => s.snap?.phase);
   const ballPhase = useGame((s) => s.snap?.ballPhase);
   const reviewKind = useGame((s) => s.snap?.review?.kind);
-  const visible = o && phase !== 'appeal' && phase !== 'drs' && (phase === 'between' || phase === 'aiming' || ballPhase === 'dead' || (phase === 'review' && reviewKind === 'ball'));
+  // The stroke card on the right has the timing; in the nets it has everything.
+  const coached = useGame((s) => s.snap?.coaching !== undefined);
+  const nets = useGame((s) => s.snap?.nets !== undefined);
+  const visible = !nets && o && phase !== 'appeal' && phase !== 'drs' && (phase === 'between' || phase === 'aiming' || ballPhase === 'dead' || (phase === 'review' && reviewKind === 'ball'));
   if (!o || !visible) return null;
-  const t = timingText(o);
+  const t = coached ? null : timingText(o);
   const big = o.boundary !== undefined || o.wicket !== undefined;
   return (
     <div key={count} className={`banner ${big ? 'big' : ''} ${o.wicket ? 'wicket' : o.boundary ? 'boundary' : ''}`} role="status" data-testid="banner">
@@ -782,40 +791,23 @@ function Key({ label, on, wide }: { label: string; on: boolean; wide?: boolean }
  * fast ball's narrower window shows up as a bigger error.
  */
 function TimingGauge() {
-  const contact = useGame((s) => s.snap?.contact);
   const scale = useGame((s) => s.snap?.timingScale ?? 1);
   const confidence = useGame((s) => s.snap?.striker.form.confidence ?? 0.5);
-  // The gauge is drawn in a normal batter's timing units: a confident batter's sweet spot is wider.
+  // How wide the batter's sweet spot is just now (confidence and tiredness): the timing itself is on the stroke card.
   const RANGE = 2.5;
   const perfect = 0.3 * scale;
   const ok = 0.8 * scale;
   const zone = (half: number) => ({ left: `${50 - (half / RANGE) * 50}%`, width: `${(half / RANGE) * 100}%` });
-  const hit = contact && contact.kind !== 'leave' ? contact : undefined;
-  const t = hit ? Math.max(-RANGE, Math.min(RANGE, hit.timing * scale)) : 0;
-  const ms = hit ? Math.round(hit.timingSeconds * 1000) : 0;
-  const raw = hit ? Math.abs(hit.timing) : 0;
-  const word = !hit
-    ? 'Ready'
-    : hit.kind === 'miss'
-      ? 'Missed'
-      : raw < 0.3
-        ? 'Perfect'
-        : raw < 0.8
-          ? hit.timing < 0 ? 'A touch early' : 'A touch late'
-          : hit.timing < 0 ? 'Early' : 'Late';
-  const tone = !hit ? '' : hit.kind === 'miss' ? 'bad' : raw < 0.3 ? 'good' : raw < 0.8 ? 'ok' : 'bad';
   const feel = confidence > 0.7 ? 'Seeing it well' : confidence > 0.45 ? 'Settled' : confidence > 0.3 ? 'Uncertain' : 'Nervous';
   return (
-    <div className="timing" data-testid="timing-gauge" aria-label={hit ? `Timing: ${word}, ${ms} ms` : `Timing gauge, ${feel}`}>
+    <div className="timing" data-testid="timing-gauge" aria-label={`Timing window: ${feel}`}>
       <div className="timing-head">
-        <span className="dim">Timing</span>
-        <strong className={tone}>{word}</strong>
-        <span className="dim">{hit ? (ms === 0 ? '0 ms' : ms < 0 ? `${-ms} ms early` : `${ms} ms late`) : feel}</span>
+        <span className="dim">Timing window</span>
+        <strong>{feel}</strong>
       </div>
       <div className="timing-bar">
         <span className="zone ok" style={zone(ok)} />
         <span className="zone good" style={zone(perfect)} />
-        {hit ? <span className={`mark ${tone}`} style={{ left: `${50 + (t / RANGE) * 50}%` }} /> : null}
       </div>
       <div className="timing-scale dim">
         <span>early</span>
@@ -833,8 +825,9 @@ function TimingGauge() {
  * for a right-hander.
  */
 function FieldRadar({ hand, front, back, scheme }: { hand: Hand; front: ShotAttempt; back: ShotAttempt; scheme: ArrowScheme }) {
-  // Drawn the way the arrows read: with batter arrows the off side is always on the right.
-  const offLeft = scheme === 'screen' && hand === 'right';
+  // Drawn the way the arrows read: batter arrows put his right on the right (a left-hander's off side on the left),
+  // screen arrows the picture from behind the bowler (a right-hander's off side on the left).
+  const offLeft = scheme === 'screen' ? hand === 'right' : hand === 'left';
   const at = (a: ShotAttempt) => {
     const kind = SHOTS[a.shot].kind;
     if (kind === 'leave' || (kind === 'defence' && !a.push)) return undefined;
@@ -859,6 +852,88 @@ function FieldRadar({ hand, front, back, scheme }: { hand: Hand; front: ShotAtte
 
 /** Controller buttons for the keys the panels show (see input/gamepad.ts). */
 const PAD_LABEL: Readonly<Record<string, string>> = { S: 'A', W: 'X', D: 'Y', A: 'B', Shift: 'RT', Space: 'LT', Q: 'LB', E: 'RB' };
+
+const TIMING_RANGE = 160;
+
+/**
+ * The batter's clipboard, on the right: the moment the bat comes down, how
+ * early or late the press was on a big meter; then the sweet spot, the ball
+ * as the coach saw it, what went wrong and the keys for it next time.
+ */
+function StrokeCard() {
+  const snap = useGame((s) => s.snap);
+  const tips = useGame((s) => s.coachTips);
+  const toggleTips = useGame((s) => s.toggleCoachTips);
+  const replaying = useGame((s) => s.replaying);
+  const nets = useGame((s) => s.match?.config.nets !== undefined);
+  const pad = useGame((s) => s.padActive);
+  if (!snap || replaying) return null;
+  const c = snap.coaching;
+  const live = snap.stroke;
+  if (!c && !live) return null;
+  const ms = c ? c.pressMs : live?.pressMs;
+  const word = c ? c.timingWord : ms === undefined ? 'Perfect' : Math.abs(ms) <= 25 ? 'Perfect' : ms < 0 ? 'Early' : 'Late';
+  const tone = word === 'Perfect' || word === 'Left' ? 'good' : word === 'No shot' ? 'ok' : Math.abs(ms ?? 0) <= 60 && word !== 'Too late' ? 'ok' : 'bad';
+  const at = ms === undefined ? 50 : 50 + (Math.max(-TIMING_RANGE, Math.min(TIMING_RANGE, ms)) / TIMING_RANGE) * 50;
+  const zone = (half: number) => ({ left: `${50 - (half / TIMING_RANGE) * 50}%`, width: `${(half / TIMING_RANGE) * 100}%` });
+  const showTips = tips || nets;
+  return (
+    <section className={`stroke-card ${c?.verdict ?? ''}`} aria-label="Your stroke" data-testid="stroke-card">
+      <div className="sc-head">
+        <strong className={`sc-word ${tone}`}>{word}</strong>
+        <span className="sc-ms">{ms === undefined || word === 'No shot' || word === 'Left' ? '' : ms === 0 ? 'spot on' : `${Math.abs(ms)} ms ${ms < 0 ? 'early' : 'late'}`}</span>
+      </div>
+      {word !== 'No shot' && word !== 'Left' ? (
+        <div className="sc-meter" aria-hidden="true">
+          <span className="zone ok" style={zone(60)} />
+          <span className="zone good" style={zone(25)} />
+          <span className="sc-centre" />
+          {ms !== undefined ? <span className={`sc-needle ${tone}`} style={{ left: `${at}%` }} /> : null}
+          <span className="sc-end left">early</span>
+          <span className="sc-end right">late</span>
+        </div>
+      ) : null}
+      {c ? (
+        <>
+          <div className="sc-facts">
+            <span>{c.played}</span>
+            {c.sweetSpot !== undefined ? (
+              <span>
+                sweet spot <b className={c.sweetSpot >= 70 ? 'good' : c.sweetSpot >= 40 ? 'ok' : 'bad'}>{c.sweetSpot}%</b>
+                {c.whereOnBat && c.whereOnBat !== 'the middle' ? ` · ${c.whereOnBat}` : ''}
+              </span>
+            ) : c.timingWord !== 'No shot' && c.timingWord !== 'Left' ? (
+              <span className="bad">missed</span>
+            ) : null}
+          </div>
+          <div className="sc-ball">{c.ball.words}</div>
+          {showTips ? (
+            <>
+              <ul className="sc-points">
+                {c.points.slice(0, nets ? 4 : 2).map((p) => (
+                  <li key={p}>{p}</li>
+                ))}
+              </ul>
+              <div className="sc-try">
+                <span className="dim">To this ball:</span>
+                {c.options.map((o) => (
+                  <span key={o.name} className="sc-option" title={`to ${o.region}`}>
+                    {o.name} <kbd>{comboLabel(o.combo, pad)}</kbd>
+                  </span>
+                ))}
+              </div>
+            </>
+          ) : null}
+          {nets ? null : (
+            <button type="button" className="sc-toggle" onClick={toggleTips} data-testid="coach-tips">
+              {tips ? 'Hide coaching' : 'Coaching tips'}
+            </button>
+          )}
+        </>
+      ) : null}
+    </section>
+  );
+}
 
 function ControlsPanel() {
   const snap = useGame((s) => s.snap);
@@ -889,8 +964,10 @@ function ControlsPanel() {
     const where = (a: BatAction) => fieldRegion(shot(a));
     const struck = snap.ballPhase === 'struck';
     const rows: { a: GameAction; k: string; label: string; what: string; to?: string }[] = [
-      { a: 'shotFront', k: K('S'), what: 'Front foot', label: name('front'), to: where('front') },
-      { a: 'shotBack', k: K('W'), what: 'Back foot', label: name('back'), to: where('back') },
+      struck
+        ? { a: 'shotFront', k: K('S'), what: 'Dive', label: 'for the crease, near the end of a run' }
+        : { a: 'shotFront', k: K('S'), what: 'Front foot', label: name('front'), to: where('front') },
+      { a: 'shotBack', k: K('W'), what: 'Back foot', label: struck ? '' : name('back'), ...(struck ? {} : { to: where('back') }) },
       struck
         ? { a: 'shotFeet', k: K('D'), what: 'Run', label: snap.runsCalled > 0 ? `${snap.runsCalled} called` : 'call a run' }
         : { a: 'shotFeet', k: K('D'), what: 'Use your feet', label: name('feet'), to: where('feet') },
@@ -909,10 +986,10 @@ function ControlsPanel() {
             <FieldRadar hand={hand} front={shot('front')} back={shot('back')} scheme={scheme} />
             <div className="aim-label">{dir.x === 0 && dir.y === 0 ? 'No arrow: defend' : '↓ is straight'}</div>
             <button type="button" className="aim-scheme" onClick={toggleArrows} title="Switch how the arrows aim" data-testid="arrow-scheme">
-              {scheme === 'batter' ? '→ off side' : '← screen-left'}
+              {scheme === 'batter' ? '→ his right' : '← screen-left'}
             </button>
             <Key label={K('Shift')} on={lit('lofted')} wide />
-            <div className="aim-label">{back ? 'Lofted' : 'Along the ground'}</div>
+            <div className="aim-label">{struck ? (back ? 'Sprinting' : 'Hold to sprint') : back ? 'Lofted' : 'Along the ground'}</div>
           </div>
           <ul>
             {rows.map((r) => (
@@ -1059,6 +1136,12 @@ function DrsPanel() {
  * innings, and take it back. Top left, out of the way of play.
  */
 function AutoplayControl() {
+  const inNets = useGame((s) => s.nets !== undefined && s.match?.config.nets !== undefined);
+  if (inNets) return null;
+  return <AutoplayButtons />;
+}
+
+function AutoplayButtons() {
   const snap = useGame((s) => s.snap);
   const match = useGame((s) => s.match);
   const replaying = useGame((s) => s.replaying);
@@ -1245,6 +1328,98 @@ function FieldEditor() {
 }
 
 /** Practice: the challenge and how it is going, top centre. */
+/** Mean of a list, or undefined. */
+const avg = (xs: readonly number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : undefined);
+
+/**
+ * The nets, top of the screen: the ball being bowled and its lesson, the
+ * attempts so far (timing and sweet spot, latest last), how the first few
+ * compare with the last few, and the choice of ball.
+ */
+function NetsPanel() {
+  const snap = useGame((s) => s.snap);
+  const match = useGame((s) => s.match);
+  const [choosing, setChoosing] = useState(false);
+  const n = snap?.nets;
+  if (!snap || !match || !n) return null;
+  const log = n.log.filter((c) => c.timingWord !== 'Left');
+  const off = (c: Coaching) => (c.pressMs === undefined ? undefined : Math.abs(c.pressMs));
+  const first = log.slice(0, 3);
+  const last = log.slice(-3);
+  const t0 = avg(first.map(off).filter((x): x is number => x !== undefined));
+  const t1 = avg(last.map(off).filter((x): x is number => x !== undefined));
+  const q0 = avg(first.map((c) => c.sweetSpot ?? 0));
+  const q1 = avg(last.map((c) => c.sweetSpot ?? 0));
+  const between = snap.phase === 'review' || snap.phase === 'between';
+  return (
+    <section className="nets-panel" aria-label="Coaching nets" data-testid="nets-panel">
+      <div className="nets-head">
+        <div>
+          <strong>{n.ball.name}</strong>
+          {n.variant ? <span className="dim"> · ball {n.variant + 1}</span> : null}
+          <div className="dim small">{n.ball.lesson}</div>
+        </div>
+        <span className="nets-count">{n.attempts} faced</span>
+      </div>
+      {log.length ? (
+        <ol className="nets-log" aria-label="Your attempts at this ball">
+          {log.slice(-10).map((c, i) => (
+            <li key={i} className={c.verdict} title={`${c.played}: ${c.points[0] ?? ''}`}>
+              <span className="nl-shot">{c.played}</span>
+              <span className="nl-ms">{c.pressMs === undefined ? '—' : c.pressMs === 0 ? '0' : `${c.pressMs > 0 ? '+' : '−'}${Math.abs(c.pressMs)}`}</span>
+              <span className="nl-q">{c.sweetSpot === undefined ? '—' : `${c.sweetSpot}%`}</span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="dim small">Your attempts at this ball will be listed here: timing in ms (+ late) and how much of the sweet spot you found.</p>
+      )}
+      {log.length >= 4 && t0 !== undefined && t1 !== undefined ? (
+        <p className="nets-trend" data-testid="nets-trend">
+          Timing {Math.round(t0)} → <b className={t1 < t0 ? 'good' : 'bad'}>{Math.round(t1)} ms off</b> · sweet spot {Math.round(q0 ?? 0)}% → <b className={(q1 ?? 0) > (q0 ?? 0) ? 'good' : 'bad'}>{Math.round(q1 ?? 0)}%</b>
+        </p>
+      ) : null}
+      <div className="nets-actions">
+        <button type="button" disabled={!between} onClick={() => match.next()} data-testid="nets-same">
+          Same ball <kbd>Enter</kbd>
+        </button>
+        <button
+          type="button"
+          disabled={!between}
+          onClick={() => {
+            match.newNetsVariant();
+            match.next();
+          }}
+          data-testid="nets-another"
+        >
+          Another like it <kbd>N</kbd>
+        </button>
+        <button type="button" disabled={!between} onClick={() => setChoosing((v) => !v)} aria-expanded={choosing}>
+          Change ball
+        </button>
+      </div>
+      {choosing && between ? (
+        <ul className="nets-choose">
+          {NETS_BALLS.map((b) => (
+            <li key={b.id}>
+              <button
+                type="button"
+                className={b.id === n.ball.id ? 'on' : ''}
+                onClick={() => {
+                  match.setNetsBall(b.id);
+                  setChoosing(false);
+                }}
+              >
+                {b.name}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
 function ChallengeCard() {
   const snap = useGame((s) => s.snap);
   const c = snap?.challenge;
@@ -1379,8 +1554,8 @@ function ReviewCard() {
             {snap.userBatting ? (
               <ol className="howto">
                 <li>
-                  Hold an <kbd>arrow</kbd> for where to hit it: <kbd>↓</kbd> straight, <kbd>→</kbd> the off side, <kbd>←</kbd> the leg side,{' '}
-                  <kbd>↑</kbd> fine. Hold <kbd>Shift</kbd> to loft it. As the bowler runs in, <kbd>Q</kbd>/<kbd>E</kbd> shuffle across the crease.
+                  Hold an <kbd>arrow</kbd> for where to hit it, as the batter sees it: <kbd>↓</kbd> straight, <kbd>↑</kbd> fine, <kbd>→</kbd>{' '}
+                  his right (a right-hander&apos;s off side), <kbd>←</kbd> his left. Hold <kbd>Shift</kbd> to loft it. As the bowler runs in, <kbd>Q</kbd>/<kbd>E</kbd> shuffle across the crease.
                 </li>
                 <li>
                   As the ball arrives press <kbd>S</kbd> front foot, <kbd>W</kbd> back foot, <kbd>D</kbd> to come down the pitch, or{' '}
@@ -1455,5 +1630,35 @@ function ReplayBadge() {
         <kbd>Enter</kbd> <span className="dim">skip replay</span>
       </button>
     </>
+  );
+}
+
+/** A new achievement: a card at the top of the screen for a few seconds. */
+function AchievementToast() {
+  const toast = useGame((s) => s.toast);
+  const dismiss = useGame((s) => s.dismissToast);
+  useEffect(() => {
+    if (!toast) return;
+    const id = window.setTimeout(dismiss, 4500);
+    return () => window.clearTimeout(id);
+  }, [toast, dismiss]);
+  if (!toast) return null;
+  return (
+    <div className="achievement-toast" role="status" data-testid="achievement-toast">
+      {toast.ids.map((id) => {
+        const a = achievement(id);
+        return (
+          <div key={id} className="at-row">
+            <span className="at-star" aria-hidden="true">
+              ★
+            </span>
+            <span>
+              <strong>{a.title}</strong>
+              <span className="dim"> {a.how}</span>
+            </span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
