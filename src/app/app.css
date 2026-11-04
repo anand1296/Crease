@@ -3175,3 +3175,278 @@ section.keys li > span:last-child {
 section.keys .aim-scheme {
   pointer-events: auto;
 }
+
+/* ---- Touch: on-screen controls (phones and tablets) ---------------------------------- */
+.app.touch {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+/* The keyboard panel is replaced by the touch controls. */
+.app.touch section.keys:not(.bowl-panel) {
+  display: none;
+}
+/* Bowling: the panel (delivery, amount, steps, meter) stays, compact at the top in the middle. */
+.app.touch section.bowl-panel {
+  left: 50%;
+  bottom: auto;
+  top: 8px;
+  transform: translateX(-50%);
+  width: min(400px, 48vw);
+  max-height: 58vh;
+  overflow: auto;
+  font-size: 12px;
+  padding: 8px 10px;
+  pointer-events: auto;
+}
+.app.touch section.bowl-panel .bp-blurb {
+  display: none;
+}
+.touch-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;
+}
+.touch-layer > * {
+  pointer-events: auto;
+}
+.touch-layer .rotate-hint {
+  display: none;
+}
+.tpad-left {
+  position: absolute;
+  left: max(16px, env(safe-area-inset-left));
+  bottom: 78px;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+}
+.tpad-note {
+  font-size: 11px;
+  color: var(--chalk-dim);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+.tstick {
+  position: relative;
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(10, 20, 16, 0.25) 0 38%, rgba(10, 20, 16, 0.55) 70%);
+  border: 2px solid rgba(241, 238, 227, 0.35);
+  touch-action: none;
+}
+.tstick-arrow {
+  position: absolute;
+  font: 600 14px var(--display);
+  color: rgba(241, 238, 227, 0.6);
+}
+.tstick-arrow.up {
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.tstick-arrow.down {
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.tstick-arrow.left {
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.tstick-arrow.right {
+  right: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.tstick-knob {
+  position: absolute;
+  left: calc(50% - 26px);
+  top: calc(50% - 26px);
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(241, 238, 227, 0.85);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+.tpad-right {
+  position: absolute;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: 78px;
+  display: grid;
+  grid-template-columns: 66px 66px 96px;
+  grid-template-rows: 44px 58px 58px;
+  grid-template-areas:
+    'shuffle shuffle back'
+    'loft leave front'
+    'feet feet front';
+  gap: 8px;
+}
+.tbtn {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 1px;
+  padding: 2px 4px;
+  border-radius: 14px;
+  background: rgba(10, 20, 16, 0.62);
+  border: 2px solid rgba(241, 238, 227, 0.4);
+  color: var(--chalk);
+  font: 700 15px var(--display);
+  line-height: 1.05;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.tbtn small {
+  font: 500 10px var(--body, inherit);
+  color: var(--chalk-dim);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tbtn small.where {
+  color: var(--brass);
+}
+.tbtn:active,
+.tbtn.on {
+  background: rgba(216, 162, 28, 0.85);
+  border-color: #f3d27a;
+  color: #10160f;
+}
+.tbtn:active small,
+.tbtn.on small {
+  color: #10160f;
+}
+.tbtn.big {
+  grid-area: front;
+  border-radius: 50%;
+  font-size: 19px;
+  border-color: rgba(243, 210, 122, 0.8);
+}
+.tbtn.back,
+.tbtn.sprint {
+  grid-area: back;
+}
+.tbtn.loft,
+.tbtn.dive,
+.tbtn.side {
+  grid-area: loft;
+}
+.tbtn.leave,
+.tbtn.no,
+.tbtn.field {
+  grid-area: leave;
+}
+.tbtn.feet,
+.tbtn.setfield {
+  grid-area: feet;
+}
+.tshuffle {
+  grid-area: shuffle;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--chalk-dim);
+}
+.tbtn.small {
+  min-width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  font-size: 15px;
+}
+.ttop {
+  position: absolute;
+  left: max(14px, env(safe-area-inset-left));
+  bottom: 262px;
+  display: flex;
+  gap: 8px;
+}
+/* The stroke card and the nets panel, compact at the top on a phone. */
+.app.touch .stroke-card {
+  top: 10px;
+  bottom: auto;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  width: min(320px, 46vw);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.app.touch .stroke-card .sc-points li:nth-child(n + 2),
+.app.touch .stroke-card .sc-try .sc-option:nth-of-type(n + 3) {
+  display: none;
+}
+.app.touch .nets-panel {
+  left: max(14px, env(safe-area-inset-left));
+  transform: none;
+  width: min(300px, 38vw);
+  font-size: 12px;
+}
+.app.touch .banner {
+  top: 44%;
+}
+/* Autoplay, compact: just the two buttons. */
+.app.touch .autoplay {
+  padding: 4px;
+  gap: 4px;
+  font-size: 13px;
+}
+.app.touch .autoplay[data-mode='off'] > span.dim,
+.app.touch .autoplay kbd {
+  display: none;
+}
+.app.touch .stroke-card .sc-toggle,
+.app.touch .stroke-card .sc-try .sc-option:nth-of-type(n + 2) {
+  display: none;
+}
+.app.touch .stroke-card {
+  width: min(300px, 36vw);
+}
+@media (max-height: 500px) {
+  .app.touch .stroke-card .sc-ball,
+  .app.touch .stroke-card .sc-points {
+    display: none;
+  }
+  .app.touch .ttop {
+    bottom: auto;
+    top: 60px;
+  }
+}
+@media (orientation: portrait) {
+  .app.touch[data-screen='match'] .touch-layer .rotate-hint {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 24px;
+    text-align: center;
+    background: rgba(8, 14, 11, 0.97);
+    color: var(--chalk);
+    font: 600 20px var(--display);
+    z-index: 60;
+  }
+  .app.touch[data-screen='match'] .touch-layer .rotate-hint span {
+    font-size: 34px;
+  }
+}
+/* Buttons a thumb can find. */
+.app.touch .next-prompt {
+  min-height: 48px;
+  padding-inline: 22px;
+}
+.app.touch .review button.continue,
+.app.touch .appeal button {
+  min-height: 46px;
+}
+.app.touch .bowl-panel kbd {
+  display: none;
+}

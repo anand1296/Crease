@@ -32,7 +32,10 @@ export function useGamepad(): void {
   useEffect(() => {
     if (typeof navigator === 'undefined' || !navigator.getGamepads) return;
     const pad = new GamepadInput(keyboard, padContext);
-    pad.onActive = (on) => useGame.getState().setPadActive(on);
+    pad.onActive = (on) => {
+      useGame.getState().setPadActive(on);
+      if (on) useGame.getState().setTouchActive(false);
+    };
     const connected = (e: GamepadEvent) => useGame.getState().setPadName(e.gamepad.id);
     const gone = () => {
       const any = [...navigator.getGamepads()].some((p) => p?.connected);

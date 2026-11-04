@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.0 — Play on a phone or tablet (2026-11-04)
+
+- **Touch controls**: on a phone or tablet (or as soon as a touch screen is used) the keyboard panel gives way to on-screen controls, sideways. A thumbstick on the left aims — where to hit it, the bowling marker and amount, and held up or down to throw in the field. On the right, batting: Front, Back, Feet and Leave, each showing the stroke it will play and where, Loft held with them, and ◀ ▶ to shuffle across before the ball; once it is hit, Run, Sprint (held), Dive and No!. Bowling: Bowl for each step, Back, ◀ ▶ for the delivery, Side, Field and Set field, with the bowling panel compact at the top. Pause, camera and full screen are top left. Like the game controller, the buttons press the game's keys, so they behave exactly as the keyboard does.
+- **Laid out for a phone**: the stroke card, the nets panel, the autoplay buttons and the prompts are compact and out of the thumbs' way; prompts and cards say "tap" rather than naming keys; a phone held upright is asked to turn sideways; the page fits round notches.
+- Typing on a keyboard switches back to the keyboard panel, and picking up a game controller (supported since 0.14.0) hides the touch controls.
+
 ## 0.15.0 — Easier, clearer batting, coaching nets, catches you can see, sprints and dives, the umpire's finger, and the gaps between balls (2026-11-03)
 
 - **Batting you can actually do**: the difficulty now helps a human batter. On Easy a press up to about 90 ms late or 75 ms early is met half-way (the downswing speeds up or waits, as a real batter's does), the timing window is 60% wider, the line you can still middle is wider and the ball's late movement is read better; Normal helps a little, Hard hardly at all. Key presses are also dated for the time it takes a frame to reach the screen (35 ms), so pressing as you see it is no longer always late.

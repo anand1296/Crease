@@ -1,3 +1,4 @@
+import { useTouchDetection } from '../ui/TouchControls.tsx';
 import { useGamepad } from '../game/input/useGamepad.ts';
 import { lazy, type ReactNode, Suspense, useState } from 'react';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
@@ -40,9 +41,11 @@ export function App() {
   const warming = useGame((s) => s.warming);
   useGameControls();
   useGamepad();
+  useTouchDetection();
+  const touch = useGame((s) => s.touchActive);
 
   return (
-    <div className="app" data-testid="app" data-status={webgl ? status : 'unsupported'} data-screen={screen}>
+    <div className={`app${touch ? ' touch' : ''}`} data-testid="app" data-status={webgl ? status : 'unsupported'} data-screen={screen}>
       {webgl ? (
         <ErrorBoundary
           fallback={(error, reset) => (

@@ -54,6 +54,10 @@ The controls follow EA Sports Cricket 07's keyboard scheme. Hold an arrow for di
 | <kbd>Shift</kbd> (hold) after the hit | Sprint: the run is run flat out, if the batter has the legs (it tires him more) |
 | <kbd>S</kbd> after the hit | Dive for the crease, near the end of a run: a fifth of a second sooner, but a moment to get up again |
 
+### Phones and tablets
+
+Turn the phone sideways. On a touch screen the keyboard panel gives way to on-screen controls: a thumbstick on the left for the arrows, and on the right Front, Back, Feet, Leave and Loft (held), each showing the stroke it will play, ◀ ▶ to shuffle across before the ball, and once it is hit Run, Sprint (held), Dive and No!. Bowling: Bowl for each step, Back, ◀ ▶ for the delivery, Side, Field and Set field. Pause, camera and full screen are top left; every other prompt is a tap.
+
 ### Game controller
 
 Any standard controller (Xbox, PlayStation, Switch Pro) works: press a button once it is connected. Batting: the stick or d-pad aims, A front foot, X back foot, Y use your feet (and run once it's hit), B leave (and send him back), RT lofted, LT run, LB / RB shuffle. Bowling: A for each step (choose, place, run in, lock the pace), B back, LB / RB the delivery, the stick for the marker and the amount, X field, Y over or round, LT place your own field. Between balls A carries on; Start pauses; View / Select changes the camera. In the menus the stick moves between buttons and A presses them. The controls panel shows the pad's buttons while you use it.

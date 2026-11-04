@@ -675,6 +675,16 @@ export function HowToPlay({ onClose }: { onClose: () => void }) {
           After the hit, <kbd>A</kbd> sends your partner back. When bowling, <kbd>G</kbd> lets you place your own field. A no-ball brings a free
           hit, a second bouncer in an over is a no-ball, leg byes count only off a stroke, and a tie goes to a super over.
         </p>
+        <h2>Phones and tablets</h2>
+        <p>
+          Play sideways. A stick on the left aims (up is fine, down is straight, right is the batter&apos;s right; when bowling it moves the
+          marker and sets the amount, and in the field you hold it up or down to throw). On the right: <strong>Front</strong>,{' '}
+          <strong>Back</strong>, <strong>Feet</strong> and <strong>Leave</strong>, with <strong>Loft</strong> held to hit it in the air —
+          the buttons show the stroke you will play — and ◀ ▶ to shuffle across before the ball; once it is hit, <strong>Run</strong>,{' '}
+          <strong>Sprint</strong> (held), <strong>Dive</strong> and <strong>No!</strong>. Bowling: <strong>Bowl</strong> for each step,{' '}
+          <strong>Back</strong>, ◀ ▶ for the delivery, <strong>Side</strong>, <strong>Field</strong> and <strong>Set field</strong>.
+          Everything else is a tap. The ⤢ button goes full screen.
+        </p>
         <h2>Game controller</h2>
         <p>
           Plug in or pair a controller and press any button. Batting: the stick or d-pad aims, <kbd>A</kbd> front foot, <kbd>X</kbd> back

@@ -65,6 +65,7 @@ Simulation (core, physics,        deterministic TypeScript — no React or three
 | `game/practice/challenges.ts` | Practice challenges: one over with a goal, judged from the ball-by-ball record |
 | `game/practice/nets.ts`, `game/batting/coaching.ts` | Coaching nets (one delivery bowled again and again) and the ball-by-ball coach: what the ball was, what went wrong, and which keys play it, worked out from the game's own stroke model |
 | `game/achievements.ts` | Achievements: what a ball or a result earns, kept in the browser |
+| `ui/TouchControls.tsx` | Phones and tablets: the thumbstick and buttons, pressing the game's keys by context, and full screen |
 | `game/scenes/batModel.ts` | The bat: a lofted blade (flat face, thick edges, a spine), grip and stickers, built once and shared |
 | `game/match/toss.ts` | The toss: the coin's face from the seed, the computer captain's choice, and the coin's flight (pure, unit-tested) |
 | `game/scenes/TossView.tsx` | The toss scene: captains and referee on the pitch, the flicked coin, the toss cameras |

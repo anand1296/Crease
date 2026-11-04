@@ -178,6 +178,9 @@ export interface GameState {
   /** A game controller is connected (its name), and whether it is the device in use (the panels show its buttons). */
   readonly padName: string | undefined;
   readonly padActive: boolean;
+  /** Playing by touch (a phone or tablet): on-screen controls instead of the keyboard panel. */
+  readonly touchActive: boolean;
+  setTouchActive: (on: boolean) => void;
   /** Achievements just unlocked, announced on screen. */
   readonly toast: { readonly ids: readonly AchievementId[]; readonly at: number } | undefined;
   dismissToast: () => void;
@@ -546,6 +549,10 @@ export const useGame = create<GameState>()((set, get) => {
     arrows: readArrowScheme(),
     padName: undefined,
     padActive: false,
+    touchActive: typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches,
+    setTouchActive: (touchActive) => {
+      if (get().touchActive !== touchActive) set({ touchActive });
+    },
     toast: undefined,
     dismissToast: () => set({ toast: undefined }),
     coachTips: readCoachTips(),

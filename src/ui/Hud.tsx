@@ -1,3 +1,4 @@
+import { TouchControls } from './TouchControls.tsx';
 import { achievement } from '../game/achievements.ts';
 import { useGame } from '../state/game.ts';
 import { challenge } from '../game/practice/challenges.ts';
@@ -58,6 +59,7 @@ export function Hud() {
       <HelpOverlay />
       <PauseOverlay />
       <AchievementToast />
+      <TouchControls />
     </>
   );
 }
@@ -225,13 +227,20 @@ function OutcomeBanner() {
 
 function RunPrompt() {
   const snap = useGame((s) => s.snap);
+  const touch = useGame((s) => s.touchActive);
   if (!snap || !snap.userBatting || snap.ballPhase !== 'struck') return null;
   return (
     <div className="run-prompt" role="status" data-testid="run-prompt">
       {snap.runsCalled === 0 ? (
-        <>
-          <kbd>Space</kbd> run
-        </>
+        touch ? (
+          <>Tap Run to run</>
+        ) : (
+          <>
+            <kbd>Space</kbd> run
+          </>
+        )
+      ) : touch ? (
+        <>Running {snap.runsCalled} · Run again for another</>
       ) : (
         <>
           Running {snap.runsCalled} · <kbd>Space</kbd> for another
@@ -738,7 +747,7 @@ function Coach({ notes }: { notes: { batting: readonly CoachNote[]; bowling: rea
 // --- Controls panel -----------------------------------------------------------------------
 
 /** Keys currently held, plus the last one pressed (lit briefly), polled each animation frame. */
-function useKeys(): { held: ReadonlySet<GameAction>; flash: GameAction | undefined; dir: { x: -1 | 0 | 1; y: -1 | 0 | 1 }; back: boolean } {
+export function useKeys(): { held: ReadonlySet<GameAction>; flash: GameAction | undefined; dir: { x: -1 | 0 | 1; y: -1 | 0 | 1 }; back: boolean } {
   const [state, setState] = useState<{ held: ReadonlySet<GameAction>; flash: GameAction | undefined; dir: { x: -1 | 0 | 1; y: -1 | 0 | 1 }; back: boolean }>({
     held: new Set(),
     flash: undefined,
@@ -1484,6 +1493,7 @@ function SaveButton() {
 function NextPrompt() {
   const snap = useGame((s) => s.snap);
   const pad = useGame((s) => s.padActive);
+  const touch = useGame((s) => s.touchActive);
   const match = useGame((s) => s.match);
   const replaying = useGame((s) => s.replaying);
   if (!snap || !match || replaying) return null;
@@ -1492,7 +1502,7 @@ function NextPrompt() {
   if (snap.phase === 'review' && snap.review?.kind === 'ready') {
     return (
       <button type="button" className="next-prompt ready first-ball" onClick={() => match.next()} data-testid="ready-prompt">
-        Ready? {pad ? <kbd>A</kbd> : <><kbd>Space</kbd> <span className="dim">or</span> <kbd>Enter</kbd></>}
+        Ready? {touch ? <span className="dim">Tap to start</span> : pad ? <kbd>A</kbd> : <><kbd>Space</kbd> <span className="dim">or</span> <kbd>Enter</kbd></>}
       </button>
     );
   }
@@ -1500,9 +1510,15 @@ function NextPrompt() {
   return (
     <button type="button" className={`next-prompt ${waiting ? 'ready' : ''}`} onClick={() => match.next()} data-testid="next-ball">
       {waiting ? (
-        <>
-          Next ball <kbd>Space</kbd> <span className="dim">or</span> <kbd>Enter</kbd>
-        </>
+        touch ? (
+          <>Next ball</>
+        ) : (
+          <>
+            Next ball <kbd>Space</kbd> <span className="dim">or</span> <kbd>Enter</kbd>
+          </>
+        )
+      ) : touch ? (
+        <span className="dim">Skip</span>
       ) : (
         <>
           <kbd>Enter</kbd> <span className="dim">skip</span>
@@ -1517,6 +1533,7 @@ function ReviewCard() {
   const snap = useGame((s) => s.snap);
   const match = useGame((s) => s.match);
   const replaying = useGame((s) => s.replaying);
+  const touch = useGame((s) => s.touchActive);
   const review = snap?.review;
   if (!snap || !match || !review || review.kind === 'ball' || review.kind === 'ready' || replaying) return null;
   const inn = match.current;
@@ -1551,7 +1568,21 @@ function ReviewCard() {
               {inn.target === undefined ? snap.toss : `${batting.name} need ${inn.target} to win from ${match.config.overs} overs.`}{' '}
               <strong>{snap.userBatting ? 'You are batting.' : 'You are bowling.'}</strong>
             </p>
-            {snap.userBatting ? (
+            {touch ? (
+              snap.userBatting ? (
+                <ol className="howto">
+                  <li>Hold the stick on the left where you want to hit it: up is fine, down is straight, right is the batter&apos;s right.</li>
+                  <li>As the ball arrives tap Front, Back or Feet (or Leave); hold Loft with it to hit it in the air. The stroke names show on the buttons.</li>
+                  <li>Once it is hit: Run (again for each run), hold Sprint, and Dive near the end of a run.</li>
+                </ol>
+              ) : (
+                <ol className="howto">
+                  <li>Tap a bowler, then choose the delivery with ◀ ▶ and Side, and the amount with the stick (up and down).</li>
+                  <li>Bowl, move the marker with the stick, and Bowl again to run in; Bowl once more to lock the pace on the meter.</li>
+                  <li>In the field, hold the stick up or down to throw to the keeper or the bowler.</li>
+                </ol>
+              )
+            ) : snap.userBatting ? (
               <ol className="howto">
                 <li>
                   Hold an <kbd>arrow</kbd> for where to hit it, as the batter sees it: <kbd>↓</kbd> straight, <kbd>↑</kbd> fine, <kbd>→</kbd>{' '}
@@ -1577,8 +1608,14 @@ function ReviewCard() {
               </ol>
             )}
             <p className="dim small">
-              The controls stay on screen at the bottom left. After every ball the game waits for you — or let the computer play the
-              over (<kbd>Y</kbd>) or the innings (<kbd>U</kbd>).
+              {touch ? (
+                <>After every ball the game waits for you to tap Next ball — or let the computer play the over or the innings with the Autoplay buttons, top left.</>
+              ) : (
+                <>
+                  The controls stay on screen at the bottom left. After every ball the game waits for you — or let the computer play the over (<kbd>Y</kbd>) or the
+                  innings (<kbd>U</kbd>).
+                </>
+              )}
             </p>
           </>
         ) : review.kind === 'over' ? (
